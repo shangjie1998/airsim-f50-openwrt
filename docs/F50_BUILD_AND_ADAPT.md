@@ -150,6 +150,8 @@ nft list chain inet fw4 accept_to_wan | tail -3       # 有 oifname "sipa_eth0" 
 
 ## 8. 发布与留档
 
+版本号按 `0.1.0.N-r22-f50` 走（`VERSIONING.md`）：主版本与 `r22` 跟上游，`N` 每打包一次 +1。
+
 - 已验收的包：`dist/luci-app-airsim-0.1.0-r22.apk`
   （sha256 `849f72fb5cf3613dc8e029682182f62f9722441ab716da06a30329c038cbcfb8`）。
 - `dist/SHA256SUMS` 同时记了 apk、公钥、安装脚本、上游源码包的哈希。
