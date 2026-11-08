@@ -190,3 +190,20 @@ cd <上面打印的目录>/module/module-agent && CGO_ENABLED=0 GOOS=linux GOARC
 出包：`sh scripts/bump-version.sh` 拿新版本 → 放二进制与页面进 `pkg/airsim-f50-<版本>/`
 → `tar czf dist/airsim-f50-<版本>.tar.gz -C pkg/airsim-f50-<版本> .`。
 apk v3 签名包仍需 apk-tools 3.x（本机与云主机都没有 Docker），暂不做。
+
+## 1e. 装机验证记录（2026-11-08，5.4 内核）
+
+用 `dist/airsim-f50-0.1.0.2-r22-f50.tar.gz` 覆盖安装、`mu300-update rollback-boot` 回 5.4 后实测：
+
+| 项 | 命令 | 实测 |
+|---|---|---|
+| 内核 | `uname -r` | `5.4.254-gb50db5b6224c` |
+| 服务 | `/etc/init.d/airsim status` | `running`（3 个进程：daemon ×2 + agent） |
+| 音频 | `ubus call airsim status` | `audio_available: true` |
+| 显示名 | `ubus call airsim status` | `"product": "AirSIM for F50"` |
+| 包版本 | `head -1 /usr/lib/airsim/MANIFEST` | `0.1.0.2-r22-f50` |
+| mDNS | Mac 上 `dns-sd -B _airsim-vowlan._tcp` | 实例 `AirSIM-F50-0p0JKELA`，TXT `device_name=AirSIM\ F50` / `model=F50` / `agent_kind=mu300` |
+
+设备没插卡（没有余额），所以只验到"插件起得来、音频可调用"这一层；通话本身没复验。
+6.18.x 上同样的包会停在 `active with no instances`（prepare 的音频预检过不去），这不是包的问题，
+要语音就留在 5.4。
