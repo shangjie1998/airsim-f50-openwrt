@@ -218,3 +218,13 @@ apk v3 的 `mkpkg` 只有 apk-tools 3.x 提供（上游脚本靠 `node:22-alpine
 本机 macOS 装不了、云主机没有 Docker，所以这版先出覆盖包；要用真正签名 apk，
 得在能跑 apk-tools 3.x 的 Linux 上补 `--sign-key` 那一步（自编包公钥必然与 release 那把不同，
 设备上要 `apk del luci-app-airsim` 再装）。
+
+### 只支持 5.4 内核（0.1.0.3 起写死）
+
+`install.sh` 现在会查 `uname -r`：不是 `5.4.*` 直接拒绝（退出码 3），一个字都不写进设备。
+原因见 `docs/F50_BUILD_AND_ADAPT.md`：语音用的音频驱动只针对 `5.4.254-gb50db5b6224c` 编过，
+6.18.x 上插件能跑、能改名，但 `prepare` 过不了音频预检，打电话没声音。
+确要在别的内核上强装看界面：`F50_ALLOW_OTHER_KERNEL=1 sh install.sh`。
+
+`dist/airsim-f50-0.1.0.3-r22-f50-bundle.tar.gz` 是整套：包本体 + `安装说明.txt` +
+`验证记录.md` + `fix-network.sh`（断网修复）+ `switch-kernel.sh`（切回 5.4）+ `SHA256SUMS`。
