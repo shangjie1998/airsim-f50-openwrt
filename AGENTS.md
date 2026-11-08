@@ -34,6 +34,7 @@
 | `dist/luci-app-airsim-0.1.0-r22.apk` | `849f72fb5cf3613dc8e029682182f62f9722441ab716da06a30329c038cbcfb8` | 与上游 `v0.1.0-r22` release 公布的 digest **逐位相同**，设备上装的就是这个官方包 |
 | `src/`（r22 sources tarball） | `68495e7369e2e2400510d6010c77db6fbf72d1d12995e0bc4fe3af81547a7bdd` | 同一 release 公布的源码快照 |
 | `src/plugin` vs 上游解包 | `diff -r` 无差异 | **源码树未被改动过**：F50 的适配全在设备侧，不在源码里 |
+| 上游锚点 | `8cd12b4`（main HEAD，`VERSION`=`0.1.0-r22`） | 源码可用 `git clone` + `checkout 8cd12b4` 复现，等价于上面的 tarball |
 
 **所以别指望在 `src/` 里找到 F50 补丁。** F50 那几处让它真能干活的关键改动，改的是设备上的运行库文件
 （`/opt/mu300/bin/sipa-dele-start`、`/opt/mu300/bin/mu300-at`、`/usr/lib/airsim/` 下的音频暂存脚本），

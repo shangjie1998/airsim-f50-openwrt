@@ -100,3 +100,19 @@ of rights or a declaration that the independent binary is open-source.
 The APK builder retains explicit parent directory records (`--compat 3.0.0_pre3`)
 so the v3 package remains compatible with device apk-tools 3.0.5 and the stricter
 archive extraction checks in apk-tools 3.0.8. Signature verification is unchanged.
+
+## 本仓库保存时的上游锚点（2026-11-08 实测）
+
+- 上游仓库 `https://github.com/kai-wu-cortex/airsim-mu300`，分支 `main`，
+  **HEAD = `8cd12b4`（"Align source and dependency notices with R22 release"）**，`VERSION` = `0.1.0-r22`，工作区干净。
+- 本目录 `src/plugin` 与该 commit 的源码（除 `vendor/` 与 release 归档差异外）**逐文件一致**，
+  也与 `airsim-mu300-0.1.0-r22-sources.tar.gz`（sha256 `68495e73…7bdd`）解包结果一致。
+
+要重新取源码，两条等价路径：
+
+```sh
+# A. 用官方源码快照（离线可核哈希）
+curl -LO https://github.com/kai-wu-cortex/airsim-mu300/releases/download/v0.1.0-r22/airsim-mu300-0.1.0-r22-sources.tar.gz
+# B. 用 git 锚点（能看历史、能打 diff）
+git clone https://github.com/kai-wu-cortex/airsim-mu300.git && git -C airsim-mu300 checkout 8cd12b4
+```
