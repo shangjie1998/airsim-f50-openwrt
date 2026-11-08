@@ -1,16 +1,37 @@
-# AirSIM on 中兴 F50（MU300 / UMS9620）— OpenWrt 部署记录
+# AirSIM on 中兴 F50（MU300 / UMS9620）— OpenWrt 自编包与实测记录
 
 把 AirSIM 通话网关跑在中兴 F50 上：**5.4 内核下双向通话已实机打通**，数据联网也已修复。
-本仓库是这个过程的实测记录与修复脚本，不是刷机包，也不是 AirSIM 官方发布。
+本仓库现在既留实测记录与修复脚本，也放**自己交叉编译出来的安装包**（`0.1.0.N-r22-f50`）。
+
+> **一句话选包：只支持 5.4 内核（`5.4.254-gb50db5b6224c`）。** 6.18.x 上插件能装能跑、名字也对，
+> 但音频驱动只对 5.4 编过，`prepare` 过不了音频预检，打电话没声音。`install.sh` 已加内核闸门，
+> 不在 5.4 上直接拒绝（退出码 3），不动设备一个文件。
 
 | | |
 |---|---|
 | 设备 | 中兴 F50（`MU300`，`Spreadtrum UMS9620`），OpenWrt 侧地址 `192.168.77.1` |
 | 系统 | OpenWrt **25.12.5 `r33051-f5dae5ece4`**，`aarch64_generic` |
-| 语音内核 | **`5.4.254-gb50db5b6224c`**（厂商内核，`mu300-audio` 的驱动按它编） |
+| 语音内核 | **`5.4.254-gb50db5b6224c`**（厂商内核，`mu300-audio` 的驱动按它编）—— **本包只支持这个** |
 | 数据内核 | `6.18.60`（mainline，数据联网更干净，**语音失效**） |
-| 插件 | 上游原版 `luci-app-airsim-0.1.0-r22`（未改包名、未改名） |
-| 上游 | [kai-wu-cortex/airsim-mu300](https://github.com/kai-wu-cortex/airsim-mu300) |
+| 安装包 | 自编覆盖包 `airsim-f50-0.1.0.3-r22-f50.tar.gz`（Go 1.24.7 交叉编译，带备份与 `uninstall.sh`） |
+| 显示名 | `AirSIM F50`（mDNS `AirSIM-F50-xxxx`、TXT `device_name`/`model`、`/status` 的 `product`、LuCI 页面）；`agent_kind=mu300` 等标识保留 |
+| 上游 | [kai-wu-cortex/airsim-mu300](https://github.com/kai-wu-cortex/airsim-mu300) @ `8cd12b4`（`v0.1.0-r22`） |
+
+## 0. 下载
+
+最新：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.3-r22-f50>
+
+| 附件 | 说明 |
+|---|---|
+| `airsim-f50-0.1.0.3-r22-f50.tar.gz` | 覆盖式安装包：两个二进制 + 三个 LuCI 页面 + acl，带备份和 `uninstall.sh` |
+| `airsim-f50-0.1.0.3-r22-f50-bundle.tar.gz` | 整套：包 + `安装说明.txt` + `验证记录.md` + `fix-network.sh` + `switch-kernel.sh` + `SHA256SUMS` |
+
+装：`scp` 到 `/tmp/` → 解包 → `sh install.sh`（只做覆盖更新，前置要求是设备上已装上游
+`luci-app-airsim`）。校验 `head -1 /usr/lib/airsim/MANIFEST` 应为 `0.1.0.3-r22-f50`。
+
+**改名的边界**：改的是给人看的文案，没改标识 —— `agent_kind=mu300`（客户端靠它认设备类型）、
+Go module 与二进制名 `airsim-mu300d`、`/usr/lib/airsim` 路径、`mu300-` 工具前缀、升级检查 UA
+全部保留，所以已配对客户端不会把设备当成另一种东西。**但设备名缓存在 App 侧，装完要删设备重新配对。**
 
 > **客户端断网了？** 先跑 `sh scripts/修断网.sh --check`，症状对得上就 `--fix`。一条根因：
 > flowtable 里含 `sipa_eth0` 导致整张防火墙规则表加载失败（详见 §4 第 5 条与
@@ -29,8 +50,9 @@
   `dial_request → pcm_connection → pcm_authenticated → pcm_ready → pcm_closed` 完整。
 - **数据联网**：`sipa_eth0` 拿到地址、默认路由、DNS，设备与 LAN 客户端都能出网，
   整机重启后自动拨号成立（已两次冷启动验证）。
-- **6.18 内核**：数据比 5.4 还干净，但 `luci-app-airsim` 附带的音频驱动只编了 5.4，
-  `/etc/init.d/airsim` 起不来（`active with no instances`），语音没有。要语音就待在 5.4。
+- **6.18 内核**：数据比 5.4 还干净，但音频驱动只编了 5.4，`/etc/init.d/airsim` 停在
+  `active with no instances`（音频预检过不去），语音没有。**自编包也在 6.18 上验过**：
+  手动起 daemon 正常、`product` 仍是 `AirSIM for F50`、`audio_available=false`。要语音就待在 5.4。
 
 为什么不在 Android 上做：F50 的 ROM 没有 `android.app.role.DIALER`，绕过角色后信令全通但**下行音频永远是 0**
 （`pcm_capture=all_zero`、`/dev/snd` 只有 `timer`、`tinymix` 打不开 mixer）。转 OpenWrt 后由
