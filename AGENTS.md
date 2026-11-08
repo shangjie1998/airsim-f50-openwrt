@@ -27,6 +27,18 @@
 - 设备侧运行时补丁（重启后仍然生效，见 §4）：`sipa-dele-start` 的就绪放行、`mu300-at` 的 stdin、
   `audio-setup` 的空列表保护、防火墙 `flow_offloading=0`。
 
+## 1b. 源码与包对不对得上（有据可查，别猜）
+
+| 物 | 哈希 / 判据 | 结论 |
+|---|---|---|
+| `dist/luci-app-airsim-0.1.0-r22.apk` | `849f72fb5cf3613dc8e029682182f62f9722441ab716da06a30329c038cbcfb8` | 与上游 `v0.1.0-r22` release 公布的 digest **逐位相同**，设备上装的就是这个官方包 |
+| `src/`（r22 sources tarball） | `68495e7369e2e2400510d6010c77db6fbf72d1d12995e0bc4fe3af81547a7bdd` | 同一 release 公布的源码快照 |
+| `src/plugin` vs 上游解包 | `diff -r` 无差异 | **源码树未被改动过**：F50 的适配全在设备侧，不在源码里 |
+
+**所以别指望在 `src/` 里找到 F50 补丁。** F50 那几处让它真能干活的关键改动，改的是设备上的运行库文件
+（`/opt/mu300/bin/sipa-dele-start`、`/opt/mu300/bin/mu300-at`、`/usr/lib/airsim/` 下的音频暂存脚本），
+仓库里以 `scripts/` 的重放脚本留档。重编一个包不会把这些改动带进去，装完必须单独打补丁。
+
 ## 2. 设备访问
 
 - 管理地址 `192.168.77.1`（OpenWrt 侧），`root`，密码不在仓库里，按现场提供。
