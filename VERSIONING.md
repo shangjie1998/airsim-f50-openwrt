@@ -29,3 +29,18 @@
    `apk` 的版本、内核/配置哈希门槛都对着上游那套校验。本仓库的 `N` 只活在标签、文件名和文档里。
 2. 真正要出**自己重编的包**时，包内版本会变成自己编的那份，届时记得同步：
    `VERSIONING.md` 的 N、`dist/SHA256SUMS`、`README` 里的哈希表、`docs/F50_BUILD_AND_ADAPT.md` 的发布段。
+
+## 版本号不许手工改（改了就 MANIFEST 报旧版本）
+
+打包计数只从一个地方推：`sh scripts/bump-version.sh`。它会一次写三处——
+
+1. 仓库根 `VERSION`
+2. `pkg/airsim-f50-<版本>/VERSION`
+3. `pkg/airsim-f50-<版本>/MANIFEST` 首行（目录名里的版本一起挪）
+
+之所以要三处一起写：包目录自带一份 VERSION，只改根目录那份，打包时按旧值算，
+MANIFEST 首行就会报出一个已经发布过的旧版本（M8 线就是这么踩的坑，`build.sh`
+把包内 VERSION 回填成旧值，装完 `MANIFEST` 对不上）。这个脚本是唯一入口，别手改。
+
+注意：**包内 `/usr/lib/airsim/VERSION` 仍然是上游的 `0.1.0-r22`**，那是插件自己的
+版本，被 `audio-preflight` 等门槛按值校验，不参与本仓库计数。
