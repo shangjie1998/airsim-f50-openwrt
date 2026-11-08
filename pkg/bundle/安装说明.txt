@@ -1,0 +1,46 @@
+AirSIM for F50 自编包  0.1.0.3-r22-f50
+=====================================
+
+【只能装在 5.4 内核上】
+本包只支持内核 5.4.254-gb50db5b6224c。
+原因：语音用的音频驱动（airsim-audio-0.1.0-r16.tar.gz）只针对这个内核编译过。
+6.18.x 上插件仍能装、能跑、界面和设备名都正常，但 prepare 过不了音频预检，
+服务不自启，打电话没有声音。
+
+  uname -r        # 应显示 5.4.254-gb50db5b6224c
+
+不在 5.4 上时 install.sh 会直接拒绝（退出码 3），不会动设备任何文件。
+真要在别的内核上强装（只为了看界面/改名）：
+  F50_ALLOW_OTHER_KERNEL=1 sh install.sh
+
+回 5.4：mu300-update rollback-boot → 重启。详见 switch-kernel.sh。
+
+【装法】
+  scp airsim-f50-0.1.0.3-r22-f50.tar.gz root@192.168.77.1:/tmp/
+  ssh root@192.168.77.1
+  cd /tmp && rm -rf pkgx && mkdir pkgx && tar xzf airsim-f50-0.1.0.3-r22-f50.tar.gz -C pkgx
+  cd pkgx && sh install.sh
+
+install.sh 会先备份旧文件到 /usr/lib/airsim/backup-<版本>/，再替换两个二进制
+（airsim-mu300d、airsim-agent）、三个 LuCI 页面 js、acl，然后重启服务。
+回滚：sh uninstall.sh
+
+【装完校验】
+  uname -r                                      # 5.4.254-gb50db5b6224c
+  /etc/init.d/airsim status                     # running
+  ubus call airsim status | grep audio_available # true
+  ubus call airsim status | grep product         # "AirSIM for F50"
+  head -1 /usr/lib/airsim/MANIFEST               # 0.1.0.3-r22-f50
+  同一局域网 Mac 上：dns-sd -B _airsim-vowlan._tcp → 实例 AirSIM-F50-xxxxxxxx
+
+【已配对客户端要重新配对】
+设备名缓存在 App 一侧，装完新包请把设备删掉重新配对，才能看到 AirSIM F50。
+
+【本包改了什么】
+只改"给人看"的名字：mDNS 实例 AirSIM-F50-<8位>、TXT device_name=AirSIM F50 / model=F50、
+health 的 device_name/model、/status 的 product、LuCI 页面文案、acl 描述、apk 描述。
+没动：agent_kind=mu300（客户端靠它认设备类型）、Go module 与二进制名 airsim-mu300d、
+/usr/lib/airsim 路径、mu300- 工具前缀、升级检查 UA。所以客户端识别不会断。
+
+【断网】
+数据联网断了（联通/移动/电信卡都一样）用本包里的 fix-network.sh。

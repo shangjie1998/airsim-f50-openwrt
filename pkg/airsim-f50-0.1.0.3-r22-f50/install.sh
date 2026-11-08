@@ -6,6 +6,23 @@ VER=$(cat "$HERE/VERSION")
 BK=/usr/lib/airsim/backup-$VER
 
 echo "== AirSIM for F50 $VER =="
+
+# 这个包只对 5.4 内核有效：音频扩展包里的驱动是按 5.4.254-gb50db5b6224c 编的，
+# 6.18.x 上插件能装、能跑，但打电话没有声音。要装就装 5.4，别在 6.18 上瞎折腾。
+K=$(uname -r)
+case "$K" in
+5.4.*) : ;;
+*)
+	if [ "${F50_ALLOW_OTHER_KERNEL:-}" = 1 ]; then
+		echo "  警告：当前内核 $K，本包只支持 5.4.254-gb50db5b6224c，语音会不可用（已强制继续）" >&2
+	else
+		echo "  当前内核 $K，本包只支持 5.4.254-gb50db5b6224c（语音驱动只编了这个版本）。" >&2
+		echo "  先回 5.4：mu300-update rollback-boot  然后重启；确要强装：F50_ALLOW_OTHER_KERNEL=1 sh install.sh" >&2
+		exit 3
+	fi
+	;;
+esac
+
 [ -f /usr/lib/airsim/airsim-mu300d ] || { echo "插件未安装，本包只做覆盖更新" >&2; exit 1; }
 
 mkdir -p "$BK"
