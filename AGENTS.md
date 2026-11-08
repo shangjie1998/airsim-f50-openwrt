@@ -167,3 +167,26 @@ src/AirSIM/                  AirSIM 客户端/Agent 源码（固定提交）
 src/dependencies/            重建音频扩展所需的依赖源码包
 dist/                        已验收的安装包、公钥、安装脚本、SHA256SUMS
 ```
+
+## 1d. 自编包怎么出（不给 docker 也行）
+
+交叉编译只要 Go：`/Users/shangjie/Documents/doubaokaifagongju/go/go-sdk/go/bin`
+（1.24.7 darwin/arm64，下载源见该目录 README）。项目自己的脚本留在本仓库，不放进工具目录。
+
+```sh
+export PATH=/Users/shangjie/Documents/doubaokaifagongju/go/go-sdk/go/bin:$PATH
+cd src/plugin
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=vendor -buildvcs=false -trimpath \
+  -ldflags "-s -w -X main.version=0.1.0-r22" -o /tmp/f50-out/airsim-mu300d ./cmd/airsim-mu300d
+AIRSIM_UPSTREAM_REPO=<本地 AirSIM 克隆> sh scripts/prepare-agent.sh     # 打印出 agent 源码目录
+cd <上面打印的目录>/module/module-agent && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+  -trimpath -ldflags "-s -w -X main.agentVersion=0.4.7-mu300.<发布号>" -o /tmp/f50-out/airsim-agent .
+```
+
+`prepare-agent.sh` 默认去 `src/plugin/../AirSIM` 找上游，那份是 tarball 拷贝（没有 `.git`），
+必须用 `AIRSIM_UPSTREAM_REPO` 指到真正的 AirSIM 克隆，否则报
+`Not a valid object name cc2ade3…^{commit}`。
+
+出包：`sh scripts/bump-version.sh` 拿新版本 → 放二进制与页面进 `pkg/airsim-f50-<版本>/`
+→ `tar czf dist/airsim-f50-<版本>.tar.gz -C pkg/airsim-f50-<版本> .`。
+apk v3 签名包仍需 apk-tools 3.x（本机与云主机都没有 Docker），暂不做。

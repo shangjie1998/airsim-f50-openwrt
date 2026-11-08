@@ -187,3 +187,34 @@ sh scripts/package-apk.sh                   # 产物在 out/，签名私钥留�
 
 管线里的三道硬门槛，改任何一个参数都得同步改这三处：内核版本 `5.4.254-gb50db5b6224c`、
 内核配置哈希 `1057cb97…6356b3`、以及音频节点的 `hw:1,53` / `hw:1,16`。
+
+## 自编包（覆盖式安装，`dist/airsim-f50-0.1.0.2-r22-f50.tar.gz`）
+
+这是**本仓库自己编的**包，跟上游 release 的 apk 不是一回事：只覆盖插件二进制与页面，
+不动依赖、不动音频组件，带备份和回滚。
+
+内容：`airsim-mu300d`、`airsim-agent`（Go 1.24.7 交叉编译 linux/arm64）、
+三个 LuCI 页面 js、acl、`VERSION`、`MANIFEST`、`install.sh`、`uninstall.sh`。
+
+装法（设备上）：
+
+```sh
+scp dist/airsim-f50-0.1.0.2-r22-f50.tar.gz root@192.168.77.1:/tmp/
+ssh root@192.168.77.1 'cd /tmp && rm -rf pkgx && mkdir pkgx && tar xzf airsim-f50-0.1.0.2-r22-f50.tar.gz -C pkgx && cd pkgx && sh install.sh'
+```
+
+`install.sh` 会把旧二进制备份到 `/usr/lib/airsim/backup-<版本>/`，替换后重启服务；
+`sh uninstall.sh` 原样回滚。跑完 `head -1 /usr/lib/airsim/MANIFEST` 应看到
+`0.1.0.2-r22-f50`。
+
+本包改的只有**显示名**：mDNS 实例 `AirSIM-F50-<8位>`、TXT `device_name=AirSIM F50`、
+`model=F50`、health 的 `device_name`/`model`、`/status` 的 `product`、页面文案与 acl 描述。
+`agent_kind=mu300`、二进制名、`/usr/lib/airsim` 路径、`mu300-` 前缀全部保留，
+客户端识别不受影响。**已配对过的客户端要删掉设备重新配对**，因为设备名缓存在 App 那一侧。
+
+### 为什么是 tar 而不是 apk
+
+apk v3 的 `mkpkg` 只有 apk-tools 3.x 提供（上游脚本靠 `node:22-alpine` 容器跑）。
+本机 macOS 装不了、云主机没有 Docker，所以这版先出覆盖包；要用真正签名 apk，
+得在能跑 apk-tools 3.x 的 Linux 上补 `--sign-key` 那一步（自编包公钥必然与 release 那把不同，
+设备上要 `apk del luci-app-airsim` 再装）。
