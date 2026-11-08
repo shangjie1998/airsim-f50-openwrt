@@ -146,6 +146,13 @@ scripts/                 设备侧补丁脚本（重放用）
 | `dist/luci-app-airsim-0.1.0-r22.apk` | 9229711 | `849f72fb…cbcfb8` |
 | `dist/airsim-dev.pem`（签名公钥） | 625 | `0ce703e7…2cf1de` |
 
+上面这个 apk 的 sha256 与上游 `v0.1.0-r22` release 公布的 digest **逐位相同**；`src/` 是同一 release
+公布的源码快照，与上游解包 `diff -r` 无差异。也就是说：**包和源码是同一版本、可对账的，但源码里没有
+F50 的补丁**——F50 的适配全在设备侧（`sipa-dele-start`、`mu300-at`、音频暂存脚本），以 `scripts/` 留档重放。
+
+一次性拿全的整包：`dist/airsim-f50-0.1.0-r22-bundle.tar.gz`（apk + 公钥 + 安装脚本 + `修断网.sh` +
+`SHA256SUMS` + 安装说明），Release 附件里也有。
+
 重建最短路径（细节见 `docs/F50_BUILD_AND_ADAPT.md`）：
 
 ```sh

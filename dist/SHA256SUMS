@@ -2,3 +2,5 @@
 0ce703e76ea4b702194c54b90534d7127874bb38ecda17f7ed6b1add2d2cf1de  airsim-dev.pem
 38d0aff2aad8c4f5e2cb797477f2fe0aa6321a8c70f3c619c209aa3dfeae52f4  install.sh
 68495e7369e2e2400510d6010c77db6fbf72d1d12995e0bc4fe3af81547a7bdd  airsim-mu300-0.1.0-r22-sources.tar.gz
+# --- 以下为 F50 本地补充（上游原包不含）---
+8d982ab1a898870c72a72fc5fad6136c98bf782d9aa929b10c2c40d83fbd3993  修断网.sh
