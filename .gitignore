@@ -1,2 +1,3 @@
-.DS_Store
+src/plugin/out/
 *.log
+.DS_Store
