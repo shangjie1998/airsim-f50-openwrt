@@ -157,3 +157,16 @@ nft list chain inet fw4 accept_to_wan | tail -3       # 有 oifname "sipa_eth0" 
 - `dist/SHA256SUMS` 同时记了 apk、公钥、安装脚本、上游源码包的哈希。
 - 重新发布会改变包内容与签名，**必须同时更新** `SHA256SUMS`、本文件的哈希、以及 `README` 里的口径，
   否则下一位接手的人会拿旧指纹去验新包。
+
+
+## 内核选择与语音
+
+5.4 与 6.18 的差别不在插件，在音频 ko：`src/assets/airsim-audio-0.1.0-r16.tar.gz` 里的驱动只针对
+`5.4.254-gb50db5b6224c` 编过。6.18.x 上 `prepare` 过不了音频预检，服务停在
+`active with no instances`，语音用不了（数据联网正常）。
+
+- 回 5.4（离线可用）：`mu300-update rollback-boot` → `reboot`
+- 上 6.18（要联网）：`mu300-update kernel 6.18` → `reboot`
+- `rollback-boot` 是一次性的，它不会把当前镜像另存为新的备份
+
+详见 `scripts/切内核-5.4.sh`。
