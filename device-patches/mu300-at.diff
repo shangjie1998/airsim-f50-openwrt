@@ -1,0 +1,13 @@
+--- mu300-at.orig	2026-11-08 13:26:32
++++ mu300-at	2026-11-08 13:26:32
+@@ -37,6 +37,10 @@
+ fi
+ case $T in [1-9]|[1-9][0-9]) ;; *) echo "mu300-at: timeout must be 1..99 seconds" >&2; exit 2 ;; esac
+ cmd=${1:-}
++if [ "$cmd" = - ]; then
++    cmd=
++    IFS= read -r cmd || [ -n "$cmd" ] || cmd=
++fi
+ [ -n "$cmd" ] || { echo "usage: mu300-at [-t SECONDS] \"AT+COMMAND\"" >&2; exit 2; }
+ # The FIFO protocol is one LF-delimited request. Preserve CR and Ctrl-Z: SMS
+ # submission deliberately sends AT+CMGS, PDU and Ctrl-Z in the same request.
