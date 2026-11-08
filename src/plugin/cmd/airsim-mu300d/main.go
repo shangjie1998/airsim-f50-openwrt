@@ -50,7 +50,7 @@ func main() {
 	manage := flag.String("manage", "", "rpcd management command")
 	monitorUpdates := flag.Bool("update-monitor", false, "periodically check published plugin versions")
 	updateWorker := flag.String("update-worker", "", "internal detached upgrade worker")
-	runAgent := flag.Bool("run-agent", false, "supervise Agent with MU300 management policy")
+	runAgent := flag.Bool("run-agent", false, "supervise Agent with F50 management policy")
 	selfTest := flag.Duration("audio-self-test", 0, "explicit no-call DSP self-test, 1s..30s")
 	trial := flag.Bool("early-media-trial", false, "explicit 10-minute lab window; separately arm one current call for 60s")
 	trialArm := flag.Bool("early-media-trial-arm", false, "locally authorize only the current owned outgoing call for receive-only trial")
@@ -147,8 +147,8 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	gwAd, e := zeroconf.Register("AirSIM-MU300-"+id[len(id)-8:], "_airsim-vowlan._tcp", "local.", settings.ControlPort,
-		[]string{"v=1", "agent_id=" + id, "agent_kind=mu300", "device_name=AirSIM MU300", "manufacturer=ZTE", "model=MU300", "host=" + lan, "control_port=" + portText(settings.ControlPort), "pcm_port=" + portText(settings.PCMPort), "caps=control,pcm"}, []net.Interface{*lanInterface})
+	gwAd, e := zeroconf.Register("AirSIM-F50-"+id[len(id)-8:], "_airsim-vowlan._tcp", "local.", settings.ControlPort,
+		[]string{"v=1", "agent_id=" + id, "agent_kind=mu300", "device_name=AirSIM F50", "manufacturer=ZTE", "model=F50", "host=" + lan, "control_port=" + portText(settings.ControlPort), "pcm_port=" + portText(settings.PCMPort), "caps=control,pcm"}, []net.Interface{*lanInterface})
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -208,7 +208,7 @@ func main() {
 			}
 		}(server)
 	}
-	log.Printf("MU300 plugin ready; pairing port %d", settings.PairPort)
+	log.Printf("F50 plugin ready; pairing port %d", settings.PairPort)
 	<-ctx.Done()
 	d.closePair("")
 	for _, s := range servers {
@@ -277,7 +277,7 @@ func (d *daemon) status(w http.ResponseWriter, r *http.Request) {
 	paired := d.paired
 	d.mu.Unlock()
 	calls := d.callsSnapshot(r.Context())
-	write(w, 200, map[string]any{"product": "AirSIM for MU300", "version": version, "running": true, "lan_ip": d.lan, "pairing_port": d.settings.PairPort, "control_port": d.settings.ControlPort, "pcm_port": d.settings.PCMPort, "mode": d.settings.Mode, "bonjour_pairing": session != nil, "agent_id": d.deviceID, "pairing": session, "paired_this_boot": paired, "audio": d.bridge.Status(), "gateway": d.gateway.Diagnostics(), "devices": dev, "audio_available": e == nil, "agent": d.agentHealth(), "sim": d.agentGet("/api/status"), "relay": d.agentGet("/api/push/status"), "call_active": !calls.Available || len(calls.Calls) > 0, "calls": calls})
+	write(w, 200, map[string]any{"product": "AirSIM for F50", "version": version, "running": true, "lan_ip": d.lan, "pairing_port": d.settings.PairPort, "control_port": d.settings.ControlPort, "pcm_port": d.settings.PCMPort, "mode": d.settings.Mode, "bonjour_pairing": session != nil, "agent_id": d.deviceID, "pairing": session, "paired_this_boot": paired, "audio": d.bridge.Status(), "gateway": d.gateway.Diagnostics(), "devices": dev, "audio_available": e == nil, "agent": d.agentHealth(), "sim": d.agentGet("/api/status"), "relay": d.agentGet("/api/push/status"), "call_active": !calls.Available || len(calls.Calls) > 0, "calls": calls})
 }
 
 func (d *daemon) callActive() bool {
@@ -364,7 +364,7 @@ func (d *daemon) startPair(w http.ResponseWriter, r *http.Request) {
 		write(w, 503, map[string]string{"error": "LAN unavailable"})
 		return
 	}
-	ad, err := zeroconf.RegisterProxy("AirSIM-MU300-"+s.ID[:8], "_airsim-pair._tcp", "local.", d.settings.PairPort, "airsim-"+s.ID[:8], []string{d.lan}, []string{"v=1", "session=" + s.ID, "key=" + s.Public, fmt.Sprintf("expires=%d", s.Expires)}, []net.Interface{*i})
+	ad, err := zeroconf.RegisterProxy("AirSIM-F50-"+s.ID[:8], "_airsim-pair._tcp", "local.", d.settings.PairPort, "airsim-"+s.ID[:8], []string{d.lan}, []string{"v=1", "session=" + s.ID, "key=" + s.Public, fmt.Sprintf("expires=%d", s.Expires)}, []net.Interface{*i})
 	if err != nil {
 		d.adMu.Unlock()
 		write(w, 503, map[string]string{"error": "pairing discovery unavailable"})
@@ -509,7 +509,7 @@ func prepareRegistration(reg map[string]any, deviceID string) {
 	delete(reg, "notification_forwarding")
 	reg["android_agent_id"] = deviceID
 	reg["android_agent_kind"] = "mu300"
-	reg["android_device_name"] = "AirSIM MU300"
+	reg["android_device_name"] = "AirSIM F50"
 	reg["android_manufacturer"] = "ZTE"
-	reg["android_model"] = "MU300"
+	reg["android_model"] = "F50"
 }
