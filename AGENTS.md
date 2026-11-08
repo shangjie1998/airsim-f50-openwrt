@@ -221,3 +221,18 @@ apk v3 签名包仍需 apk-tools 3.x（本机与云主机都没有 Docker），�
 起不来会自动退回 Android。包里的 `./devices` 必须含 `f50`。
 
 注意 `mu300-update kernel` 每次都会重新写 `prev.*`，所以喂包这条路可以反复走，不受 rollback 一次性限制。
+
+## 1g. 装机验证记录（2026-11-08 晚，6.18 内核）
+
+同一个包在 6.18 上的实测结果，跟 5.4 差别只在音频：
+
+| 项 | 实测 |
+|---|---|
+| 内核 | `6.18.60`（模块 2958 个，`mu300-update kernel 6.18` 装好后 `installed.kernel` 与 `kernel` 都是 `6.18`） |
+| 服务 | `/etc/init.d/airsim status` = `active with no instances`（prepare 的音频预检过不去，procd 不建实例） |
+| 手动起 | `/usr/lib/airsim/airsim-mu300d --interface br-lan` 可正常跑，日志首行 `F50 plugin ready; pairing port 8580` |
+| `audio_available` | `false` |
+| 显示名 | `"product": "AirSIM for F50"`、mDNS 实例 `AirSIM-F50-0p0JKELA` |
+
+结论：**6.18 上跑得起来、显示名正常，只是通话不可用**。要语音就 `rollback-boot` 回 5.4
+（喂包那条路会重写 `prev.*`，所以随时能回）。想在 6.18 上自启，得等 6.18 版的音频 ko。
