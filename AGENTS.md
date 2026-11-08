@@ -40,6 +40,21 @@
 （`/opt/mu300/bin/sipa-dele-start`、`/opt/mu300/bin/mu300-at`、`/usr/lib/airsim/` 下的音频暂存脚本），
 仓库里以 `scripts/` 的重放脚本留档。重编一个包不会把这些改动带进去，装完必须单独打补丁。
 
+## 1c. 品牌名改动范围（MU300 → F50）
+
+照 M8 那次的规矩：**只换给人看的字段，标识一个都不动**。已经在源码里改过，自己重编包即生效。
+
+改了（`src/plugin` 内）：mDNS 实例名 `AirSIM-F50-xxxx` 与 TXT 的 `device_name=AirSIM F50` / `model=F50`、
+health 接口的 `device_name`/`model`、`/status` 的 `product=AirSIM for F50`、pushRegistration 的
+`android_device_name`/`android_model`、音频报错串、LuCI 页面文案与 acl 描述、apk 的 `description`。
+
+**没改（改了会出问题）**：`agent_kind=mu300`（客户端靠它判设备类型）、Go module 与二进制名
+`airsim-mu300d`、`/usr/lib/airsim` 路径、`mu300-at`/`mu300-sms` 等工具名、`mu300-` 呼叫前缀、
+升级检查 UA `AirSIM-MU300-update-check`、历史 release 说明里的旧串。
+
+改完验证看这些：`dns-sd -B _airsim-vowlan._tcp` 实例名是 `AirSIM-F50-…`；`dns-sd -L` 的 TXT 里
+`device_name=AirSIM F50` 且 `agent_kind=mu300`；`curl /status` 的 `product` 是 `AirSIM for F50`。
+
 ## 2. 设备访问
 
 - 管理地址 `192.168.77.1`（OpenWrt 侧），`root`，密码不在仓库里，按现场提供。

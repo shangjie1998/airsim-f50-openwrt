@@ -69,7 +69,7 @@ return view.extend({
     s.audio_setup === 'failed' || s.audio_setup === 'not_prepared' ? '音频安装准备未完成，请检查安装结果；当前还不能通话。' : '音频组件正在准备，请稍候。';
    var paired = s.pairing && s.pairing.expires_at > Date.now() ? s.pairing : null;
    if (s.version) previousVersion = s.version;
-   set('version', previousVersion ? 'v' + previousVersion : 'MU300 · OpenWrt');
+   set('version', previousVersion ? 'v' + previousVersion : 'F50 · OpenWrt');
    set('live', setupBlocked ? s.audio_setup === 'reboot_required' ? '需重启完成安装' : '音频准备未完成' : pending === 'start' ? '正在启动' : pending === 'stop' ? '正在关闭' : online ? '服务运行中' : s.service_alive ? '服务连接中' : '服务已关闭');
    nodes.live.className = 'as-pill ' + (online ? 'as-pill-green' : 'as-pill-neutral');
    set('number', sim.phone_number || (online ? '等待号码' : '—'));
@@ -130,7 +130,7 @@ return view.extend({
      var updated = await getStatus(); refresh(updated);
      if (action === 'pair_start') {
       if (!updated.pairing || !updated.bonjour_pairing) throw new Error('未确认配对发现已开启，请重试。');
-      message('success', '配对码已就绪，Bonjour 发现已开启', '在同一局域网的 AirSIM 中添加设备，选择 AirSIM-MU300 并输入配对码。');
+      message('success', '配对码已就绪，Bonjour 发现已开启', '在同一局域网的 AirSIM 中添加设备，选择 AirSIM-F50 并输入配对码。');
      } else if (action === 'pair_cancel') {
       if (updated.pairing) throw new Error('配对窗口仍在运行，请重试。');
       message('success', '配对窗口已关闭', 'Bonjour 配对发现已停止，已有客户端连接不受影响。');
@@ -154,7 +154,7 @@ return view.extend({
     operation = dialAttempt.id;
    } else if (!id) return;
    pending = action; refresh(current);
-   callMessage('pending', action === 'dial' ? '正在发起拨号' : action === 'answer' ? '正在接听所选通话' : '正在挂断所选通话', '正在等待 MU300 确认，请勿重复操作。');
+   callMessage('pending', action === 'dial' ? '正在发起拨号' : action === 'answer' ? '正在接听所选通话' : '正在挂断所选通话', '正在等待 F50 确认，请勿重复操作。');
    try {
     var result = await callAction(action, action === 'dial' ? number : '', id, operation);
     if (!result.ok || result.error) throw new Error(result.error || '未收到有效操作回执，请先查看实时状态。');
@@ -173,7 +173,7 @@ return view.extend({
   nodes.callSelect = E('select', { id: 'as-call-select', 'class': 'as-call-select', change: function() { syncCalls(current); } }, [E('option', { value: '' }, '当前没有通话')]);
   root = E('div', { 'class': 'as-root' }, [
    E('link', { 'rel': 'stylesheet', 'href': L.resource('view/airsim/overview.css') }),
-   E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 电话网关'), E('h2', {}, '让连接，简单一点。'), E('p', {}, 'MU300 的运行状态与客户端连接，在这里管理。')]), text('version', 'span', 'as-version')]),
+   E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 电话网关'), E('h2', {}, '让连接，简单一点。'), E('p', {}, 'F50 的运行状态与客户端连接，在这里管理。')]), text('version', 'span', 'as-version')]),
    E('div', { 'class': 'as-layout' }, [
     E('section', { 'class': 'as-card as-status', 'aria-label': '设备状态' }, [
      E('div', { 'class': 'as-card-heading' }, [E('h3', {}, '设备状态'), text('live', 'span', 'as-pill')]),
@@ -190,15 +190,15 @@ return view.extend({
      ]),
      E('section', { 'class': 'as-card as-pair', 'aria-label': '配对客户端' }, [
       E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '02'), E('h3', {}, '配对客户端')]),
-      E('p', { 'class': 'as-copy' }, '让 iPhone 与 MU300 处于同一局域网。'),
+      E('p', { 'class': 'as-copy' }, '让 iPhone 与 F50 处于同一局域网。'),
       E('div', { 'class': 'as-code-area' }, [text('discovery', 'p', 'as-discovery'), text('code', 'div', 'as-code'), text('countdown', 'p', 'as-caption')]),
       E('div', { 'class': 'as-buttons' }, [button('获取配对码', 'pair_start', 'as-primary'), button('关闭配对', 'pair_cancel', 'as-secondary')]),
-      E('ol', { 'class': 'as-instructions' }, [E('li', {}, '在 AirSIM 中打开“添加设备”。'), E('li', {}, '选择自动发现的 AirSIM-MU300。'), E('li', {}, '输入上方六位配对码，完成连接。')])
+      E('ol', { 'class': 'as-instructions' }, [E('li', {}, '在 AirSIM 中打开“添加设备”。'), E('li', {}, '选择自动发现的 AirSIM-F50。'), E('li', {}, '输入上方六位配对码，完成连接。')])
      ])
     ]),
     E('section', { 'class': 'as-card as-dial', 'aria-label': '拨号与通话' }, [
      E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '03'), E('h3', {}, '拨号与通话')]),
-     E('p', { 'class': 'as-copy' }, '使用 MU300 的 SIM 卡发起电话。'),
+     E('p', { 'class': 'as-copy' }, '使用 F50 的 SIM 卡发起电话。'),
      E('label', { 'for': 'as-dial-number', 'class': 'as-field-label' }, '拨打号码'),
      E('div', { 'class': 'as-dial-entry' }, [nodes.dialNumber, button('拨号', 'dial', 'as-primary')]),
      E('p', { id: 'as-dial-help', 'class': 'as-caption' }, '可能产生运营商通话费用。本页仅控制通话，不提供浏览器音频。'),
@@ -209,7 +209,7 @@ return view.extend({
     ]),
     sms.render()
    ]),
-   E('footer', { 'class': 'as-footer' }, 'AirSIM for MU300 · 开发预览版')
+   E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 开发预览版')
   ]);
   refresh(current);
   poll.add(function() {

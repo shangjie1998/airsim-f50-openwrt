@@ -176,7 +176,7 @@ return view.extend({
   buttons.updates = E('button',{type:'button','class':'as-button as-primary',click:updates},'检查更新');
   var root = E('div',{'class':'as-root'},[
    E('link',{rel:'stylesheet',href:L.resource('view/airsim/overview.css')}),
-   E('header',{'class':'as-header'},[E('div',{},[E('div',{'class':'as-eyebrow'},'AirSIM · 管理与维护'),E('h2',{},'按你的方式，保持连接。'),E('p',{},'仅管理 MU300 插件，不改变 AirSIM 客户端。')]),E('span',{'class':'as-version'},'v'+config.version)]),
+   E('header',{'class':'as-header'},[E('div',{},[E('div',{'class':'as-eyebrow'},'AirSIM · 管理与维护'),E('h2',{},'按你的方式，保持连接。'),E('p',{},'仅管理 F50 插件，不改变 AirSIM 客户端。')]),E('span',{'class':'as-version'},'v'+config.version)]),
    E('a',{href:L.url('admin/services/airsim/overview'),'class':'as-text-button'},'返回设备概览'),
    E('div',{'class':'as-management-layout'},[
     E('section',{'class':'as-card'},[
