@@ -144,6 +144,7 @@ AGENTS.md                    本文件：给下一位接手者的最短路径
 docs/F50-通话打通.md          通话验收与调试全过程
 docs/F50-数据联网修复.md       拨号修复（sipa）与客户端断网（flowtable）两条完整链路
 docs/F50_BUILD_AND_ADAPT.md  从源码重建安装包、换内核/换硬件的适配口径
+device-patches/              从设备取回的两处运行库补丁（含原件与 .diff，可直接重放）
 scripts/                     设备侧补丁脚本（重放用）
 src/plugin/                  上游 r22 插件源码（含 vendor、packaging、patches）
 src/AirSIM/                  AirSIM 客户端/Agent 源码（固定提交）

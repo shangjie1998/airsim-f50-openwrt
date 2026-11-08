@@ -1,0 +1,17 @@
+--- sipa-dele-start.orig	2026-11-08 13:26:32
++++ sipa-dele-start	2026-11-08 13:26:32
+@@ -34,8 +34,12 @@
+         node=$candidate; count=$((count + 1))
+     done
+     [ "$count" = 1 ] || {
+-        log 'missing or ambiguous kernel readiness interface; matching delegate module required'
+-        return 1
++        if ! grep -q '^sipa_dele ' /proc/modules; then
++            log 'missing or ambiguous kernel readiness interface; matching delegate module required'
++            return 1
++        fi
++        log 'no readiness sysfs on this 5.4 vendor driver build; module loaded after registration, proceeding'
++        return 0
+     }
+     # This read waits on a kernel waitqueue, not a dmesg string or a sleep.
+     # The kernel returns immediately when ready, or reports open failure /
