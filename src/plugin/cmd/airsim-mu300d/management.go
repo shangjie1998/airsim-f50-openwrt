@@ -236,7 +236,7 @@ func flagValue(v any) bool        { b, _ := v.(bool); return b }
 func diagnosticReport(s map[string]any, settings managementSettings) map[string]any {
 	a, relay, sim, calls, audio := object(s["agent"]), object(s["relay"]), object(s["sim"]), object(s["calls"]), object(s["audio"])
 	return map[string]any{
-		"schema": 1, "product": "AirSIM for MU300", "version": version, "generated_at": time.Now().UTC().Format(time.RFC3339),
+		"schema": 1, "product": "AirSIM for F50", "version": version, "generated_at": time.Now().UTC().Format(time.RFC3339),
 		"mode": settings.Mode, "status_available": s != nil, "agent_reachable": flagValue(a["reachable"]),
 		"sim_inserted": flagValue(sim["sim_inserted"]), "audio_available": flagValue(s["audio_available"]), "audio_active": flagValue(audio["active"]),
 		"call_status_available": flagValue(calls["available"]), "call_active_or_unknown": s == nil || flagValue(s["call_active"]),
