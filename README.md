@@ -12,6 +12,10 @@
 | 插件 | 上游原版 `luci-app-airsim-0.1.0-r22`（未改包名、未改名） |
 | 上游 | [kai-wu-cortex/airsim-mu300](https://github.com/kai-wu-cortex/airsim-mu300) |
 
+> **客户端断网了？** 先跑 `sh scripts/修断网.sh --check`，症状对得上就 `--fix`。一条根因：
+> flowtable 里含 `sipa_eth0` 导致整张防火墙规则表加载失败（详见 §4 第 5 条与
+> [docs/F50-数据联网修复.md](docs/F50-数据联网修复.md)）。
+
 同 SoC 的另一条线（VIPME-M8，内核 6.18.54，改过播放采样率与显示名）见
 <https://github.com/shangjie1998/airsim-m8-openwrt>。两台机器内核、音频路由、播放参数都不同，
 **安装包与文档不能互换**。
@@ -68,7 +72,7 @@
 | 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 在"旧文件一个都没有"时对空列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `scripts/音频暂存-空列表保护.sh`：空列表直接 `: > previous.tar`，`restore()` 同样加 `-s` 判断 |
 | 3 | Agent 来电轮询一直失败，`last_poll_error: MU300 AT request failed (AT+CLCC)`，但手动 `mu300-at 'AT+CLCC'` 是 OK | 设备自带旧版 `mu300-at`（10-27）不认 `-`（stdin），把连字符当 AT 命令发出去 | `scripts/mu300-at-补stdin.sh` 补上 stdin 支持（原件备份 `.bak-20261107`） |
 | 4 | 数据不拨号，日志 `sipa delegate did not become ready; refusing unsafe PDP activation` | 5.4 的 `sipa-dele.ko` **没有** `sipa_dele_wait` 节点，`delegate_ready()` 把"读不到就绪接口"当硬失败；其实模块是注册后才 insmod 的，委托线程是活的 | 改 `/opt/mu300/bin/sipa-dele-start` 的 `delegate_ready()`：模块已加载则记日志继续，未加载仍拒绝 |
-| 5 | 设备能上网、连热点的终端显示"无互联网" | `flowtable` 含 `sipa_eth0`（自定义 ARPHRD 虚拟口），fw4 整张规则表拒绝加载，留下的是 `forward policy drop` 的旧表 | **最终方案**：`uci set firewall.@defaults[0].flow_offloading='0'`（不生成 flowtable，5.4 的 EBUSY 冲突从源头消失）；上游 hotplug 钩子方案实测可用但未采用，留档 `scripts/19-mu300-fw4-钩子版.sh` |
+| 5 | 设备能上网、连热点的终端显示"无互联网" | `flowtable` 含 `sipa_eth0`（自定义 ARPHRD 虚拟口），fw4 整张规则表拒绝加载，留下的是 `forward policy drop` 的旧表 | **最终方案**：`uci set firewall.@defaults[0].flow_offloading='0'`（不生成 flowtable，5.4 的 EBUSY 冲突从源头消失），一键脚本 `scripts/修断网.sh`；上游 hotplug 钩子方案实测可用但未采用，留档 `scripts/19-mu300-fw4-钩子版.sh` |
 | 6 | 切 6.18.60 后 `airsim` 起不来 | 音频附加包的 ko 只编了 5.4 | 回 `mu300-update rollback-boot`，或等带 6.18 驱动的新版 audio 包 |
 
 细节、实测输出与回退步骤见 [docs/F50-通话打通.md](docs/F50-通话打通.md) 与
@@ -119,3 +123,39 @@ ubus call network.interface.wan status | head -20      # up=true, l3_device=sipa
 本仓库只包含文字记录与几个设备侧补丁脚本，沿用上游的非商业定位：
 AirSIM Agent 为 **PolyForm Noncommercial 1.0.0**，mu300-audio 按文件采用 **GPL-2.0 / MIT**。
 脚本可自由取用，但不得用于商业目的；涉及上游组件的部分以各自许可证为准。
+
+## 9. 仓库结构与「从源码重来」
+
+这个仓库现在**不只是记录**：源码、依赖和已验收的安装包都在里面，下一个接手的人和 AI 可以从零重建。
+
+```text
+src/plugin/              上游 r22 插件源码（go.mod、internal/、packaging/、patches/、vendor/）
+src/AirSIM/              AirSIM 客户端与 module-agent 源码（固定提交 cc2ade3）
+src/dependencies/        重建音频扩展用的依赖源码包（mu300-audio、内核构建树、alsa、openwrt-packages）
+src/UPSTREAM-SOURCES.md  上游源码包出处与哈希
+dist/                    luci-app-airsim-0.1.0-r22.apk + 公钥 + install.sh + SHA256SUMS
+docs/F50_BUILD_AND_ADAPT.md   构建环境、构建步骤、换内核/换参数口径、验证清单
+AGENTS.md                给下一个 AI 的最短路径（参数、坑、别做什么）
+scripts/                 设备侧补丁脚本（重放用）
+```
+
+已验收的包：
+
+| 文件 | 大小 | sha256 |
+|---|---|---|
+| `dist/luci-app-airsim-0.1.0-r22.apk` | 9229711 | `849f72fb…cbcfb8` |
+| `dist/airsim-dev.pem`（签名公钥） | 625 | `0ce703e7…2cf1de` |
+
+重建最短路径（细节见 `docs/F50_BUILD_AND_ADAPT.md`）：
+
+```sh
+cd src/plugin
+AGENT_TREE=$(sh scripts/prepare-agent.sh)   # 需要 Go 1.24+、Docker（node:22-alpine）
+sh scripts/package-apk.sh                   # 产物在 out/，签名私钥留在 out/signing/
+```
+
+**自编的包公钥与 `dist/` 里那把不同**，装的时候必须换成自己的公钥，不能沿用 `dist/install.sh`
+里写死的指纹。
+
+管线里的三道硬门槛，改任何一个参数都得同步改这三处：内核版本 `5.4.254-gb50db5b6224c`、
+内核配置哈希 `1057cb97…6356b3`、以及音频节点的 `hw:1,53` / `hw:1,16`。

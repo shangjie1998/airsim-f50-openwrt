@@ -1,0 +1,10 @@
+# github.com/damonto/euicc-go v1.1.2
+## explicit; go 1.24.0
+github.com/damonto/euicc-go/apdu
+github.com/damonto/euicc-go/bertlv
+github.com/damonto/euicc-go/bertlv/primitive
+github.com/damonto/euicc-go/driver
+github.com/damonto/euicc-go/http
+github.com/damonto/euicc-go/http/rootci
+github.com/damonto/euicc-go/lpa
+github.com/damonto/euicc-go/v2
