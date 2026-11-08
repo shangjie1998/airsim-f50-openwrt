@@ -207,3 +207,17 @@ apk v3 签名包仍需 apk-tools 3.x（本机与云主机都没有 Docker），�
 设备没插卡（没有余额），所以只验到"插件起得来、音频可调用"这一层；通话本身没复验。
 6.18.x 上同样的包会停在 `active with no instances`（prepare 的音频预检过不去），这不是包的问题，
 要语音就留在 5.4。
+
+## 1f. 断网时切内核（离线喂包）
+
+设备没插卡、没网，`mu300-update` 里凡是要 `latest_release` 或 `fetch_verified` 的都走不通。能救场的只有两条：
+
+- **回滚**：`mu300-update rollback-boot`（把 `prev.body` 写回，一次性；不联网）
+- **喂本地包**：`MU300_RELEASE=<tag> MU300_KERNEL_BUNDLE=<本地 tar.gz> mu300-update kernel <5.4|6.18>`
+
+本地包从 `dikeckaan/mu300-linux` 的 Releases 取，tag 跟设备已装系统一致就行（2026-11-08 用的
+`v2026.11.02.1`，其中 `mu300-kernel-6.18.tar.gz` 53,175,572 字节，sha
+`64893b18…e130`）。设备上核完 sha 再跑；跑完会打印 `slot b armed`，新镜像落在不常用的 b 槽，
+起不来会自动退回 Android。包里的 `./devices` 必须含 `f50`。
+
+注意 `mu300-update kernel` 每次都会重新写 `prev.*`，所以喂包这条路可以反复走，不受 rollback 一次性限制。
