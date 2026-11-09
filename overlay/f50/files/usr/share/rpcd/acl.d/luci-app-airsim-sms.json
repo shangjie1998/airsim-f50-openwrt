@@ -1,0 +1,7 @@
+{
+	"luci-app-airsim-sms": {
+		"description": "Grant access to SMS wrapper over mu300dash",
+		"read": { "ubus": { "airsim-sms": [ "sms_list", "sms_show", "sms_job", "sms_sims" ] } },
+		"write": { "ubus": { "airsim-sms": [ "sms_send", "sms_read_all", "sms_clear_batch" ] } }
+	}
+}

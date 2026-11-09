@@ -1,0 +1,7 @@
+{
+	"luci-app-airsim-call": {
+		"description": "来电转发页面",
+		"read": {"ubus": {"airsim-call": ["call_get", "call_status"]}},
+		"write": {"ubus": {"airsim-call": ["call_save", "call_test", "call_clear"]}}
+	}
+}
