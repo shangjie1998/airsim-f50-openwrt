@@ -54,8 +54,61 @@ bt_state() {
 	pgrep -f '[b]luetoothd' >/dev/null 2>&1 && bluetoothd=1
 	json_add_boolean bluetoothd "$bluetoothd"
 
+	# 显示名：手机蓝牙列表里看到的就是它（attach 脚本算的 F50-<地址后6位>）
+	# hciconfig 不带 -a 不打印名字，必须 -a；手机端看到的是这个名字
+	nm=$(hciconfig -a hci0 2>/dev/null | sed -n "s/.*Name: *'\(.*\)'.*/\1/p" | head -n 1)
+	[ -n "$nm" ] && json_add_string name "$nm"
+
+	# 可见性：PSCAN=可被发现，ISCAN=可被连接。默认开机就打开，见 airsim-bt-boot。
+	discoverable=0
+	pairable=0
+	if [ -d "$HCI" ] && command -v hciconfig >/dev/null 2>&1; then
+		hciconfig hci0 2>/dev/null | grep -q 'PSCAN' && discoverable=1
+		hciconfig hci0 2>/dev/null | grep -q 'ISCAN' && pairable=1
+	fi
+	json_add_boolean discoverable "$discoverable"
+	json_add_boolean pairable "$pairable"
+
+	# 已配对设备：BlueZ 每台配对设备存成 /var/lib/bluetooth/<控制器>/<mac>/info，
+	# 只有带 [LinkKey] 段的才算真配对。先落临时文件再读，别让 jshn 掉进管道子 shell。
+	json_add_array devices
+	if [ -n "$addr" ] && [ -d "/var/lib/bluetooth/$addr" ]; then
+		_tmp=$(mktemp /tmp/airsim-bt-dev.XXXXXX 2>/dev/null || echo /tmp/airsim-bt-dev.$$)
+		_con=$(hcitool con 2>/dev/null)
+		for _d in /var/lib/bluetooth/"$addr"/*; do
+			[ -d "$_d" ] || continue
+			_ma=$(basename "$_d")
+			case "$_ma" in cache|settings) continue ;; esac
+			_info="$_d/info"
+			[ -f "$_info" ] || continue
+			grep -q '^\[LinkKey\]' "$_info" 2>/dev/null || continue
+			_n=$(sed -n 's/^Name=/ /p' "$_info" 2>/dev/null | head -n 1 | sed 's/^ //')
+			_cn=0
+			printf '%s' "$_con" | grep -qi "$_ma" && _cn=1
+			printf '%s\t%s\t%s\n' "$_ma" "${_n:-未命名}" "$_cn" >> "$_tmp"
+		done
+		while IFS='	' read -r _a _n _c; do
+			[ -n "$_a" ] || continue
+			json_add_object
+			json_add_string address "$_a"
+			json_add_string name "$_n"
+			json_add_boolean connected "$_c"
+			json_close_object
+		done < "$_tmp"
+		rm -f "$_tmp"
+	fi
+	json_close_array
+
+	# 文案要跟着真实状态走：开关记着「开」但 hci0 不存在时，
+	# 不能哄人说「可以直接搜到」——那正是页面显示"未挂载"却没人知道原因的那次。
 	case "$en" in
-	1) json_add_string hint '控制器已打开；手机、耳机可以直接搜到这台设备。' ;;
+	1)
+		if [ -d "$HCI" ]; then
+			json_add_string hint '控制器已挂载并保持可被发现；手机、耳机可以直接搜到这台设备。'
+		else
+			json_add_string hint '开关是开的，但控制器还没挂上；稍等十几秒，仍不行就关一次再打开（或重启后由开机脚本重试）。'
+		fi
+		;;
 	unset) json_add_string hint '还没有写过开关配置，按默认（开）处理。' ;;
 	*) json_add_string hint '已关闭；打开后控制器才挂载。' ;;
 	esac
@@ -80,6 +133,14 @@ bt_set() {
 		return
 	fi
 	out=$("$SW" "$want" 2>&1)
+	# 开关动作顺便把可见性复位：sprdbluetooth 重启后会清掉 PSCAN/ISCAN，
+	# 只写 hciconfig 不够，bluetoothd 那边也要 pairable/discoverable 打开。
+	if [ "$want" = on ] && [ -d "$HCI" ]; then
+		hciconfig hci0 piscan >/dev/null 2>&1
+		if command -v bluetoothctl >/dev/null 2>&1; then
+			printf 'pairable on\ndiscoverable on\nquit\n' | bluetoothctl >/dev/null 2>&1
+		fi
+	fi
 
 	json_init
 	json_add_boolean ok 1
