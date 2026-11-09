@@ -1,3 +1,9 @@
+> **两条内核线严格分开**：6.18（在研主线，`docs/6.18/`、`scripts/6.18/`）与 5.4（已冻结，
+> `docs/5.4/`、`scripts/5.4/`）。新改动只落 6.18 线，别再碰 5.4 的包和脚本。
+>
+> **先读 [`docs/6.18/接手说明.md`](docs/6.18/接手说明.md)**：里面写了这台机器现在到哪一步、
+> 怎么装模块、怎么判活、哪些还是坑、下一步升上游 r23 怎么落。
+
 # 给下一个 AI 的交接说明（F50 / MU300 / UMS9620）
 
 先读完这一页，再动手。这里写的都是**这台机器上实测过**的东西，不是上游文档的复述。
@@ -80,7 +86,7 @@ health 接口的 `device_name`/`model`、`/status` 的 `product=AirSIM for F50`�
 | # | 现象 | 根因 | 修法 |
 |---|---|---|---|
 | 1 | 安装报 `MU300 runtime library missing` | 新 rootfs 裁掉了 `/opt/mu300/lib/run-dir.sh` | 从 `mu300-linux` 补回（644） |
-| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 对空文件列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `scripts/音频暂存-空列表保护.sh` |
+| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 对空文件列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `scripts/5.4/音频暂存-空列表保护.sh` |
 | 3 | 来电轮询永远失败 `MU300 AT request failed (AT+CLCC)`，手动同条 AT 正常 | 设备自带旧版 `mu300-at` 不认 `-`（stdin），把连字符当命令发出去 | `scripts/mu300-at-补stdin.sh`（原件留 `.bak-20261107`） |
 | 4 | 数据不拨号：`sipa delegate did not become ready; refusing unsafe PDP activation` | **5.4 的 `sipa-dele.ko` 根本没有 `sipa_dele_wait` 节点**（6.18 才有），而 `delegate_ready()` 把"读不到"当硬失败 | 改 `/opt/mu300/bin/sipa-dele-start` 的 `delegate_ready()`：`/proc/modules` 里有 `sipa_dele` 就记日志放行。**6.18 上不需要这个补丁**（有 `sipa_dele_wait`/`sipa_dele_ready`，走原路径） |
 
@@ -107,7 +113,7 @@ uci commit firewall
 关掉软件流卸载后 fw4 根本不生成 flowtable，那个事务冲突从源头消失；顺带 LuCI 里“保存防火墙”也不会再翻车。
 代价只是转发不走快路径，LTE 几十兆量级 CPU 看不出差别。
 
-**上游的钩子方案**（`scripts/19-mu300-fw4-钩子版.sh`）实测可用但未采用：它在 ifup 时先删 flowtable 再 reload。
+**上游的钩子方案**（`scripts/5.4/19-mu300-fw4-钩子版.sh`）实测可用但未采用：它在 ifup 时先删 flowtable 再 reload。
 注意这台机器的 5.4 内核连 `nft delete flowtable inet fw4 ft` 都返回 `Resource busy`，必须先
 `nft delete table inet fw4`（整表）才有用；而且它覆盖不到非 ifup 的 reload，所以选了“关卸载”。
 
@@ -132,7 +138,7 @@ ping -c2 223.5.5.5                                     # 设备自身出网
 
 ## 7. 要重编安装包
 
-见 [docs/F50_BUILD_AND_ADAPT.md](docs/F50_BUILD_AND_ADAPT.md)。要点：
+见 [docs/5.4/F50_BUILD_AND_ADAPT.md](docs/5.4/F50_BUILD_AND_ADAPT.md)。要点：
 
 - 构建机需要 Git、**Go 1.24+**、Node.js、Docker（`node:22-alpine`）、curl、OpenSSL；
 - 入口 `sh scripts/package-apk.sh`（内部会 `build.sh` → `fetch-deps.sh` → `fetch-sources.sh`）；
@@ -157,9 +163,9 @@ ping -c2 223.5.5.5                                     # 设备自身出网
 README.md                    部署记录总览（结论、装机、坑、自检）
 AGENTS.md                    本文件：给下一位接手者的最短路径
 VERSIONING.md                版本编号规则（0.1.0.N-r22-f50，每打包一次 N+1）
-docs/F50-通话打通.md          通话验收与调试全过程
-docs/F50-数据联网修复.md       拨号修复（sipa）与客户端断网（flowtable）两条完整链路
-docs/F50_BUILD_AND_ADAPT.md  从源码重建安装包、换内核/换硬件的适配口径
+docs/5.4/F50-通话打通.md          通话验收与调试全过程
+docs/5.4/F50-数据联网修复.md       拨号修复（sipa）与客户端断网（flowtable）两条完整链路
+docs/5.4/F50_BUILD_AND_ADAPT.md  从源码重建安装包、换内核/换硬件的适配口径
 device-patches/              从设备取回的两处运行库补丁（含原件与 .diff，可直接重放）
 scripts/                     设备侧补丁脚本（重放用）
 src/plugin/                  上游 r22 插件源码（含 vendor、packaging、patches）

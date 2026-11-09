@@ -100,7 +100,7 @@ apk --no-network add --upgrade /tmp/luci-app-airsim-0.1.0-r22.apk
 |---|---|---|---|
 | 数据联网 | `sipa_*`、netifd `mu300cell.sh` | 需要 `sipa-dele-start` 放行补丁 | **原生可用**（有 `sipa_dele_wait`/`sipa_dele_ready`） |
 | 语音 | `mu300-audio` 编出的 ko + `agdsp.bin` | 可用 | **不可用**（ko 只按 5.4 编） |
-| 防火墙 | fw4 + flowtable | 有 5.4 事务坑，见 `docs/F50-数据联网修复.md` | 无此问题 |
+| 防火墙 | fw4 + flowtable | 有 5.4 事务坑，见 `docs/5.4/F50-数据联网修复.md` | 无此问题 |
 
 要在 6.18 上恢复语音，只有一条路：用 `src/plugin/packaging/openwrt-audio/` 那套打包逻辑，
 针对 6.18.60 的内核头重新编一份音频模块（依赖 `src/dependencies/mu300-audio-v1.0.5-source.tar.gz`
@@ -145,7 +145,7 @@ uci get firewall.@defaults[0].flow_offloading         # 0
 nft list chain inet fw4 accept_to_wan | tail -3       # 有 oifname "sipa_eth0" accept
 ```
 
-电话实测时关注 `docs/F50-通话打通.md` 里那份数据表的口径（约 40 s 通话：
+电话实测时关注 `docs/5.4/F50-通话打通.md` 里那份数据表的口径（约 40 s 通话：
 `downlink_frames≈2062`、`received_uplink_frames≈2060`），量级差太多就是链路有问题。
 
 ## 8. 发布与留档
@@ -169,4 +169,4 @@ nft list chain inet fw4 accept_to_wan | tail -3       # 有 oifname "sipa_eth0" 
 - 上 6.18（要联网）：`mu300-update kernel 6.18` → `reboot`
 - `rollback-boot` 是一次性的，它不会把当前镜像另存为新的备份
 
-详见 `scripts/切内核-5.4.sh`。
+详见 `scripts/5.4/切内核-5.4.sh`。
