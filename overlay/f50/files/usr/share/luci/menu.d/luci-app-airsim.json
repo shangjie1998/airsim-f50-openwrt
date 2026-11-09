@@ -33,6 +33,11 @@
  "admin/services/airsim/settings": {
   "title": "外观与设置", "order": 50,
   "action": {"type": "view", "path": "airsim/settings"},
+  "depends": {"acl": ["luci-app-airsim"]}
+ },
+ "admin/services/airsim/bluetooth": {
+  "title": "蓝牙", "order": 55,
+  "action": {"type": "view", "path": "airsim/bluetooth"},
   "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-bt"]}
  }
 }
