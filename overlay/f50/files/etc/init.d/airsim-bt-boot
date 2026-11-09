@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+# AirSIM for F50 —— 开机按开关状态恢复蓝牙
+#
+# 为什么要有这个：蓝牙开关只在 rpcd（airsim-bt）里被调用，重启以后没人拉起，
+# 于是 /sys/class/bluetooth/hci0 一直不存在、页面永远显示“未挂载”，
+# 可开关本身还记着「开」。这里按 /etc/config/f50-bt 的 enabled 在开机时补这一步。
+# 值为 0（或没写过）就什么都不做 —— 「关了以后重启仍是关」靠的就是这句。
+
+START=98
+STOP=10
+
+# 默认「可被发现 + 可配对」：手机列表里能搜到、能直接发起配对。
+# PSCAN/ISCAN 写控制器，pairable/discoverable 交给 bluetoothd（两者都要，缺一个手机那边就搜不到或配不上）。
+visible() {
+	hciconfig hci0 piscan >/dev/null 2>&1
+	if command -v bluetoothctl >/dev/null 2>&1; then
+		printf 'pairable on\ndiscoverable on\nquit\n' | bluetoothctl >/dev/null 2>&1
+	fi
+}
+
+start() {
+	[ -x /usr/sbin/f50-bt-switch.sh ] || return 0
+	en=$(uci -q get f50-bt.settings.enabled)
+	[ "$en" = 1 ] || return 0
+	# 控制器挂载要等内核模块/固件就位，第一次没出现就再试两轮
+	i=0
+	while [ "$i" -lt 3 ]; do
+		/usr/sbin/f50-bt-switch.sh on >/dev/null 2>&1
+		if [ -d /sys/class/bluetooth/hci0 ]; then
+			visible
+			return 0
+		fi
+		i=$((i + 1))
+		sleep 8
+	done
+	logger -t airsim-bt "蓝牙开关为开，但三次尝试后 hci0 仍未出现"
+}
