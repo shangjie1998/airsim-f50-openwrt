@@ -12,6 +12,22 @@
 DASH=mu300dash
 AGENT=http://127.0.0.1:8575
 
+# 「已读」是本地标记，不动 SIM 卡：
+# mu300dash 只有 sms_list/show/send/sync/delete，没有标记已读的方法，
+# 短信在卡上的 status 永远是 unread。所以这里自己记一份 id 清单，
+# 列表返回前把它们改写成 read。放 /etc 下，重启和升级后都在。
+READ_DB=/etc/airsim-sms-read
+
+msg_is_read() {
+	[ -n "$1" ] && grep -qx -- "$1" "$READ_DB" 2>/dev/null
+}
+
+msg_mark_read() {
+	[ -n "$1" ] || return 0
+	msg_is_read "$1" && return 0
+	printf '%s\n' "$1" >> "$READ_DB" 2>/dev/null
+}
+
 req_get() {  # req_get <字段> [默认值]
 	json_get_var _v "$1" 2>/dev/null
 	printf '%s' "${_v:-${2:-}}"
@@ -24,7 +40,60 @@ forward_sms_list() {
 	if json_load "$request" 2>/dev/null; then page=$(req_get page); fi
 	json_init
 	[ -n "$page" ] && json_add_string page "$page"
-	ubus call "$DASH" sms_list "$(json_dump)" 2>/dev/null
+	_q=$(json_dump)
+	_raw=$(ubus call "$DASH" sms_list "$_q" 2>/dev/null)
+	if [ -z "$_raw" ]; then printf '%s\n' '{"error":"设备短信服务未响应"}'; return; fi
+
+	# 取字段一律用 jsonfilter：这台机器上 busybox 的 grep -o / sed 取 JSON 都不可靠。
+	_total=$(printf '%s' "$_raw" | jsonfilter -e '@.total' 2>/dev/null)
+	_page=$(printf '%s' "$_raw" | jsonfilter -e '@.page' 2>/dev/null)
+	_pages=$(printf '%s' "$_raw" | jsonfilter -e '@.pages' 2>/dev/null)
+	_used=$(printf '%s' "$_raw" | jsonfilter -e '@.sim_used' 2>/dev/null)
+	_cap=$(printf '%s' "$_raw" | jsonfilter -e '@.sim_total' 2>/dev/null)
+	_t=/tmp/.airsim-sms-$$
+	printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].id'      > "$_t.1" 2>/dev/null
+	printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].status'  > "$_t.2" 2>/dev/null
+	printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].dir'     > "$_t.3" 2>/dev/null
+	printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].peer'    > "$_t.4" 2>/dev/null
+	printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].time'    > "$_t.5" 2>/dev/null
+	printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].preview' > "$_t.6" 2>/dev/null
+	_n=$(wc -l < "$_t.1" 2>/dev/null | tr -d ' ')
+
+	# mu300dash 的 sim_used 是 0 基槽位号，转成人看的 SIM 名（F50 上恒为 SIM1）
+	_simname="SIM$(( ${_used:-0} + 1 ))"
+	json_init
+	json_add_int total "${_total:-0}"
+	json_add_int page "${_page:-1}"
+	json_add_int pages "${_pages:-1}"
+	json_add_int sim_used "${_used:-0}"
+	json_add_int sim_total "${_cap:-0}"
+	json_add_array msgs
+	_unread=0
+	i=1
+	while [ "$i" -le "${_n:-0}" ]; do
+		_mid=$(sed -n "${i}p" "$_t.1" 2>/dev/null)
+		_mst=$(sed -n "${i}p" "$_t.2" 2>/dev/null)
+		if [ -n "$_mid" ] && [ "$_mst" = unread ] && msg_is_read "$_mid"; then
+			_mst=read
+		fi
+		if [ "$_mst" = unread ]; then _unread=$((_unread + 1)); fi
+		json_add_object
+		json_add_string id "$_mid"
+		json_add_string status "${_mst:-read}"
+		json_add_string dir "$(sed -n "${i}p" "$_t.3" 2>/dev/null)"
+		json_add_string peer "$(sed -n "${i}p" "$_t.4" 2>/dev/null)"
+		json_add_string time "$(sed -n "${i}p" "$_t.5" 2>/dev/null)"
+		json_add_string preview "$(sed -n "${i}p" "$_t.6" 2>/dev/null)"
+		# 页面拿 m.sim / m.card 判"来源"，两个都没有就显示"来源未知"。
+		# mu300dash 只给 top 级 sim_used（0 基），这里换成 SIM1/SIM2 塞进每条。
+		json_add_string sim "$_simname"
+		json_close_object
+		i=$((i + 1))
+	done
+	json_close_array
+	json_add_int unread "$_unread"
+	json_dump
+	rm -f "$_t".[1-6]
 }
 
 forward_sms_show() {
@@ -35,7 +104,12 @@ forward_sms_show() {
 	json_init
 	[ -n "$id" ] && json_add_string id "$id"
 	[ -n "$slot" ] && json_add_string slot "$slot"
-	ubus call "$DASH" sms_show "$(json_dump)" 2>/dev/null
+	_out=$(ubus call "$DASH" sms_show "$(json_dump)" 2>/dev/null)
+	printf '%s' "$_out"
+	# 打开全文就当读过：记进本地清单，列表里立刻变"已读"。
+	if [ -n "$id" ] && printf '%s' "$_out" | jsonfilter -e '@.ok' 2>/dev/null | grep -qx '1'; then
+		msg_mark_read "$id"
+	fi
 }
 
 forward_sms_send() {
@@ -88,6 +162,51 @@ sms_sims() {
 	json_dump
 }
 
+# 全部已读：逐页把 dash 的短信 id 收进本地清单，不碰 SIM 卡
+mark_all_read() {
+	_p=1
+	_added=0
+	while :; do
+		_raw=$(ubus call "$DASH" sms_list "{\"page\":$_p}" 2>/dev/null)
+		[ -n "$_raw" ] || break
+		_pages=$(printf '%s' "$_raw" | jsonfilter -e '@.pages' 2>/dev/null)
+		for _id in $(printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].id' 2>/dev/null); do
+			[ -n "$_id" ] || continue
+			msg_is_read "$_id" && continue
+			msg_mark_read "$_id"
+			_added=$((_added + 1))
+		done
+		[ "$_p" -lt "${_pages:-1}" ] || break
+		_p=$((_p + 1))
+		[ "$_p" -gt 50 ] && break
+	done
+	printf '{"ok":1,"marked":%s}\n' "$_added"
+}
+
+# 清空：mu300dash 没有批量删接口（只有 sms_delete 删单条），
+# 所以这里按页取 id、逐条删，删够 limit 就交回去让页面再点一轮。
+do_clear_batch() {
+	IFS= read -r request
+	_limit=4
+	if json_load "$request" 2>/dev/null; then
+		_v=$(req_get limit)
+		[ -n "$_v" ] && _limit=$_v
+	fi
+	_raw=$(ubus call "$DASH" sms_list '{"page":1}' 2>/dev/null)
+	_deleted=0
+	for _id in $(printf '%s' "$_raw" | jsonfilter -e '@.msgs[*].id' 2>/dev/null); do
+		[ "$_deleted" -ge "$_limit" ] && break
+		[ -n "$_id" ] || continue
+		_ok=$(ubus call "$DASH" sms_delete "{\"id\":\"$_id\"}" 2>/dev/null | jsonfilter -e '@.ok' 2>/dev/null)
+		[ "$_ok" = 1 ] || break
+		_deleted=$((_deleted + 1))
+		# 删掉的短信也把本地已读标记清掉，别让清单一直涨
+		grep -vx -- "$_id" "$READ_DB" > "$READ_DB.tmp" 2>/dev/null && mv "$READ_DB.tmp" "$READ_DB" 2>/dev/null
+	done
+	_rem=$(ubus call "$DASH" sms_list '{"page":1}' 2>/dev/null | jsonfilter -e '@.total' 2>/dev/null)
+	printf '{"ok":1,"deleted":%s,"remaining":%s}\n' "$_deleted" "${_rem:-0}"
+}
+
 case "$1" in
 	list)
 		printf '%s\n' '{"sms_list":{"page":"String","card":"String"},"sms_show":{"id":"String"},"sms_send":{"num":"String","text":"String","card":"String"},"sms_job":{"card":"String"},"sms_sims":{},"sms_read_all":{},"sms_clear_batch":{"limit":"String"}}'
@@ -99,15 +218,8 @@ case "$1" in
 		sms_send) forward_sms_send ;;
 		sms_job) forward_sms_job ;;
 		sms_sims) sms_sims ;;
-		sms_read_all) ubus call "$DASH" sms_read_all '{}' 2>/dev/null ;;
-		sms_clear_batch)
-			IFS= read -r request
-			limit=''
-			json_load "$request" 2>/dev/null && limit=$(req_get limit)
-			json_init
-			[ -n "$limit" ] && json_add_string limit "$limit"
-			ubus call "$DASH" sms_clear_batch "$(json_dump)" 2>/dev/null
-			;;
+		sms_read_all) mark_all_read ;;
+		sms_clear_batch) do_clear_batch ;;
 		*) exit 1 ;;
 		esac
 		;;

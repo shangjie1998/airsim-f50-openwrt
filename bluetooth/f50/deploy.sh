@@ -17,7 +17,8 @@ chmod 755 /usr/sbin/f50-bt-switch.sh
 
 echo "[3/7] 修改 /etc/bluetooth/main.conf"
 sed -i 's/^#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
-sed -i 's/^#Name = BlueZ/Name = mu300/'      /etc/bluetooth/main.conf
+# 兜底名；真正的唯一名（F50-<地址后 6 位>）由 sprd-bt-attach.sh 起 hci0 后现算
+sed -i 's/^Name = .*/Name = F50/'          /etc/bluetooth/main.conf
 
 echo "[4/7] 启用开机自启"
 /etc/init.d/dbus enable

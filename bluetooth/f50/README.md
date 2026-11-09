@@ -44,6 +44,37 @@ Features: 0xff 0xff 0x8d 0xfe 0xdb 0x7d 0x3b 0xc3
 实测：经典扫描扫到小米电视、Redmi Note 5；LE 扫描扫到 `RM Magcooler 5pro`、`BYD BLE3` 等；
 裸 H4 帧 `Reset` 回 `Command Complete status=0`。
 
+## 蓝牙显示名：F50-<控制器地址后 6 位>
+
+别的手机搜到的名字是 **`F50-142211`**（本机实测），规则是取 `hciconfig hci0` 的
+`BD Address` 后 6 位、去冒号、转大写：
+
+```
+BD Address: 27:93:31:14:22:11  ->  142211  ->  F50-142211
+```
+
+为什么用控制器地址而不是序列号/设备标识：
+
+| 候选 | 长度 | 稳定性 | 结论 |
+|---|---|---|---|
+| BD Address 后 6 位 | 6 | 每台控制器唯一，重启不变 | 采用 |
+| 设备序列号（`009238d10a2acb06`） | 8+ | 稳，但蓝牙 attach 早于相关服务启动 | 备选 |
+| 页面「设备标识」（`0p0JKELA`） | 8 | 由 `airsim-agent` 生成，attach 时未必就绪 | 不用 |
+| 随机值 / 时间戳 | — | 每次开机都变，手机端会堆一堆配对记录 | 否决 |
+
+实现落在两处：
+
+- `sprd-bt-attach.sh`：hci0 上电成功后执行 `hciconfig hci0 name "$_btname"`。
+  attach 由 procd 常驻拉起，**重启后自动重设**，不用手工写 nvram。
+  取不到地址（`hciconfig` 异常）时 `_suf` 为空，名字退回固定 `F50`，
+  不会出现 `F50-` 这种半截名字。
+- `/etc/bluetooth/main.conf` 的 `Name = F50`（deploy.sh 里 sed 写入）：
+  只作 BlueZ 兜底，避免名字回落成 `mu300`。
+
+**取列的坑**：`hciconfig` 那行长这样 ——
+`BD Address: 27:93:31:14:22:11  ACL MTU: 1021:8  SCO MTU: 240:3`，
+地址是**第 3 列**，用 `awk '{print $4}'` 拿到的是 `ACL`，名字会变成 `F50-`。
+
 ## 部署
 
 ```sh

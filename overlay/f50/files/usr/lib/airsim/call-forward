@@ -92,15 +92,64 @@ collect_info() {
 	_dbm=$(printf '%s' "$_st" | sed -n 's/.*"signal_dbm":\([^,}]*\).*/\1/p' | tr -d '"')
 	_mm=$(mmcli -m any 2>/dev/null)
 	[ -n "$_self" ] || _self=$(printf '%s' "$_mm" | sed -n 's/.*own: *//p' | head -1 | tr -d ' ')
-	_operator=$(printf '%s' "$_mm" | sed -n 's/.*operator name: *//p' | head -1)
+
+	# 首页状态看板的数据源就是 mu300dash，先走它——比 mmcli / AT 都准：
+	#   cells  -> operator.plmn（这台机器 name 是 null，只有 PLMN 码）
+	#   signal -> nr.rsrp（dBm，5G 优先；没有 5G 时回落 lte.rsrp）
+	_dash_sig=$(ubus call mu300dash signal 2>/dev/null)
+	_dash_cells=$(ubus call mu300dash cells 2>/dev/null)
+	# 取字段一律用 jsonfilter：这台机器上 busybox 的 grep -o 对 [-0-9.] 这种
+	# 字符类不灵（只会吐出 "rsrp": 三个字符），sed 也会因为 JSON 一行到底而漏字段。
+	_plmn=$(printf '%s' "$_dash_cells" | jsonfilter -e '@.cell.operator.plmn' 2>/dev/null)
+	_operator=$(printf '%s' "$_dash_cells" | jsonfilter -e '@.cell.operator.name' 2>/dev/null)
+	case "$_operator" in null|'') _operator= ;; esac
+	if [ -z "$_operator" ] && [ -n "$_plmn" ]; then
+		case "$_plmn" in
+		46000|46002|46004|46007|46008|46020) _operator='中国移动' ;;
+		46001|46006|46009)                   _operator='中国联通' ;;
+		46003|46005|46011|46012|46015)       _operator='中国电信' ;;
+		460*)                                _operator="未知($_plmn)" ;;
+		*)                                   _operator="$_plmn" ;;
+		esac
+	fi
+	if [ -z "$_operator" ]; then
+		_operator=$(printf '%s' "$_mm" | sed -n 's/.*operator name: *//p' | head -1)
+	fi
+	# 兜底二：没有 ModemManager 时用 AT+COPS，它给数字格式（"46011" = MCC+MNC）。
+	if [ -z "$_operator" ] && [ -x "$AT_BIN" ]; then
+		_cops=$("$AT_BIN" -t 3 'AT+COPS?' 2>/dev/null | sed -n 's/.*"\([0-9]\{5,\}\)".*/\1/p' | head -1)
+		case "$_cops" in
+		46000|46002|46004|46007|46008|46020) _operator='中国移动' ;;
+		46001|46006|46009)                   _operator='中国联通' ;;
+		46003|46005|46011|46012|46015)       _operator='中国电信' ;;
+		460*)                                _operator="未知($_cops)" ;;
+		*)                                   [ -z "$_cops" ] || _operator="$_cops" ;;
+		esac
+	fi
+
+	_rsrp5g=$(printf '%s' "$_dash_sig" | jsonfilter -e '@.sig.rsrp' 2>/dev/null)
+	[ -n "$_rsrp5g" ] || _rsrp5g=$(printf '%s' "$_dash_sig" | jsonfilter -e '@.nr.rsrp' 2>/dev/null)
+	[ -n "$_rsrp5g" ] || _rsrp5g=$(printf '%s' "$_dash_sig" | jsonfilter -e '@.lte.rsrp' 2>/dev/null)
 	_quality=$(printf '%s' "$_mm" | sed -n 's/.*signal quality: *\([0-9]*\)%.*/\1%/p' | head -1)
 	_rsrp=$(mmcli -m any --signal-get 2>/dev/null | sed -n 's/.*rsrp: *\(-*[0-9.]*\) *dBm.*/\1/p' | head -1)
-	if [ -n "${_dbm:-}" ] && [ "$_dbm" != null ]; then
+	if [ -n "${_rsrp5g:-}" ]; then
+		_signal="$(printf '%.1f' "$_rsrp5g" 2>/dev/null | sed 's/\.0$//')dBm"
+	elif [ -n "${_dbm:-}" ] && [ "$_dbm" != null ]; then
 		_signal="${_dbm}dBm"
 	elif [ -n "$_rsrp" ]; then
 		_signal="$(printf '%s' "$_rsrp" | awk '{printf "%d", $1}')dBm"
 	else
-		_signal=${_quality:-未知}
+		# 最后的兜底 AT+CSQ：rssi=99 表示读不到，那就老实写"未知"，不编假值。
+		_csq=
+		if [ -x "$AT_BIN" ]; then
+			_csq=$("$AT_BIN" -t 3 'AT+CSQ' 2>/dev/null | sed -n 's/.*+CSQ: *\([0-9]*\).*/\1/p' | head -1)
+			case "$_csq" in
+			''|99|255) _signal=${_quality:-未知} ;;
+			*)         _signal="$(( -113 + 2 * _csq ))dBm" ;;
+			esac
+		else
+			_signal=${_quality:-未知}
+		fi
 	fi
 	_uptime=$(awk '{s=int($1); printf "%02d:%02d:%02d", s/3600, (s%3600)/60, s%60}' /proc/uptime 2>/dev/null)
 
