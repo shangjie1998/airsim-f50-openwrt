@@ -88,13 +88,17 @@ say "模块已放到 $dest（$(ls "$dest"/*.ko | wc -l) 个 .ko）"
 if [ -f "$DSP" ] && [ ! -f "$DSP.orig" ]; then
     cp -f "$DSP" "$DSP.orig"
     cat > /tmp/patch-dsp.awk <<'AWK'
-# CONFIG 那行整行换成“只要声明了 CONFIG 就放行”；用 index/正则匹配 set_fits 里唯一那一行
+# 两处改动合在一个 awk 里，从 .orig 一次生成，别叠两层补丁（先补 set_fits 再补 dsp_alive 会把前者冲掉）
+# 1) set_fits 的 CONFIG 逐位比对 → “声明了 CONFIG 就放行”
 /config_sum\)/ && /_want/ { print "    [ -n \"$_want\" ] && true"; next }
+# 2) dsp_alive 的 aplay 探针失败不再整条判死（真机上 aplay 会 EIO：没通话时 DSP 不消费数据），
+#    最终判定仍靠后面的 dmesg：aud_send_cmd out,cmd 出现且没有 failed to get command
+/aplay --fatal-errors -D "hw:\$card,0"/ && /return 1/ { sub(/return 1/, "true") }
 { print }
 AWK
     awk -f /tmp/patch-dsp.awk "$DSP.orig" > "$DSP.NEW" && mv "$DSP.NEW" "$DSP"
     chmod 755 "$DSP"
-    say 'mu300-audio-dsp 的 CONFIG 校验已放宽（原文件 = mu300-audio-dsp.orig）'
+    say 'mu300-audio-dsp 已放行 CONFIG 比对与 aplay 探针（原文件 = mu300-audio-dsp.orig）'
 fi
 
 say '装好了（重开机会走原来的 prepare.local）'
