@@ -10,8 +10,8 @@
 |---|---|
 | 本适配仓库 | <https://github.com/shangjie1998/airsim-f50-openwrt> |
 | 上游项目 | <https://github.com/kai-wu-cortex/airsim-mu300>（本仓库源码钉在 `v0.1.0-r23`） |
-| 已验收版本 | **`0.1.0.5-r23-6.18`**（2026-11-09 真机通话双向有声） |
-| 插件安装包 | [Release `v0.1.0.5-r23-6.18`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.5-r23-6.18) · 5.7 MB（仓库内另有 [`dist/`](dist/) 同款） |
+| 已验收版本 | **`0.1.0.7-r23-6.18`**（2026-11-10 真机：页面换皮 + 来电转发 + 号码补 `+86`） |
+| 插件安装包 | [Release `v0.1.0.7-r23-6.18`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.7-r23-6.18) · 5.9 MB（仓库内另有 [`dist/`](dist/) 同款） |
 | 音频模块包 | `0.1.0.4-r22-6.18` 里的 25 个 `.ko`（内核绑死 6.18.60，见 §3） |
 | 接手说明 | [docs/6.18/接手说明.md](docs/6.18/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
 | 蓝牙（选装） | [bluetooth/](bluetooth/README.md) —— WCN 蓝牙启用脚本 + 总开关口子，**不影响通话** |
@@ -99,20 +99,49 @@ ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --verify'
 ### 3-2 装插件包（覆盖式更新，先备份再换）
 
 ```sh
-scp dist/airsim-f50-0.1.0.5-r23-6.18.tar.gz root@192.168.77.1:/tmp/r23pkg.tar.gz
-ssh root@192.168.77.1 'cd /tmp && rm -rf airsim-f50-0.1.0.5-r23-6.18 && tar xzf r23pkg.tar.gz && ./airsim-f50-0.1.0.5-r23-6.18/install.sh'
+scp dist/airsim-f50-0.1.0.7-r23-6.18.tar.gz root@192.168.77.1:/tmp/p.pkg.tar.gz
+ssh root@192.168.77.1 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh pkg/airsim-f50-0.1.0.7-r23-6.18/install.sh'
 ```
 
-`install.sh` 会先检查内核（非 6.18 直接退出码 3，不写设备一个文件），把旧二进制备份到
-`/usr/lib/airsim/backup-<版本>/`，再停服务 → 换二进制与 LuCI → 起服务。
+`install.sh` 会先检查内核（非 6.18 直接退出码 3，不写设备一个文件），把旧二进制、页面、
+`rpcd` 后端、菜单/ACL、`init.d`、`uci` 一并备份到 `/usr/lib/airsim/backup-<版本>/`，
+再停服务 → 铺 `files/` 整棵树 → 起服务 → 重启 `rpcd`/`uhttpd`。
 
-回滚：把备份目录里的 `airsim-mu300d`、`airsim-agent`、`VERSION` 拷回 `/usr/lib/airsim/` 后
-`/etc/init.d/airsim restart`。
+回滚：`sh uninstall.sh`（同一目录里），按备份逐个还原、把本包新加的文件删干净。
+
+**装完请开新标签页重登 LuCI**——`rpcd` 重启会把旧会话踢掉，旧标签页会一直卡"加载视图中…"。
 
 ### 3-3 配对
 
 LuCI → 服务 → AirSIM（或 `http://192.168.77.1/cgi-bin/luci/admin/services/airsim`）取配对码，
 iPhone 端 AirSIM 添加设备时选 **`AirSIM-F50-…`**。
+
+## 3-4 这一包新增了什么
+
+| 功能 | 在哪 | 说明 |
+|---|---|---|
+| 页面换 M8 皮 | 概览 / 连接 / 来电转发 / 短信 / 维护 / 外观与设置 | 全部走同一套 `ui.css` + `ui.js`，与 M8 共用 |
+| 备份与恢复 | 维护页 | 按本机硬件指纹（eMMC cid + DT 序列号）标记，别人的备份直接拒；tar 白名单，日志/音频/短信正文不进包 |
+| 来电转发 | 来电转发页 + `airsim-call-forward` 自启 | 来电/接通/挂断/漏接推 Webhook，6 个预设（Bark / PushPlus / ServerChan / Telegram / 企微 / 钉钉） |
+| 配对管理 | 概览页 | 列出已配对客户端、可单独删除（`airsim-pair`，走 `vowlan-clients.json`） |
+| 号码补 `+86` | 概览页 / `/api/status` | `AT+CNUM` 出来的 `8613…`、`0086…` 统一成 `+8613…`（E.164），走 `overlay/f50/patches/` 补丁层，`src/` 保持上游原样 |
+| 蓝牙开关 | 外观与设置页 | 只管开关，关了重启仍为关（`/usr/sbin/f50-bt-switch.sh`） |
+
+### 双卡逻辑：代码全留，F50 上隐藏
+
+判据只有一句：**`sms_sims` 返回的 `sims` 数组长度 > 1 才显示卡选择**。
+
+- 概览页「拨出卡」、短信页「查看卡 / 发送卡」在单卡时整块 `display:none`，`card` 参数照传
+- `call-forward` 里 `SLOTS`、`slot_label`（卡1/卡2）、`INFO_SELF_0/1`、每槽一条 `AT+CLCC` 全保留；
+  单卡写 `SLOTS="0"`，注释里写明"双卡机型改回 `0 1` 即可"
+- 换双卡设备时不用改前端，后端按槽出数组，页面自动长出选择器
+
+### 打新包
+
+```sh
+sh scripts/bump-version.sh                    # 序号 +1
+sh scripts/6.18/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.tar.gz
+```
 
 ## 4. 已知限制与坑
 
@@ -137,7 +166,8 @@ iPhone 端 AirSIM 添加设备时选 **`AirSIM-F50-…`**。
 - `6.18` 是内核线标识；5.4 线永久冻结在 `0.1.0.3-r22-f50`
 
 `scripts/bump-version.sh` 负责 +1 并同步 `VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`，
-遇到非 6.18 线直接拒绝。
+遇到非 6.18 线直接拒绝。`scripts/6.18/make-package.sh` 负责把二进制、`overlay/f50/files`
+整棵树、音频抢占脚本和安装/卸载脚本打成一个 `dist/*.tar.gz`。
 
 ## 6. 想让 AI 帮你重写或调试
 
