@@ -195,3 +195,56 @@ F50 插件的更新检查读的是**上游作者的仓库**（`kai-wu-cortex/air
 - **需要重编 Go 的**：`+86` 号码补全（`module-agent/sms.go`）、`pair_clients`/`pair_remove` 的原生接口（`main.go`/`gateway.go`）。按约定，等这几项 UI/脚本都落地了再一次性编译。
 - 来电转发**只做了链路和页面**，没配真实 webhook 发包验证（需要你给一个地址，或先用页面「测试消息」走一遍）。
 - `manage.js` 未删，只是不挂菜单。
+
+## 十、本轮落地记录（2026-11-10：短信三连 + 配对列表/删除 + 补丁体检）
+
+对应包 `0.1.0.8-r23-6.18`（AGENT-VERSION `0.4.7-mu300.0.1.0.8-r23-6.18`，Release id `439463805`）。
+**M8 侧注意：下面 10.1/10.2/10.3 三条是「上游代码与 F50 厂商环境契约不一致」，M8 用的是同一份上游 Go，只要目标设备的 `mu300-sms` 也是位置参数版，就必须同样处理。**
+
+### 10.1 短信发送：参数与回执双坑（第三枚补丁）
+
+`overlay/f50/patches/AirSIM-mu300-sms-send.patch`（只动 `AirSIM/module/module-agent/mu300_sms.go`）：
+
+1. **参数**：上游调 `/opt/mu300/bin/mu300-sms send --stdin`（号码\n正文走标准输入）。F50 厂商脚本**整份没有 `--stdin`**，只认 `send NUM TEXT`，喂 `--stdin` 被当号码 → `die "send needs a phone number and a text"`。补丁加 `mu300SMSSendAcceptsStdin()`：读脚本内容判断有无 `--stdin`，有则走上游老路，无则用位置参数 + `strings.Cut` 拆号码/正文。
+2. **回执**：厂商成功打两行——
+
+```
+submitting to 10000 (18 octets, 4 UCS-2 units)
+sent (2)
+```
+
+   上游正则 `^sent \(reference [0-9]+\)$` 两个条件都不满足（行首锚 + `reference ` 字样）。补丁改为 `(?m)^sent \((?:reference )?[0-9]+\)$`。
+3. **不做“失败换姿势重试”**：提交失败时重试可能让短信已发出去却再扣一次，宁可报未确认。
+
+**判定方法（跨端通用）**：`grep -c -- '--stdin' /opt/mu300/bin/mu300-sms`，0 就是位置参数版。
+
+### 10.2 短信读取：上游写死路径 vs 厂商真实池
+
+上游 `mu300_sms.go` 把池写死成 `/etc/mu300/sms-pool/msg`，F50 厂商实际在 `/etc/mu300/sms`（`/opt/mu300/lib/sms-pool.sh` 归一化）。原症状：`/api/sms` 恒 503 `native SMS inbox unavailable`。
+F50 做法：不碰 Go，新增 `overlay/f50/files/etc/init.d/airsim-sms-pool-link`（`START=97`，幂等建软链 `/etc/mu300/sms-pool -> sms`），`install.sh` 里 enable+start。agent 每 3 秒扫池，链路一起来就恢复。
+**M8 若上游已改对路径则无需此步；先 `ls` 确认哪条存在再决定。**
+
+### 10.3 “来源未知” → 每条补 `sim`
+
+`rpcd/airsim-sms` 的 `forward_sms_list()` 原样重建列表时丢了槽位，页面 `sms.js` 判 `m.sim || card?'SIM1':'来源未知'` 就落到兜底。
+改法：`_simname="SIM$(( ${_used:-0} + 1 ))"`，每条 `json_add_string sim "$_simname"`。单卡设备恒 `SIM1`，双卡设备按 `sim_used` 自动分开，**不需要为双卡再写一套逻辑**。
+
+### 10.4 已配对客户端：列表 + 删除
+
+- **列表**：上游 Go 没有 `/pair/clients`（`404 page not found`），rpcd 层又看不到“哪把密钥在鉴权”，所以只能改 Go——`overlay/f50/patches/AirSIM-pair-clients.patch`：`gateway.go` 加 `lastUsed map[string]int64`（`authenticate()` 里 HMAC 比对成功处记时间）、`ClientInfo`/`fingerprintOf`/`Clients()`，在线窗口 120 秒；`main.go` 加 `/pair/clients` 路由。`rpcd/airsim-pair` 的 `list_clients()` 优先 `curl $AGENT/pair/clients`，命中 `"clients"` 直接用，否则退回读 `vowlan-clients.json`（老二进制不炸）。
+- **删除**：`vowlan-clients.json` 是 Go 写的**一整行 JSON 数组**，`pair_remove` 原实现按“一行一把密钥”切 → 序号 2 永远删不掉、序号 1 会把整行抹掉。改成 `jsonfilter -e '@[*]'` 先拆成一行一把、按序号过滤、再拼回一整行数组原子替换，之后重启 `airsim` 让网关重载密钥。
+  **通用教训**：这个文件形态决定“按行处理”一定错，任何端要改它都得先按数组元素拆。
+
+### 10.5 补丁治理层（F50 已上，M8 建议照抄）
+
+- `overlay/f50/patches/manifest.tsv`：四列 = 补丁文件 / 上游仓库（空=无对照）/ 已合并标志串 / 锚点串（`;` 分隔）。
+- `scripts/check-patches.py`：① 干净 `src/` 副本上 `patch --dry-run` 判干净/打不上；② 拉上游最新文件比对（**上游没有 `plugin/` 这层前缀，脚本自动去前缀**），命中已合并标志串 → “已合并，删补丁”；锚点缺失 → “锚点缺失”。
+- 已挂进 `overlay/f50/build.sh`（rsync 之后立刻跑，只打表不阻断；**真正打补丁的 `apply.py` 打不上就退出，让构建失败**）。
+- 规则见 `overlay/f50/patches/README.md`：不许 `--fuzz`/`-l`/`--forward` 绕过；冲突由人改补丁；**上游自己合并了同功能，我们也合并（删我们的补丁跟随上游）**；补丁只做加法。
+
+### 10.6 本轮踩到的坑（新增）
+
+1. **跨网短号发不出去 ≠ 代码 bug**：联通卡（`AT+COPS?` → `46001`）发 `10000`（电信客服）必报 `+CMS ERROR: 313`，同一份代码发 `10010` 一次成功。判断口径：手工绕过 agent 直接跑厂商脚本，同样报错就是网络/运营商侧。
+2. **失败后 120 秒禁重发**是上游保护（`previous SMS outcome unknown`），实测点完失败立刻再点会被拦，等两分钟即可；`send.json` 里 `sent:false` 就是未确认状态。
+3. **`/api/sms` 短暂回 `[]`**：agent 重启后要等一轮 3 秒扫描，`analyze` 前先 `sleep 8` 再看，别当回归。
+4. **二进制换了 md5 必须核对**：设备侧 `md5sum /usr/lib/airsim/airsim-agent` 不变化说明根本没换上去（`Text file busy` 会静默留在旧文件）。本轮旧 `7c53591a…` → 新 `c203188e91613c1cc191a9c58f9a1b6e`。
