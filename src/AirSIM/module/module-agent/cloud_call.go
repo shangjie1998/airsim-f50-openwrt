@@ -22,6 +22,7 @@ import (
 )
 
 type cloudCallDescriptor struct {
+	AudioBuffer    *cloudAudioBufferSnapshot
 	LocalCallID    string // MU300 UUID from the authenticated dial receipt, never the Relay ID
 	CallID         string
 	CallUUID       string
@@ -48,16 +49,20 @@ func cloudMediaURL(relayURL, callUUID, callSecret string) (string, error) {
 }
 
 type cloudCallAction struct {
-	EarlyMediaVersion    int    `json:"early_media_version,omitempty"`
-	EarlyMediaNegotiated bool   `json:"-"`
-	Action               string `json:"action"`
-	CallID               string `json:"call_id"`
-	CallUUID             string `json:"call_uuid,omitempty"`
-	Generation           uint64 `json:"generation,omitempty"`
-	CommandID            string `json:"command_id,omitempty"`
-	TraceID              string `json:"trace_id,omitempty"`
-	Owner                string `json:"owner"`
-	MediaProtocol        string `json:"media_protocol,omitempty"`
+	AudioBufferVersion   json.RawMessage `json:"audio_buffer_version,omitempty"`
+	AudioBufferMode      json.RawMessage `json:"audio_buffer_mode,omitempty"`
+	AudioBufferMS        json.RawMessage `json:"audio_buffer_ms,omitempty"`
+	AudioBufferIdentity  bool            `json:"-"`
+	EarlyMediaVersion    int             `json:"early_media_version,omitempty"`
+	EarlyMediaNegotiated bool            `json:"-"`
+	Action               string          `json:"action"`
+	CallID               string          `json:"call_id"`
+	CallUUID             string          `json:"call_uuid,omitempty"`
+	Generation           uint64          `json:"generation,omitempty"`
+	CommandID            string          `json:"command_id,omitempty"`
+	TraceID              string          `json:"trace_id,omitempty"`
+	Owner                string          `json:"owner"`
+	MediaProtocol        string          `json:"media_protocol,omitempty"`
 }
 
 func decodeCloudCallAction(data []byte, expectedCallID string) (cloudCallAction, error) {
@@ -84,6 +89,7 @@ func decodeCloudCallActionForDescriptor(data []byte, descriptor cloudCallDescrip
 		descriptor.Direction == "outgoing" && descriptor.CallUUID != "" &&
 		value.CallUUID != "" && strings.EqualFold(value.CallUUID, descriptor.CallUUID) &&
 		value.Generation > 0 && value.Generation == descriptor.Generation
+	value.AudioBufferIdentity = descriptor.CallUUID != "" && value.CallUUID != "" && strings.EqualFold(value.CallUUID, descriptor.CallUUID) && value.Generation > 0 && value.Generation == descriptor.Generation
 	expectedGeneration := descriptor.Generation
 	if expectedGeneration == 0 {
 		expectedGeneration = 1
@@ -182,6 +188,13 @@ func (a *agent) startCloudCall(descriptor cloudCallDescriptor) {
 		descriptor.StartedAt = time.Now()
 	}
 	a.cloudCallMu.Lock()
+	// A restarted transport for the same identity keeps its first answer policy.
+	if current := a.cloudCallCurrent; current != nil && sameCloudAudioIdentity(*current, descriptor) {
+		descriptor.AudioBuffer = current.AudioBuffer
+	}
+	if descriptor.AudioBuffer == nil {
+		descriptor.AudioBuffer = &cloudAudioBufferSnapshot{}
+	}
 	if a.cloudCallCancel != nil {
 		a.cloudCallCancel()
 	}
@@ -219,6 +232,9 @@ func (a *agent) retireCloudCallDescriptor(descriptor cloudCallDescriptor) {
 }
 
 func (a *agent) runCloudCall(ctx context.Context, descriptor cloudCallDescriptor) {
+	if descriptor.AudioBuffer == nil {
+		descriptor.AudioBuffer = &cloudAudioBufferSnapshot{}
+	}
 	descriptor.MediaTransport = resolveCloudMediaTransport(
 		descriptor.MediaTransport,
 		[]string{cloudMediaTransportLegacyPCM},
@@ -324,6 +340,8 @@ type cloudPCMBridge struct {
 	health           *cloudMediaHealthTracker
 	mediaProtocol    string
 	downlinkSequence uint32
+	bufferPolicy     cloudAudioBufferPolicy
+	closed           bool
 	uplinkBuffer     cloudPCMSpeechBuffer
 	uplinkFramer     cloudPCMFramer
 }
@@ -403,17 +421,25 @@ func (bridge *cloudPCMBridge) frameDownlink(payload []byte, timestamp time.Time)
 
 func (bridge *cloudPCMBridge) set(connection net.Conn) {
 	bridge.mu.Lock()
+	if bridge.closed {
+		bridge.mu.Unlock()
+		connection.Close()
+		return
+	}
 	if bridge.conn != nil {
 		_ = bridge.conn.Close()
 	}
 	bridge.conn = connection
-	bridge.uplinkBuffer = cloudPCMSpeechBuffer{}
+	bridge.uplinkBuffer = cloudPCMSpeechBuffer{policy: bridge.bufferPolicy}
 	bridge.uplinkFramer = cloudPCMFramer{}
 	bridge.mu.Unlock()
 }
 
 func (bridge *cloudPCMBridge) close() {
 	bridge.mu.Lock()
+	bridge.closed = true
+	bridge.uplinkBuffer = cloudPCMSpeechBuffer{}
+	bridge.uplinkFramer = cloudPCMFramer{}
 	if bridge.conn != nil {
 		_ = bridge.conn.Close()
 	}
@@ -424,6 +450,8 @@ func (bridge *cloudPCMBridge) close() {
 func (bridge *cloudPCMBridge) clear(connection net.Conn) {
 	bridge.mu.Lock()
 	if bridge.conn == connection {
+		bridge.uplinkBuffer = cloudPCMSpeechBuffer{policy: bridge.bufferPolicy}
+		bridge.uplinkFramer = cloudPCMFramer{}
 		_ = bridge.conn.Close()
 		bridge.conn = nil
 	}
@@ -438,6 +466,9 @@ func (a *agent) serveCloudCall(
 ) bool {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if descriptor.AudioBuffer == nil {
+		descriptor.AudioBuffer = &cloudAudioBufferSnapshot{}
+	}
 	bridge := &cloudPCMBridge{health: health}
 	defer bridge.close()
 	playbackContext, stopPlayback := context.WithCancel(ctx)
@@ -509,6 +540,10 @@ func (a *agent) serveCloudCall(
 			a.debug.add("cloud-call-control", "received", "收到公网通话控制", "", fields)
 			switch control.Action {
 			case "answer":
+				if a.profile.Name == "mu300-openwrt" && (ctx.Err() != nil || !a.cloudCallDescriptorAlive(descriptor)) {
+					_ = socket.WriteText(cloudStatusForAction("action_error", "通话已结束或被替换", descriptor, control))
+					continue
+				}
 				startMedia := false
 				if !mediaStarted {
 					bridge.setMediaProtocol(control.MediaProtocol)
@@ -526,6 +561,9 @@ func (a *agent) serveCloudCall(
 						a.voice.hostEnabled = true
 						a.voice.mu.Unlock()
 					}
+				}
+				if startMedia && a.profile.Name == "mu300-openwrt" {
+					bridge.configureAudioBuffer(descriptor.AudioBuffer.accept(control))
 				}
 				health.markAnswerAcknowledged(time.Now())
 				_ = socket.WriteText(cloudStatusForAction(cloudPCMMilestoneAnswerOK, "", descriptor, control))

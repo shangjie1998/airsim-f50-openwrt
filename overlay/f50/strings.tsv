@@ -1,0 +1,9 @@
+# 每行一条：旧串<TAB>新串。只作用于 src/plugin 下的 .go（排除 vendor 与 _test.go）
+AirSIM for MU300	AirSIM for F50
+AirSIM-MU300	AirSIM-F50
+AirSIM MU300	AirSIM F50
+MU300 sound card	F50 sound card
+MU300 call PCM	F50 call PCM
+MU300 management policy	F50 management policy
+MU300 plugin ready	F50 plugin ready
+model=MU300	model=F50

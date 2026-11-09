@@ -79,7 +79,7 @@ set --
 docker run --rm -v "$HERE:/work" -v "$KEY:/signing/key.pem:ro" node:22-alpine apk mkpkg "$@" \
  --compat 3.0.0_pre3 --compression deflate:9 --xattrs=no --sign-key /signing/key.pem \
  --info name:luci-app-airsim --info "version:$VERSION" --info arch:aarch64_generic \
- --info 'description:AirSIM for F50' --info "license:$LICENSES" \
+ --info 'description:AirSIM for MU300' --info "license:$LICENSES" \
  --info 'depends:luci-base rpcd uclient-fetch ca-bundle' \
  --script "post-install:$POST_INSTALL" \
  --script "post-upgrade:$POST_INSTALL" \
