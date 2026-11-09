@@ -16,7 +16,8 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CUR=$(cat "$HERE/VERSION")
 
 KREL=$(printf '%s' "$CUR" | sed -n 's/^0\.1\.0\.[0-9][0-9]*-r[0-9][0-9]*-\(.*\)$/\1/p')
-REL=$(printf '%s' "$CUR" | sed -n 's/^0\.1\.0\.[0-9][0-9]*-\(r[0-9][0-9]\)-\..*$/\1/p')
+REL=$(printf '%s' "$CUR" | sed -n 's/^0\.1\.0\.[0-9][0-9]*-\(r[0-9][0-9]\)-[^0-9].*$/\1/p')
+[ -n "$REL" ] || REL=$(printf '%s' "$CUR" | sed -n 's/^0\.1\.0\.[0-9][0-9]*-\(r[0-9][0-9]\)-.*$/\1/p')
 [ -n "$KREL" ] && [ -n "$REL" ] || { echo "VERSION '$CUR' 不是 0.1.0.<n>-r<nn>-<内核线> 形式" >&2; exit 1; }
 [ "$KREL" = "6.18" ] || { echo "VERSION '$CUR' 属于已冻结的 5.4 线，不再加号" >&2; exit 1; }
 
