@@ -160,6 +160,11 @@ iPhone 端 AirSIM 添加设备时选 **`AirSIM-F50-…`**。
 
 两台同 SoC、两套参数，**包和文档不可互换**。逐项对照见 [docs/F50-vs-M8.md](docs/F50-vs-M8.md)。
 
+要做"一端开发、两端兼容"的自定义需求同步，照 [docs/SYNC-M8-F50.md](docs/SYNC-M8-F50.md) 走：
+**AI 先判可行（S/R/D 三档）→ 人点头 → 才落地 → 两端各自真机验**。
+先跑 `python3 scripts/sync-m8.py` 看本次要动的东西落在哪一档。
+云端心跳这类链路问题**不跨端照搬**——M8 有症状不代表 F50 有。
+
 ## 9. 上游与致谢
 
 本仓库是**独立适配工程**，不是 [kai-wu-cortex/airsim-mu300](https://github.com/kai-wu-cortex/airsim-mu300) 的官方发布。
