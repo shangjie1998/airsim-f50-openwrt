@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+# Retry taking the DSP's reserved pages after the reserve step had its one shot.
+#
+# audio_reserve.ko (upstream audio extension) grabs 2176 pages of a fixed physical
+# window once, at S10. On this 6.18 kernel it has no way to migrate a page somebody
+# else already owns (contig() is compiled out for >= 5.10, CONFIG_COMPACTION=n),
+# so any page the allocator put there during boot stays missing forever and the
+# whole audio chain (sound card -> prepare -> agent) silently refuses to start.
+#
+# This script is deliberately SEPARATE from /etc/init.d/airsim-audio-reserve so an
+# upstream audio-extension update never overwrites it. It runs right after that
+# script (S11 > S10) and polls: drop the page cache, poke retry, look again.
+# Pages that were only page cache / transient allocations do come back; pages
+# really owned by slab or an anonymous mapping never do -- that boot needs a
+# reboot, which is logged loudly but NOT done from here (no reboot loops).
+#
+# Tunables (all optional, environment or UCI):
+#   F50_CLAIM_ROUNDS (default 20)   how many retries
+#   F50_CLAIM_SLEEP  (default 3)    seconds between retries
+
+START=11
+STOP=8
+
+MISSING=/sys/module/audio_reserve/parameters/missing
+RETRY=/sys/module/audio_reserve/parameters/retry
+LOG=/tmp/airsim-audio-claim.log
+
+boot() {
+	[ -r "$MISSING" ] || return 0
+	rounds="${F50_CLAIM_ROUNDS:-20}"
+	sleep_for="${F50_CLAIM_SLEEP:-3}"
+
+	m="$(cat "$MISSING" 2>/dev/null)"
+	[ "$m" = 0 ] && return 0
+
+	i=0
+	while [ "$i" -lt "$rounds" ]; do
+		i=$((i + 1))
+		sync
+		# 1 = page cache, 2 = dentries+inodes, 3 = both
+		echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+		# retry writes back -EBUSY while pages are still missing; that is expected
+		echo 1 > "$RETRY" 2>/dev/null
+		m="$(cat "$MISSING" 2>/dev/null)"
+		echo "$(date '+%H:%M:%S') round $i missing=$m" >> "$LOG"
+		[ "$m" = 0 ] && break
+		sleep "$sleep_for"
+	done
+
+	if [ "$m" = 0 ]; then
+		echo "audio pages claimed after $i round(s)" >> "$LOG"
+		logger -t airsim-audio-claim "claimed after $i round(s)"
+	else
+		echo "audio pages STILL missing=$m after $i round(s): this boot needs a reboot" >> "$LOG"
+		logger -t airsim-audio-claim "missing=$m after $i rounds; reboot required"
+		dmesg | grep -i 'audio_reserve:.*not taken' | tail -1 >> "$LOG"
+	fi
+	# intentionally no reboot from here: boot loops are worse than one bad boot
+	true
+}
+
+start() { boot; }
