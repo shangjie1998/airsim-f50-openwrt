@@ -93,7 +93,7 @@ health 接口的 `device_name`/`model`、`/status` 的 `product=AirSIM for F50`�
 > 判据：`sipa_dele_wait` 在不在，直接决定这个补丁要不要打。
 > `ls /sys/bus/platform/drivers/sipa_delegate/soc:ipa-apb:sipa-dele/`
 
-## 5. 客户端断网（本仓库最值钱的一条，`scripts/修断网.sh`）
+## 5. 客户端断网（**5.4 时代的问题**，脚本已归档 `archive/5.4-pkg/修断网.sh`，6.18 线不再需要）
 
 **症状**：设备自身能上网，连热点的手机/电脑显示"无互联网"，DHCP 正常、DNS 正常、桥接正常。
 
@@ -166,7 +166,7 @@ VERSIONING.md                版本编号规则（0.1.0.N-r22-f50，每打包一
 docs/5.4/F50-通话打通.md          通话验收与调试全过程
 docs/5.4/F50-数据联网修复.md       拨号修复（sipa）与客户端断网（flowtable）两条完整链路
 docs/5.4/F50_BUILD_AND_ADAPT.md  从源码重建安装包、换内核/换硬件的适配口径
-device-patches/              从设备取回的两处运行库补丁（含原件与 .diff，可直接重放）
+archive/5.4-pkg/device-patches/  5.4 时代从设备取回的三处运行库补丁（含原件与 .diff；6.18 不需要）
 scripts/                     设备侧补丁脚本（重放用）
 src/plugin/                  上游 r22 插件源码（含 vendor、packaging、patches）
 src/AirSIM/                  AirSIM 客户端/Agent 源码（固定提交）

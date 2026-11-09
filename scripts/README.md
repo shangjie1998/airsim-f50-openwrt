@@ -16,7 +16,7 @@
 
 ## 根目录（与内核无关）
 
-- `修断网.sh` —— 防火墙/flowtable 断网自检与修复（`--check` / `--fix`）
+- 修断网脚本已随 5.4 线归档：见 `archive/5.4-pkg/修断网.sh`（6.18 线不需要，`flow_offloading=0` 已在设备落盘）
 - `通话实时监控.sh` —— 盯 `/status` 的通话帧数
 - `mu300-at-补stdin.sh` —— AT 通道补 stdin
 - `bump-version.sh` —— 版本号三处同步（`VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`），遇非 6.18 线直接拒绝
