@@ -9,7 +9,7 @@ agent_version=0.4.7-mu300.0.1.0.6-r23-6.18
 rebrand=只改显示文案(AirSIM F50)；agent_kind 仍是 mu300
 kernel_required=6.18.60
 kernel_note=依赖自编音频模块 /mnt/mu300-disk/extra/airsim-audio/modules/6.18.60/
-verified=插件与双向通话 2026-11-09 已真机验收（downlink/uplink 帧数正常、事件链完整）；本包新增的 audio-retry 脚本尚未在本机验过（当前这台 boot 音频未起，等重启后验）
+verified=插件与双向通话 2026-11-09 已真机验收（downlink/uplink 帧数正常、事件链完整）；本包装机 2026-11-09 17:55 已验：missing=0、声卡 card1 sprdphone-sc2730、agent 版本 0.4.7-mu300.0.1.0.6-r23-6.18、devices hw:1,16/hw:1,53、audio_available=true
 added=audio/airsim-audio-retry.init -> /etc/init.d/airsim-audio-retry（S11 轮询抢占 DSP 保留页）
 scope=脚本层修复，不改内核、不改启动镜像；上游音频扩展更新不会覆盖它
 kano_limit=本缺陷源于 kano 的 6.18 内核配置（CONFIG_COMPACTION=n、CONFIG_CONTIG_ALLOC 未开，audio_reserve 只做一次性抢页且无迁移能力）。内核开了迁移、或用设备树预留该段的别的包不需要这个脚本，装了也只是每轮读完 missing=0 直接返回
