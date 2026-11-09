@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://kaandikec.com/mu300-linux/sitemap.xml
