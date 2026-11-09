@@ -1,0 +1,5 @@
+kbuild/mu300-linux/
+kbuild/mu300-audio/
+kbuild/audio-6.18.60/*.ko
+kbuild/audio-6.18.60/ko.tar.gz
+kbuild/audio-6.18.60/pkg/
