@@ -14,6 +14,9 @@ AGENTVER=$(cat "$REPO/AGENT-VERSION" 2>/dev/null || echo "0.4.7-mu300.$VER")
 
 rm -rf "$BUILD" && mkdir -p "$BUILD"
 rsync -a "$REPO/src/" "$BUILD/"
+# 补丁体检：能不能干净打上、上游是不是已经自己做了。打不上由 apply.py 硬失败，
+# 这里提前把表打出来，方便一眼看到哪个补丁要人修。
+python3 "$REPO/scripts/check-patches.py" || echo "(补丁体检有提示，见上；不影响继续构建)" >&2
 python3 "$HERE/apply.py" "$BUILD"
 
 export GOROOT="$SDK"; export PATH="$SDK/bin:$PATH"; export GOFLAGS=-mod=vendor

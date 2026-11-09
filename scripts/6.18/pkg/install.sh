@@ -68,6 +68,10 @@ chmod 755 /usr/lib/airsim/call-forward /etc/init.d/airsim-call-forward 2>/dev/nu
 
 # --- 开机自启 ---
 /etc/init.d/airsim-call-forward enable >/dev/null 2>&1 || true
+# 短信池路径对齐：厂商池在 /etc/mu300/sms，上游 agent 写死读 /etc/mu300/sms-pool/msg，
+# 不接上的话 agent 一直报「native SMS inbox unavailable」，手机端读不到短信。
+/etc/init.d/airsim-sms-pool-link enable >/dev/null 2>&1 || true
+/etc/init.d/airsim-sms-pool-link start >/dev/null 2>&1 || true
 
 # 音频保留页抢占重试（独立 rc 脚本，不覆盖上游的 airsim-audio-reserve）。
 # kano 那套 6.18 内核关了 COMPACTION / CONTIG_ALLOC，audio_reserve 只会「一次性」抢页，

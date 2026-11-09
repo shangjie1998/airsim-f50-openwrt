@@ -22,7 +22,16 @@ call_active() {
 		| jsonfilter -e '@.call_active' 2>/dev/null | grep -q true
 }
 
+# 优先问 Go（新二进制才有 /pair/clients，能给逐客户端 online / last_used）；
+# 老二进制上这条会 404，退回读 vowlan-clients.json，只报序号 + 尾号。
 list_clients() {
+	_remote=$(curl -s -m 4 "$AGENT/pair/clients" 2>/dev/null)
+	case "$_remote" in
+	*'"clients"'*)
+		printf '%s\n' "$_remote"
+		return
+		;;
+	esac
 	if [ ! -f "$CLIENTS" ]; then
 		printf '%s\n' '{"clients":[]}'
 		return
@@ -66,33 +75,40 @@ remove_clients() {
 		printf '%s\n' '{"ok":false,"error":"没有配对文件"}'
 		return
 	fi
-
-	tmp="$CLIENTS.new.$$"
-	total=$(grep -c . "$CLIENTS" 2>/dev/null || echo 0)
+	# vowlan-clients.json 是 Go 写的一整行 JSON 数组，不能按行当"一条一把密钥"切，
+	# 否则序号 2 永远删不掉、序号 1 会把整行抹掉。先按数组元素拆成一行一把。
+	keys=$(mktemp /tmp/airsim-pair-k.XXXXXX 2>/dev/null || echo /tmp/airsim-pair-k.$$)
+	keep=$(mktemp /tmp/airsim-pair-keep.XXXXXX 2>/dev/null || echo /tmp/airsim-pair-keep.$$)
+	jsonfilter -e '@[*]' < "$CLIENTS" > "$keys" 2>/dev/null
+	total=$(grep -c . "$keys" 2>/dev/null || echo 0)
 	awk -v drop="$indexes" '
 		BEGIN { n = split(drop, a, ","); for (i = 1; i <= n; i++) d[a[i]] = 1 }
-		/^$/ { next }
+		/^[[:space:]]*$/ { next }
 		{ if (!(NR in d)) print }
-	' "$CLIENTS" > "$tmp" 2>/dev/null
-	left=$(grep -c . "$tmp" 2>/dev/null || echo 0)
+	' "$keys" > "$keep" 2>/dev/null
+	left=$(grep -c . "$keep" 2>/dev/null || echo 0)
 	removed=$((total - left))
-
 	if [ "$removed" -eq 0 ]; then
-		rm -f "$tmp"
+		rm -f "$keys" "$keep"
 		printf '%s\n' '{"ok":false,"error":"选中的条目不在列表里，未做改动"}'
 		return
 	fi
-
-	json_init
-	json_add_array
-	while IFS= read -r key; do
-		[ -n "$key" ] && json_add_string '' "$key"
-	done < "$tmp"
-	json_close_array
-	json_dump > "$CLIENTS"
+	# 重新拼回一整行数组，原子替换（Go 侧按整文件 json.Unmarshal 读，格式不变最稳）
+	tmp="$CLIENTS.new.$$"
+	{
+		printf '['
+		first=1
+		while IFS= read -r key; do
+			[ -n "$key" ] || continue
+			[ "$first" -eq 1 ] || printf ','
+			first=0
+			printf '"%s"' "$key"
+		done < "$keep"
+		printf ']\n'
+	} > "$tmp"
+	mv -f "$tmp" "$CLIENTS"
 	chmod 600 "$CLIENTS" 2>/dev/null
-	rm -f "$tmp"
-
+	rm -f "$keys" "$keep"
 	/etc/init.d/airsim restart >/dev/null 2>&1
 	sleep 1
 	json_init

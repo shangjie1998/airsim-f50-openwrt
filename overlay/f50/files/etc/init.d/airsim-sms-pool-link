@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+# F50 短信池路径对齐（不改 Go、不重编）
+#
+# 厂商短信守护进程 mu300-smsd 的池在 /etc/mu300/sms（/opt/mu300/lib/sms-pool.sh
+# 会把 ucis 里的 sms_pool 归一化成这个路径），池里消息是 /etc/mu300/sms/msg/000004。
+# 上游 agent 的读法写死在 /etc/mu300/sms-pool/msg，在这台机器上根本不存在，
+# 于是它一直置 smsError，/api/sms 回 503「native SMS inbox unavailable」——
+# 手机端读不到短信就是这个原因。
+#
+# 这里起一个软链把两边接上：agent 每 3 秒扫一次池，接上后自己就恢复，不用重启。
+START=97
+STOP=10
+
+start() {
+	[ -d /etc/mu300/sms ] || return 0
+	[ -e /etc/mu300/sms-pool ] && return 0
+	ln -s sms /etc/mu300/sms-pool 2>/dev/null || true
+}
+
+stop() {
+	:
+}

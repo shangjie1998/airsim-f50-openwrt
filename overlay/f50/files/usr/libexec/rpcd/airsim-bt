@@ -34,7 +34,12 @@ bt_state() {
 		json_add_boolean attached 0
 	fi
 
+	# 这个 6.18 内核的 /sys/class/bluetooth/hci0 下没有 address 节点，
+	# 地址只能从 hciconfig 的 BD Address 里取；两处都试一次。
 	addr=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
+	if [ -z "$addr" ] && command -v hciconfig >/dev/null 2>&1; then
+		addr=$(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: *\([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)
+	fi
 	[ -n "$addr" ] && json_add_string address "$addr"
 
 	up=0
@@ -84,7 +89,12 @@ bt_set() {
 	json_add_string adapter 'hci0'
 	if [ "$want" = on ]; then json_add_boolean enabled 1; else json_add_boolean enabled 0; fi
 	if [ -d "$HCI" ]; then json_add_boolean attached 1; else json_add_boolean attached 0; fi
+	# 这个 6.18 内核的 /sys/class/bluetooth/hci0 下没有 address 节点，
+	# 地址只能从 hciconfig 的 BD Address 里取；两处都试一次。
 	addr=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
+	if [ -z "$addr" ] && command -v hciconfig >/dev/null 2>&1; then
+		addr=$(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: *\([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)
+	fi
 	[ -n "$addr" ] && json_add_string address "$addr"
 	up=0
 	if command -v hciconfig >/dev/null 2>&1; then

@@ -1,0 +1,52 @@
+--- a/AirSIM/module/module-agent/mu300_sms.go
++++ b/AirSIM/module/module-agent/mu300_sms.go
+@@ -35,7 +35,11 @@
+ 
+ var mu300PoolID = regexp.MustCompile(`^[0-9]{1,12}$`)
+ var mu300SMSPhone = regexp.MustCompile(`^\+?[0-9]{1,20}$`)
+-var mu300SentReply = regexp.MustCompile(`^sent \(reference [0-9]+\)$`)
++// 成功回执两家不一样：上游 MU300 那版打 "sent (reference N)"，
++// F50 厂商脚本打 "sent (N)"（N 就是从 +CMGS: 里抓的参考号），
++// 而且它前面还有一行 "submitting to <号码> (<n> octets, <n> UCS-2 units)"。
++// 所以要按行匹配（(?m)），不能用只认行首的锚。
++var mu300SentReply = regexp.MustCompile(`(?m)^sent \((?:reference )?[0-9]+\)$`)
+ 
+ func newMU300SMSBackend(dataDir string) *mu300SMSBackend {
+ 	return &mu300SMSBackend{pool: "/etc/mu300/sms-pool/msg", state: filepath.Join(dataDir, "mu300-sms"), runSend: runMU300SMSSend}
+@@ -329,11 +333,32 @@
+ 	Sent        bool   `json:"sent"`
+ }
+ 
+-func runMU300SMSSend(ctx context.Context, input string) (string, error) {
+-	cmd := exec.CommandContext(ctx, "/opt/mu300/bin/mu300-sms", "send", "--stdin")
+-	cmd.Stdin = strings.NewReader(input)
++// mu300SMSSendAcceptsStdin 探一下厂商脚本吃哪种参数。
++// 上游 MU300 的 mu300-sms 认 `send --stdin`（号码\n正文走标准输入）；
++// F50 这台是 Unisoc 厂商脚本，只认 `send NUM TEXT` 两个位置参数，
++// 喂它 --stdin 会被当成号码，直接 die "send needs a phone number and a text"。
++// 只看脚本内容判断，不做"先用一种、失败再换一种"——提交失败时重试可能二次扣费。
++func mu300SMSSendAcceptsStdin() bool {
++	b, err := os.ReadFile("/opt/mu300/bin/mu300-sms")
++	if err != nil {
++		return true // 读不到就按上游老路子走
++	}
++	return strings.Contains(string(b), "--stdin")
++}
++
++func runMU300SMSSend(ctx context.Context, input string) (string, error) {
+ 	// Never surface native stdout/stderr: it can contain a number or message.
+-	out, err := cmd.Output()
++	if mu300SMSSendAcceptsStdin() {
++		cmd := exec.CommandContext(ctx, "/opt/mu300/bin/mu300-sms", "send", "--stdin")
++		cmd.Stdin = strings.NewReader(input)
++		out, err := cmd.Output()
++		return string(out), err
++	}
++	phone, text, ok := strings.Cut(input, "\n")
++	if !ok || phone == "" {
++		return "", errors.New("SMS send input is not number/text")
++	}
++	out, err := exec.CommandContext(ctx, "/opt/mu300/bin/mu300-sms", "send", phone, text).Output()
+ 	return string(out), err
+ }
+ 

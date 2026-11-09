@@ -240,7 +240,8 @@ return view.extend({
    try {
     var result = await markAllRead();
     if (!result || result.error) throw new Error((result && result.error) || '标记失败');
-    opMessage('success', '已标记 ' + (Number(result.marked) || 0) + ' 条为已读。');
+    var marked = Number(result.marked) || 0;
+    opMessage('success', marked > 0 ? '已标记 ' + marked + ' 条为已读。' : '没有新的未读短信，已经是全部已读。');
     signature = ''; await refreshList();
    } catch (e) { opMessage('error', '标记已读失败：' + (e.message || '请稍后重试') + '。'); }
    finally { marking = false; update(); }
