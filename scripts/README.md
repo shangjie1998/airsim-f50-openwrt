@@ -7,6 +7,9 @@
 - `装6.18音频模块.sh` —— 把自编的 25 个 `.ko` 装进 `/mnt/mu300-disk/extra/airsim-audio/modules/6.18.60/`，
   比 vermagic、改名备份旧目录、从 `.orig` 一次生成两处 `mu300-audio-dsp` 补丁。
   `--install` 装，`--verify` 只查。
+- `airsim-audio-retry.init` + `装音频抢占.sh` —— 开机多轮抢占 DSP 保留页（A 方案）：
+  独立 rc 脚本（`START=11`，装到 `/etc/init.d/airsim-audio-retry`），不覆盖上游的 `airsim-audio-reserve`，
+  上游更新顶不掉它。清页缓存 + `retry` 轮询，日志 `/tmp/airsim-audio-claim.log`。
 
 ## 5.4/（冻结）
 
