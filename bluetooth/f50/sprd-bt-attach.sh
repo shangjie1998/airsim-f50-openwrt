@@ -34,7 +34,18 @@ unblock_bt
 		sleep 1
 		i=$((i + 1))
 	done
+	# 4) 设显示名：F50-<BD Address 后 6 位>。控制器地址每台机器唯一且重启不变，
+	#    取 6 位够分辨又不会太长（手机蓝牙列表里 F50-142211 这种）。
+	#    读不到地址时退回固定名 F50，不让名字变空。
+	if [ -d /sys/class/bluetooth/hci0 ]; then
+		_bd=$(hciconfig hci0 2>/dev/null | awk '/BD Address/ {print $3; exit}')
+		_tag=$(printf '%s' "$_bd" | tr -d ':' | tr 'a-f' 'A-F')
+		_suf=$(printf '%s' "$_tag" | awk 'length($0)>=6 {print substr($0,length($0)-5)}')
+		_btname="F50${_suf:+-$_suf}"
+		hciconfig hci0 name "$_btname" >/dev/null 2>&1
+		echo "sprd-bt: 显示名 $_btname"
+	fi
 ) &
 
-# 4) 常驻 H4 附着进程（内核已内置 CONFIG_BT_HCIUART=y / H4）
+# 5) 常驻 H4 附着进程（内核已内置 CONFIG_BT_HCIUART=y / H4）
 exec /usr/bin/btattach -B /dev/ttyBT0 -S 115200 -P h4

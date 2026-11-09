@@ -1,0 +1,8 @@
+# 补丁登记表。check-patches.py 读这张表做两件事：
+#   1) 本地干净树 dry-run，看补丁还能不能干净打上（打不上 = 上游上下文变了）
+#   2) 拉上游最新文件，看我们补的功能是不是已经被作者合并（合并了就该删补丁）
+#
+# 列：补丁文件	上游仓库（空=无上游对照）	已合并标志串	补丁依赖的锚点串（分号分隔）
+AirSIM-e164-cnum.patch				normalizeSelfNumber	decodeMaybeUCS2
+AirSIM-pair-clients.patch	kai-wu-cortex/airsim-mu300	/pair/clients	map[string]int64;/pair/cancel
+AirSIM-mu300-sms-send.patch			send --stdin;mu300SentReply
