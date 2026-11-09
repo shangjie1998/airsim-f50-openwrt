@@ -14,6 +14,7 @@
 | 插件安装包 | [Release `v0.1.0.5-r23-6.18`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.5-r23-6.18) · 5.7 MB（仓库内另有 [`dist/`](dist/) 同款） |
 | 音频模块包 | `0.1.0.4-r22-6.18` 里的 25 个 `.ko`（内核绑死 6.18.60，见 §3） |
 | 接手说明 | [docs/6.18/接手说明.md](docs/6.18/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
+| 蓝牙（选装） | [bluetooth/](bluetooth/README.md) —— WCN 蓝牙启用脚本 + 总开关口子，**不影响通话** |
 | 编译与复现 | [docs/6.18/F50-6.18音频自编.md](docs/6.18/F50-6.18音频自编.md) —— 自造 kit、四个编译坑 |
 | 与 M8 的差异 | [docs/F50-vs-M8.md](docs/F50-vs-M8.md) |
 | 5.4 归档线 | [docs/5.4/](docs/5.4/) —— 已冻结，只在归档里留着 |
@@ -51,6 +52,7 @@
 | `docs/6.18/`、`scripts/6.18/` | 6.18 线文档与设备侧脚本 |
 | `docs/5.4/`、`scripts/5.4/` | 5.4 冻结线归档 |
 | `kbuild/` | 自编内核模块用的 kit 与源码树（`.gitignore`，不入库） |
+| `bluetooth/` | **与插件无关的独立能力**：展锐 WCN 蓝牙在 6.18 上的启用脚本与文档（含开关口子，见 [`bluetooth/README.md`](bluetooth/README.md)） |
 
 相对上游改了什么（**只改显示文案，标识一律保留**）：
 

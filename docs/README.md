@@ -16,5 +16,6 @@
 ## 5.4（已冻结，只做留档）
 
 - [5.4/F50-通话打通.md](5.4/F50-通话打通.md) —— 5.4 下语音怎么打通的
+- [../bluetooth/README.md](../bluetooth/README.md) —— F50 蓝牙（WCN `sprd-marlin3`）启用与总开关口子
 - [5.4/F50-数据联网修复.md](5.4/F50-数据联网修复.md) —— flowtable 含 `sipa_eth0` 导致断网的修复
 - [5.4/F50_BUILD_AND_ADAPT.md](5.4/F50_BUILD_AND_ADAPT.md) —— 覆盖包怎么编、怎么改名
