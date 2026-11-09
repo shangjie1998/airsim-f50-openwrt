@@ -1,6 +1,6 @@
-# 只留模块包，其余都是构建中间物
-kbuild/mu300-linux/
-kbuild/mu300-audio/
+# 相对 kbuild/ 目录；只留模块包，其余都是构建中间物
+mu300-linux/
+mu300-audio/
 *.ko
-kbuild/audio-6.18.60/pkg/
-kbuild/audio-6.18.60/ko.tar.gz
+audio-6.18.60/pkg/
+audio-6.18.60/ko.tar.gz

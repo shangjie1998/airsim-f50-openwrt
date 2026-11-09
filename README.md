@@ -1,30 +1,41 @@
-# AirSIM on 中兴 F50（MU300 / UMS9620）— OpenWrt 自编包与实测记录
+# AirSIM on 中兴 F50（MU300 / UMS9620）— **6.18 内核主线**（5.4 归档）
 
-把 AirSIM 通话网关跑在中兴 F50 上：**5.4 内核下双向通话已实机打通**，数据联网也已修复。
-本仓库现在既留实测记录与修复脚本，也放**自己交叉编译出来的安装包**（`0.1.0.N-r22-f50`）。
+把 AirSIM 通话网关跑在中兴 F50 上。**两条内核线严格分开，本仓库现在只开发 6.18。**
 
-> **一句话选包：安装包本身只对 5.4 内核（`5.4.254-gb50db5b6224c`）出**，`install.sh` 带内核闸门，
-> 不在 5.4 上直接拒绝（退出码 3），不动设备一个文件。
+| 线 | 状态 | 内核 | 装法 | 文档 / 脚本 |
+|---|---|---|---|---|
+| **6.18（在研主线）** | 语音 + 数据都已真机打通；**以后所有改动只落这条线** | `6.18.60` | 往音频扩展里补 `modules/6.18.60/`（§6-bis） | `docs/6.18/`、`scripts/6.18/` |
+| **5.4（已冻结）** | 2026-11-09 起封存，只留归档包和脚本，不再重建 | `5.4.254-gb50db5b6224c` | 覆盖安装包 `airsim-f50-0.1.0.3-r22-f50.tar.gz` | `docs/5.4/`、`scripts/5.4/` |
+
+> **6.18.60 的语音**：音频驱动是我们自己在这棵 6.18.60 树上编的（上游 kit 只钉到 6.18.58/59，下载全 404）。
+> 装法不是覆盖安装包，而是往已有音频扩展里补 `modules/6.18.60/`，装完**必须重启一次** —— 见 §6-bis 与
+> [docs/6.18/F50-6.18音频自编.md](docs/6.18/F50-6.18音频自编.md)。
+> 插卡实测：`downlink_frames=1940`、`uplink_frames=1935`、`dropped_uplink_frames=0`、`last_error` 空，**双向有声**。
 >
-> **6.18.60 现在也有语音了**：音频驱动是我们自己在这棵 6.18.60 树上编的（上游 kit 只钉到 6.18.58/59，
-> 下载还全 404）。装法不是覆盖安装包，而是往已有的音频扩展里补 `modules/6.18.60/`
-> —— 见 §6 与 [docs/F50-6.18音频自编.md](docs/F50-6.18音频自编.md)。真机已验到 `drivers 19/19`、
-> `sprdphone` 声卡出现、`audio_available: true`；通话实际话音要插卡再验。
+> **5.4 那条线的东西只做留档**：`install.sh` 仍带内核闸门（不在 5.4 上退出码 3、不动设备一个文件），
+> 但不会再出新版本。
 
 | | |
 |---|---|
 | 设备 | 中兴 F50（`MU300`，`Spreadtrum UMS9620`），OpenWrt 侧地址 `192.168.77.1` |
 | 系统 | OpenWrt **25.12.5 `r33051-f5dae5ece4`**，`aarch64_generic` |
-| 语音内核 | **`5.4.254-gb50db5b6224c`**（厂商内核，`mu300-audio` 的驱动按它编）—— **本包只支持这个** |
+| 语音内核 | 6.18 线 = `6.18.60`（模块自编）；5.4 线 = `5.4.254-gb50db5b6224c`（冻结） |
 | 数据内核 | `6.18.60`（mainline，数据联网更干净，**语音也已打通**——音频模块自编，见 §6-bis） |
-| 安装包 | 自编覆盖包 `airsim-f50-0.1.0.3-r22-f50.tar.gz`（Go 1.24.7 交叉编译，带备份与 `uninstall.sh`） |
+| 安装包 | 5.4 覆盖包 `airsim-f50-0.1.0.3-r22-f50.tar.gz`（已冻结）；6.18 用 `airsim-audio-6.18.60-modules.tar.gz` |
 | 显示名 | `AirSIM F50`（mDNS `AirSIM-F50-xxxx`、TXT `device_name`/`model`、`/status` 的 `product`、LuCI 页面）；`agent_kind=mu300` 等标识保留 |
 | 上游 | [kai-wu-cortex/airsim-mu300](https://github.com/kai-wu-cortex/airsim-mu300) @ `8cd12b4`（`v0.1.0-r22`） |
 
 ## 0. 下载
 
-安装包（5.4）：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.3-r22-f50>
-6.18.60 语音模块：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v6.18.60-audio-r22-f50>
+**6.18 线（当前）**：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.4-r22-6.18>
+
+| 附件 | 说明 |
+|---|---|
+| `airsim-f50-0.1.0.4-r22-6.18-audio-modules.tar.gz` | 6.18.60 的 25 个音频 `.ko`（425286 字节，sha256 `53eac2a2…de9f`），解出来是 `modules/6.18.60/` |
+| `install-6.18-audio.sh` | 往设备装模块的脚本（就是 `scripts/6.18/装6.18音频模块.sh`） |
+| `F50-6.18-audio-build.md` | 复现文档（就是 `docs/6.18/F50-6.18音频自编.md`） |
+
+**5.4 线（已冻结）**：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.3-r22-f50>
 
 | 附件 | 说明 |
 |---|---|
@@ -40,7 +51,7 @@ Go module 与二进制名 `airsim-mu300d`、`/usr/lib/airsim` 路径、`mu300-` 
 
 > **客户端断网了？** 先跑 `sh scripts/修断网.sh --check`，症状对得上就 `--fix`。一条根因：
 > flowtable 里含 `sipa_eth0` 导致整张防火墙规则表加载失败（详见 §4 第 5 条与
-> [docs/F50-数据联网修复.md](docs/F50-数据联网修复.md)）。
+> [docs/5.4/F50-数据联网修复.md](docs/5.4/F50-数据联网修复.md)）。
 
 同 SoC 的另一条线（VIPME-M8，内核 6.18.54，改过播放采样率与显示名）见
 <https://github.com/shangjie1998/airsim-m8-openwrt>。两台机器内核、音频路由、播放参数都不同，
@@ -59,8 +70,10 @@ Go module 与二进制名 `airsim-mu300d`、`/usr/lib/airsim` 路径、`mu300-` 
   我们在 `mu300-linux` 6.18.60 树上自己造 kit、自己编出 25 个 `.ko`，真机验到
   `drivers 19/19 loaded`、`card1 sprdphone-sc2730`、`voice endpoint 01-53`、
   dmesg 里 `aud_send_cmd out,cmd ret-value:0`、`audio_available: true`。
-  装法见 §6-bis，复现步骤见 [docs/F50-6.18音频自编.md](docs/F50-6.18音频自编.md)。
+  装法见 §6-bis，复现步骤见 [docs/6.18/F50-6.18音频自编.md](docs/6.18/F50-6.18音频自编.md)。
   注意：装完**必须重启一次**（`audio_reserve` 要在 S10 抢在别人前面占住那 9MB）。
+  插卡实测（2026-11-09 晚）：`downlink_frames=1940`、`received_uplink_frames=1945`、
+  `uplink_frames=1935`、`dropped_uplink_frames=0`、`last_error` 空，事件链完整 —— **双向有声**。
 
 为什么不在 Android 上做：F50 的 ROM 没有 `android.app.role.DIALER`，绕过角色后信令全通但**下行音频永远是 0**
 （`pcm_capture=all_zero`、`/dev/snd` 只有 `timer`、`tinymix` 打不开 mixer）。转 OpenWrt 后由
@@ -99,16 +112,16 @@ Go module 与二进制名 `airsim-mu300d`、`/usr/lib/airsim` 路径、`mu300-` 
 | # | 现象 | 根因 | 修法 |
 |---|---|---|---|
 | 1 | `MU300 runtime library missing`，安装直接失败 | 新 rootfs 裁掉了 `/opt/mu300/lib/run-dir.sh`，而 `audio-preflight` 硬性要求它 | 从上游 `mu300-linux` 补回该文件（644） |
-| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 在"旧文件一个都没有"时对空列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `scripts/音频暂存-空列表保护.sh`：空列表直接 `: > previous.tar`，`restore()` 同样加 `-s` 判断 |
+| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 在"旧文件一个都没有"时对空列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `scripts/5.4/音频暂存-空列表保护.sh`：空列表直接 `: > previous.tar`，`restore()` 同样加 `-s` 判断 |
 | 3 | Agent 来电轮询一直失败，`last_poll_error: MU300 AT request failed (AT+CLCC)`，但手动 `mu300-at 'AT+CLCC'` 是 OK | 设备自带旧版 `mu300-at`（10-27）不认 `-`（stdin），把连字符当 AT 命令发出去 | `scripts/mu300-at-补stdin.sh` 补上 stdin 支持（原件备份 `.bak-20261107`） |
 | 4 | 数据不拨号，日志 `sipa delegate did not become ready; refusing unsafe PDP activation` | 5.4 的 `sipa-dele.ko` **没有** `sipa_dele_wait` 节点，`delegate_ready()` 把"读不到就绪接口"当硬失败；其实模块是注册后才 insmod 的，委托线程是活的 | 改 `/opt/mu300/bin/sipa-dele-start` 的 `delegate_ready()`：模块已加载则记日志继续，未加载仍拒绝 |
-| 5 | 设备能上网、连热点的终端显示"无互联网" | `flowtable` 含 `sipa_eth0`（自定义 ARPHRD 虚拟口），fw4 整张规则表拒绝加载，留下的是 `forward policy drop` 的旧表 | **最终方案**：`uci set firewall.@defaults[0].flow_offloading='0'`（不生成 flowtable，5.4 的 EBUSY 冲突从源头消失），一键脚本 `scripts/修断网.sh`；上游 hotplug 钩子方案实测可用但未采用，留档 `scripts/19-mu300-fw4-钩子版.sh` |
+| 5 | 设备能上网、连热点的终端显示"无互联网" | `flowtable` 含 `sipa_eth0`（自定义 ARPHRD 虚拟口），fw4 整张规则表拒绝加载，留下的是 `forward policy drop` 的旧表 | **最终方案**：`uci set firewall.@defaults[0].flow_offloading='0'`（不生成 flowtable，5.4 的 EBUSY 冲突从源头消失），一键脚本 `scripts/修断网.sh`；上游 hotplug 钩子方案实测可用但未采用，留档 `scripts/5.4/19-mu300-fw4-钩子版.sh` |
 | 6 | 切 6.18.60 后 `airsim` 起不来 | 音频附加包的 ko 只有 5.4 那套 | 自编 6.18.60 的 25 个 ko 补进 `modules/6.18.60/`，装完重启一次，见 §6-bis |
 | 7 | 6.18 上 `audio_reserve` 报 `2304 pages not taken` | 模块是运行中途 insmod 的，那 9MB 早被内核用掉了，模块又是 `[permanent]` 卸不掉 | 只能重启，让 S10 的 `airsim-audio-reserve` 在开机时最先跑 |
 | 8 | 6.18 上 `aplay` 探针报 `write error: I/O error` | 没通话场景时 DSP 不消费 voice PCM，探针本来就写不进去 | 不是链路问题；`dsp_alive` 里那句 `|| return 1` 要放开，证据看 dmesg 的 `aud_send_cmd out,cmd` |
 
-细节、实测输出与回退步骤见 [docs/F50-通话打通.md](docs/F50-通话打通.md) 与
-[docs/F50-数据联网修复.md](docs/F50-数据联网修复.md)。
+细节、实测输出与回退步骤见 [docs/5.4/F50-通话打通.md](docs/5.4/F50-通话打通.md) 与
+[docs/5.4/F50-数据联网修复.md](docs/5.4/F50-数据联网修复.md)。
 
 ## 5. 已知限制
 
@@ -140,18 +153,18 @@ ubus call network.interface.wan status | head -20      # up=true, l3_device=sipa
 所以**必须自己编**：拿 `mu300-linux` 的 6.18.60 树造 kit → 编出 25 个 `.ko`（vermagic 全
 `6.18.60 SMP mod_unload aarch64`）。完整复现步骤（含 apt 源、内核源码校验、只求构建树不要 Image、
 `module.lds`、BTF、`KBUILD_MODPOST_WARN` 几个坑）写在
-[docs/F50-6.18音频自编.md](docs/F50-6.18音频自编.md)。
+[docs/6.18/F50-6.18音频自编.md](docs/6.18/F50-6.18音频自编.md)。
 
-模块包：`kbuild/audio-6.18.60/airsim-audio-6.18.60-modules.tar.gz`
-（sha256 `53eac2a23750b6c8798d02ba22343cb3188c05c4102bf5d2396eb88ad565de9f`），
-里面是 `modules/6.18.60/{25 个 .ko, KERNEL}`。
+模块包：`dist/airsim-f50-0.1.0.4-r22-6.18-audio-modules.tar.gz`
+（425286 字节，sha256 `53eac2a23750b6c8798d02ba22343cb3188c05c4102bf5d2396eb88ad565de9f`），
+里面是 `modules/6.18.60/{25 个 .ko, KERNEL}`。原始产物在 `kbuild/audio-6.18.60/`（不进 git）。
 
 装（设备上当前内核必须是 `6.18.60`，且已经有过一次 AirSIM 的音频扩展目录
 `/mnt/mu300-disk/extra/airsim-audio/`）：
 
 ```sh
 scp airsim-audio-6.18.60-modules.tar.gz root@192.168.77.1:/tmp/
-scp scripts/装6.18音频模块.sh root@192.168.77.1:/tmp/
+scp scripts/6.18/装6.18音频模块.sh root@192.168.77.1:/tmp/
 ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --install'
 # 然后重启一次（必须），起来后：
 ssh root@192.168.77.1 'mu300-audio-dsp status; cat /proc/asound/cards'
@@ -180,8 +193,17 @@ voice:    01-53: FE_ST_VOICE_PCM_P (*) : playback 1
 /status:  audio_available = true, devices = {Card:1, Capture:"hw:1,16", Playback:"hw:1,53"}
 ```
 
-**没插卡**，所以通话实际话音还没验；`audio_available: true` + 声卡出现 + DSP 应答，
-是这台机器在没有 SIM 的情况下能验到的全部。
+插卡后通话实测（2026-11-09 晚）：
+
+```
+audio:   downlink_frames=1940  uplink_frames=1935  received_uplink_frames=1945
+         dropped_uplink_frames=0  silence_frames=6  last_error=""
+events:  dial_request → pcm_connection → pcm_authenticated → pcm_ready → pcm_closed
+sim:     sim_inserted=true, reg_status_text=已注册, phone_number_status=available
+```
+
+双向都有真帧、无丢帧无报错，和 5.4 上那次 40 秒通话（2062/2060/1990）同一量级。
+**6.18.60 上能拨通、双向有声，已成立。**
 
 ---
 
@@ -235,7 +257,7 @@ src/AirSIM/              AirSIM 客户端与 module-agent 源码（固定提交 
 src/dependencies/        重建音频扩展用的依赖源码包（mu300-audio、内核构建树、alsa、openwrt-packages）
 src/UPSTREAM-SOURCES.md  上游源码包出处与哈希
 dist/                    luci-app-airsim-0.1.0-r22.apk + 公钥 + install.sh + SHA256SUMS
-docs/F50_BUILD_AND_ADAPT.md   构建环境、构建步骤、换内核/换参数口径、验证清单
+docs/5.4/F50_BUILD_AND_ADAPT.md   构建环境、构建步骤、换内核/换参数口径、验证清单
 AGENTS.md                给下一个 AI 的最短路径（参数、坑、别做什么）
 scripts/                 设备侧补丁脚本（重放用）
 ```
@@ -257,7 +279,7 @@ F50 的补丁**——F50 的适配全在设备侧（`sipa-dele-start`、`mu300-a
 一次性拿全的整包：`dist/airsim-f50-0.1.0-r22-bundle.tar.gz`（apk + 公钥 + 安装脚本 + `修断网.sh` +
 `SHA256SUMS` + 安装说明），Release 附件里也有。
 
-重建最短路径（细节见 `docs/F50_BUILD_AND_ADAPT.md`）：
+重建最短路径（细节见 `docs/5.4/F50_BUILD_AND_ADAPT.md`）：
 
 ```sh
 cd src/plugin
@@ -305,7 +327,7 @@ apk v3 的 `mkpkg` 只有 apk-tools 3.x 提供（上游脚本靠 `node:22-alpine
 ### 只支持 5.4 内核（0.1.0.3 起写死）
 
 `install.sh` 现在会查 `uname -r`：不是 `5.4.*` 直接拒绝（退出码 3），一个字都不写进设备。
-原因见 `docs/F50_BUILD_AND_ADAPT.md`：这个覆盖包里的 `audio-preflight` 只认 `5.4.254-gb50db5b6224c`。
+原因见 `docs/5.4/F50_BUILD_AND_ADAPT.md`：这个覆盖包里的 `audio-preflight` 只认 `5.4.254-gb50db5b6224c`。
 6.18.60 不装这个包，改用 §6-bis 的“补模块”路子（那个包里的二进制本来就能用，缺的只是驱动）。
 确要在别的内核上强装看界面：`F50_ALLOW_OTHER_KERNEL=1 sh install.sh`。
 
