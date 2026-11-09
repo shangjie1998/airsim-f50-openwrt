@@ -1,0 +1,119 @@
+#!/bin/sh
+# AirSIM for F50 —— 已配对客户端管理（独立 rpcd 对象 airsim-pair）
+#
+# 为什么要单独一个对象：上游 /usr/libexec/rpcd/airsim 没有 pair_clients /
+# pair_remove 两个动作（那两条是 M8 线自己加的）。往回改上游文件等于把
+# 上游整份占住，所以这里新起 airsim-pair，页面改两行 rpc.declare 即可。
+#
+# 数据面：配对密钥存在 <data>/vowlan-clients.json（纯数组，一条一个 base64 密钥，
+# 没有时间戳、没有名字）。列表是只读的；删除是改文件 + 重启服务让它重新加载，
+# 不进 Go 源码、不需要重编二进制。
+#
+# 前置保护：正在通话时不允许重启服务。
+
+. /usr/share/libubox/jshn.sh
+
+DATA_DIR=/mnt/mu300-disk/extra/airsim/data
+CLIENTS="$DATA_DIR/vowlan-clients.json"
+AGENT=http://127.0.0.1:7581
+
+call_active() {
+	curl -s -m 4 "$AGENT/status" 2>/dev/null \
+		| jsonfilter -e '@.call_active' 2>/dev/null | grep -q true
+}
+
+list_clients() {
+	if [ ! -f "$CLIENTS" ]; then
+		printf '%s\n' '{"clients":[]}'
+		return
+	fi
+	# 注意：不能写成 jsonfilter | while，管道后那段在子 shell 里跑，
+	# jshn 攒下的数组会随子 shell 一起丢掉 —— 先落临时文件再读。
+	tmp=$(mktemp /tmp/airsim-pair.XXXXXX 2>/dev/null || echo /tmp/airsim-pair.$$)
+	jsonfilter -e '@[*]' < "$CLIENTS" > "$tmp" 2>/dev/null
+	json_init
+	json_add_array clients
+	idx=0
+	while IFS= read -r key; do
+		[ -n "$key" ] || continue
+		idx=$((idx + 1))
+		json_add_object
+		json_add_int index "$idx"
+		json_add_string fingerprint "$(printf '%s' "$key" | tail -c 9)"
+		json_close_object
+	done < "$tmp"
+	json_close_array
+	rm -f "$tmp"
+	json_dump
+}
+
+remove_clients() {
+	IFS= read -r request
+	indexes=''
+	if json_load "$request" 2>/dev/null; then
+		json_get_var indexes indexes
+	fi
+	indexes=$(printf '%s' "$indexes" | tr -cd '0-9,')
+	if [ -z "$indexes" ]; then
+		printf '%s\n' '{"ok":false,"error":"未选择要删除的客户端"}'
+		return
+	fi
+	if call_active; then
+		printf '%s\n' '{"ok":false,"error":"正在通话，先挂断再删除配对"}'
+		return
+	fi
+	if [ ! -f "$CLIENTS" ]; then
+		printf '%s\n' '{"ok":false,"error":"没有配对文件"}'
+		return
+	fi
+
+	tmp="$CLIENTS.new.$$"
+	total=$(grep -c . "$CLIENTS" 2>/dev/null || echo 0)
+	awk -v drop="$indexes" '
+		BEGIN { n = split(drop, a, ","); for (i = 1; i <= n; i++) d[a[i]] = 1 }
+		/^$/ { next }
+		{ if (!(NR in d)) print }
+	' "$CLIENTS" > "$tmp" 2>/dev/null
+	left=$(grep -c . "$tmp" 2>/dev/null || echo 0)
+	removed=$((total - left))
+
+	if [ "$removed" -eq 0 ]; then
+		rm -f "$tmp"
+		printf '%s\n' '{"ok":false,"error":"选中的条目不在列表里，未做改动"}'
+		return
+	fi
+
+	json_init
+	json_add_array
+	while IFS= read -r key; do
+		[ -n "$key" ] && json_add_string '' "$key"
+	done < "$tmp"
+	json_close_array
+	json_dump > "$CLIENTS"
+	chmod 600 "$CLIENTS" 2>/dev/null
+	rm -f "$tmp"
+
+	/etc/init.d/airsim restart >/dev/null 2>&1
+	sleep 1
+	json_init
+	json_add_boolean ok 1
+	json_add_int removed "$removed"
+	json_add_int total "$left"
+	json_dump
+}
+
+case "$1" in
+	list)
+		printf '%s\n' '{"pair_clients":{},"pair_remove":{"indexes":"String"}}'
+		;;
+	call)
+		case "$2" in
+		pair_clients) list_clients ;;
+		pair_remove) remove_clients ;;
+		*) exit 1 ;;
+		esac
+		;;
+	*)
+		exit 1
+		;;
+esac

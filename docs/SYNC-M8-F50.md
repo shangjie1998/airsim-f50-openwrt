@@ -130,3 +130,68 @@ python3 /path/to/airsim-f50-openwrt/scripts/sync-m8.py --f50 /path/to/airsim-f50
 4. **#4（来电转发）**：最后做，要真机验 AT 单卡路径。
 
 每做一项，两端各跑一次 `python3 scripts/sync-m8.py` 复核分档，并在各自账本/坑表登记。
+
+## 九、本轮落地记录（2026-11-10：页面换皮 + 功能移植）
+
+这一轮把 M8 的**自定义层**按功能搬到了 F50，原则照旧：**不碰 `src/` 上游文件，全部走 `overlay/f50/`**；能不动 Go 源码就不动，最后留给一次统一编译。
+
+### 9.1 新增的独立 rpcd 对象（都只读上游能力，不改上游文件）
+
+| 对象 | 文件 | 干什么 | M8 对应 |
+|---|---|---|---|
+| `airsim-backup` | `overlay/f50/files/usr/libexec/rpcd/airsim-backup` | `fingerprint` / `make` / `restore`，指纹 = `sha256("<eMMC cid>\|<serial-number>")`，tar 白名单，备份时排 `*.lock` | M8 里挂在 `airsim` 对象内 |
+| `airsim-bt` | 同上目录 `airsim-bt` | 蓝牙开关，包 `/usr/sbin/f50-bt-switch.sh`；字段对齐 M8（`supported/label/service/adapter/enabled/attached/address/up/bluetoothd/hint`） | `airsim-bt` |
+| `airsim-pair` | 同上目录 `airsim-pair` | `pair_clients` 读 `vowlan-clients.json`，`pair_remove` 改文件 + 重启 `airsim` 服务 | `airsim` 内的 `/pair/*` |
+| `airsim-sms` | 同上目录 `airsim-sms` | 把页面的 `card` 翻译成 `mu300dash` 的 `slot`，转发 `sms_list/show/send/job/sims/read_all/clear_batch` | `airsim-sms`（直连 python） |
+| `airsim-call` | 同上目录 `airsim-call` | 来电转发的读写配置 / 状态 / 测试 / 清历史，写 uci `airsim-call-forward` | `airsim-call` |
+
+### 9.2 页面（全部走 `ui.css` + `ui.js`，与 M8 同一套皮）
+
+| 页面 | 来源 | 改了什么 |
+|---|---|---|
+| `overview.js` | M8 原页 | 品牌换 F50；配对列表改调 `airsim-pair`；**拨出卡选择器单卡时隐藏** |
+| `sms.js` | M8 原页 | 品牌换 F50；**查看卡/发送卡单卡时隐藏**；底部“保存/重置”条显式置 `null` 去掉 |
+| `maintenance.js` | M8 原页 | 备份改调 `airsim-backup.make/restore`；下载名改 `airsim-f50-backup` / `airsim-f50-diagnostics`；版本号正则改 `v0.1.0.N-rNN-6.18`；**去掉“下载并更新”**（见 9.4）；版本说明改写为 F50 口径 |
+| `connect.js` | M8 原页 | 只改品牌，字段本来就和 F50 对得上 |
+| `settings.js` | M8 原页 | 只改品牌，蓝牙卡由 `airsim-bt` 供数 |
+| `call.js` | M8 原页 | 品牌换 F50；`来自M8-来电` → `来自F50-来电` |
+| `ui.css` / `ui.js` | M8 原样 | 不做改动，两端共用一套 |
+
+菜单（`overlay/f50/files/usr/share/luci/menu.d/luci-app-airsim.json`，**整文件覆盖上游那份**）：
+
+```
+设备概览 10 / 连接 15 / 来电转发 25 / 短信 35 / 维护 40 / 外观与设置 50
+```
+
+上游的「管理与维护」（`manage.js`）**不再挂菜单**——它的更新、诊断、服务启停都已被新版维护页覆盖。文件仍在，只是进不去，避免两套入口打架。
+
+### 9.3 双卡逻辑：**代码全留，F50 上隐藏**（这条是硬要求）
+
+口径：**能力靠探测，不靠写死机型**。以后别的双卡设备接这套页面，不用改前端。
+
+| 位置 | 保留的双卡逻辑 | F50 上的表现 |
+|---|---|---|
+| `overlay/.../view/airsim/overview.js` | `nodes.dialCard`（SIM1/SIM2 下拉）、`dialCardPresent()`、`dialCardLabel()`、`call_action` 的 `card` 参数 | `sms_sims` 只返回 1 条 → `multiSim=false` → `nodes.dialCardBlock` 整块 `display:none`；`card` 仍按 `'0'` 传（F50 后端忽略该参数，实测 `call_action` 接受多余字段） |
+| `overlay/.../view/airsim/sms.js` | `filterCard` / `sendCard` / `cardName()` / 发送二次确认里的“将从 SIMx 发出” | `multiSim=false` 时隐藏「查看卡 / 发送卡」两个下拉，文案降为“本机 SIM”；确认文案不再提卡号 |
+| `overlay/f50/files/usr/libexec/rpcd/airsim-sms` | `card`→`slot` 的映射原样保留，`sms_sims` 按 `mu300dash` 实有卡槽出数组 | 单卡 → 数组只有 `id:"1"` |
+| `overlay/f50/files/usr/lib/airsim/call-forward` | `SLOTS`、`slot_label()`（卡1/卡2）、`INFO_SELF_0/1`、`poll_at` 每槽一条 `AT+CLCC` | `SLOTS="0"` 一行注释写明“双卡机型改回 `0 1` 即可” |
+| `overlay/f50/files/usr/libexec/rpcd/airsim-call` | 历史/状态里 `slot` 字段 | 单卡恒为空 |
+
+**判断阈值就一句：`sms_sims` 返回的 `sims` 数组长度 > 1 才显示卡选择。** 换双卡设备时只要后端按槽出数组，页面自动长出选择器，无需改 JS。
+
+### 9.4 为什么维护页没有“下载并更新”
+
+F50 插件的更新检查读的是**上游作者的仓库**（`kai-wu-cortex/airsim-mu300`），点“下载并更新”会把上游整包装上来，直接盖掉本项目的 `overlay/f50`。所以本页只保留「检查更新 + 打开项目 Release」，安装一律走手动下包。
+
+### 9.5 本轮踩到的坑（都已在代码里注释）
+
+1. **`jshn` 的布尔只认 `1/0`**：`json_add_boolean service_running "true"` 渲染出来是 `false`。必须 `_run=1`。
+2. **`"$(pgrep -f 'pattern' …)"` 里的单引号是字面量**：双引号内的单引号不会被 shell 去掉，`pgrep` 拿到带引号的模式永远匹配不上。改成先 `if pgrep …; then _run=1; fi`。
+3. **`/etc/init.d/rpcd restart` 会踢掉 LuCI 会话**：页面卡“加载视图中…”，且旧标签页的 JS 会一直坏（`"%s/%s.js%s".format is not a function`）。**处理办法：`/etc/init.d/uhttpd restart` + 开新标签页重登**，不用怀疑页面代码。
+4. **`apply.py` 的权限**：带 `shebang` 一律 755，其余 644——新增的 `etc/init.d/airsim-call-forward`、`usr/lib/airsim/call-forward` 靠这条才可执行。
+
+### 9.6 本轮没做的（下轮）
+
+- **需要重编 Go 的**：`+86` 号码补全（`module-agent/sms.go`）、`pair_clients`/`pair_remove` 的原生接口（`main.go`/`gateway.go`）。按约定，等这几项 UI/脚本都落地了再一次性编译。
+- 来电转发**只做了链路和页面**，没配真实 webhook 发包验证（需要你给一个地址，或先用页面「测试消息」走一遍）。
+- `manage.js` 未删，只是不挂菜单。
