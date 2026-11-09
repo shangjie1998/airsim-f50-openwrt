@@ -102,3 +102,31 @@ python3 /path/to/airsim-f50-openwrt/scripts/sync-m8.py --f50 /path/to/airsim-f50
 ```
 
 报告里 `单边` 表示只有一台有；有差异行数的表示两边都有、内容不同——后者才是真正的"待同步候选"。
+
+## 八、功能级同步清单（2026-11-09 首次判定）
+
+样式只是皮，真正要同步的是功能。逐个判过，结论如下（**未落地，等人点头**）：
+
+| # | 功能 | M8 出处 | F50 现状 | 档 | 判定 |
+|---|---|---|---|---|---|
+| 1 | 备份与恢复（指纹校验 + tar 白名单 + 拖拽 + 二次确认） | `rpcd/airsim` 的 `backup_make`/`backup_restore`/`airsim_fingerprint` + `maintenance.js` | **没有**（rpcd 只有 status/settings/updates/pair/call） | R | **建议做**。设备无关，但白名单路径要换成 F50 的（`/usr/lib/airsim`、`/etc/config/airsim`、`/etc/config/f50-bt`），指纹里的型号串改 `AirSIM for F50`，8MB 上限够用 |
+| 2 | 自报号码补 `+86`（E.164） | `patches/AirSIM-e164.patch` → `module-agent/sms.go` 的 `parseCNUM` | **没有**；但 `src/AirSIM/module/module-agent/sms.go` 就在，同一文件 | R | **建议做**。只影响显示，单卡更简单；要重编 agent |
+| 3 | 配对客户端列表 / 删除 | `main.go` 的 `/pair/clients`、`/pair/remove` + `gateway.go` 的 `ClientInfo`/`Remove` | **没有接口**；但 `/status` 已有 `paired_clients=2`，说明表在 | R | **建议做**。换手机后旧配对清不掉，这是真痛点；要重编 daemon |
+| 4 | 来电转发 | `m8-pkg/airsim-call-forward*` + `call-forward` 主程序 | 没有；但 `/usr/bin/mu300-at` 在 | R | **可做，排后面**。M8 版按卡槽切 AT，F50 单卡要删掉选卡逻辑；先验 `mu300-at` 单卡路径 |
+| 5 | 外观设置页（浅/深/跟随 + 密度 + 玻璃） | `ui.css` + `ui.js` + `settings.js` | 无 | S | **建议做**，纯前端，零硬件风险 |
+| 6 | 连接设置单独成页 | `connect.js` | 挤在 `manage.js` 里 | S/R | 可做，字段 F50 都有（relay/端口/LAN） |
+| 7 | 维护页（备份/更新/诊断/版本说明） | `maintenance.js` | 部分在 `manage.js` | R | 跟 #1 一起做，不然是空壳 |
+| 8 | 短信池镜像 + 分槽 | `mu300-sms`、`sms-pool-sync.py`、`sms-dash.py` | 无 | D | **不搬**。双卡专属，F50 单卡没有池的概念 |
+| 9 | 流故障回调（`OnStreamFault`）+ 每秒轮询 | `session.go`、`main.go`、`fast-hangup.patch` | 有 URC 事件，挂断本来就快 | — | **不搬**。这是"M8 有问题不代表 F50 有"的典型：M8 没 URC 才要每秒轮，F50 照搬等于白耗 |
+| 10 | 日志裁剪 `keepLogsBounded` | `main.go` | 根盘 29G、只用了 724M | — | **不搬**。M8 根盘 4G 才需要 |
+| 11 | 16k 播放 / AP voice scene | `devices.go`、`voice_scene.go` | 8k `hw:1,53`，不需要 scene | — | **不搬**。硬件路径不同 |
+| 12 | 云端心跳/拨号 TLS 预算 | `PENDING-cloud-dial-missing-sim-account.md` | 未复现 | — | **不搬，先在 F50 复现** |
+
+### 建议顺序
+
+1. **#1 + #7（备份/恢复 + 维护页）**：收益最大、不碰音频、不动内核，一台做完另一台抄结构只换路径。
+2. **#2 + #3（+86 + 配对管理）**：都要重编（agent / daemon），凑一次打包，省一次装机。
+3. **#5 + #6（外观页 + 连接页）**：纯前端，可和上面任意一波合并。
+4. **#4（来电转发）**：最后做，要真机验 AT 单卡路径。
+
+每做一项，两端各跑一次 `python3 scripts/sync-m8.py` 复核分档，并在各自账本/坑表登记。
