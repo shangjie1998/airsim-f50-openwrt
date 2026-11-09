@@ -67,11 +67,22 @@ chmod 755 /usr/libexec/rpcd/airsim-backup /usr/libexec/rpcd/airsim-bt \
 chmod 755 /usr/lib/airsim/call-forward /etc/init.d/airsim-call-forward 2>/dev/null || true
 
 # --- 开机自启 ---
+# 蓝牙默认可见：main.conf 里两个超时置 0，否则 180 秒后手机就搜不到了。
+# 只在文件存在时改，别的机型没蓝牙配置也不报错。
+if [ -f /etc/bluetooth/main.conf ]; then
+	sed -i 's/^#DiscoverableTimeout = 0/DiscoverableTimeout = 0/' /etc/bluetooth/main.conf 2>/dev/null || true
+	sed -i 's/^#PairableTimeout = 0/PairableTimeout = 0/' /etc/bluetooth/main.conf 2>/dev/null || true
+
+fi
 /etc/init.d/airsim-call-forward enable >/dev/null 2>&1 || true
 # 短信池路径对齐：厂商池在 /etc/mu300/sms，上游 agent 写死读 /etc/mu300/sms-pool/msg，
 # 不接上的话 agent 一直报「native SMS inbox unavailable」，手机端读不到短信。
 /etc/init.d/airsim-sms-pool-link enable >/dev/null 2>&1 || true
 /etc/init.d/airsim-sms-pool-link start >/dev/null 2>&1 || true
+
+# 蓝牙开机恢复：开关只在 rpcd 里被调用，重启后没人拉起 → hci0 一直不存在、页面显示「未挂载」。
+# 这个脚本按 /etc/config/f50-bt 的 enabled 在开机时补这一脚；值为 0 时什么都不做。
+/etc/init.d/airsim-bt-boot enable >/dev/null 2>&1 || true
 
 # 音频保留页抢占重试（独立 rc 脚本，不覆盖上游的 airsim-audio-reserve）。
 # kano 那套 6.18 内核关了 COMPACTION / CONTIG_ALLOC，audio_reserve 只会「一次性」抢页，

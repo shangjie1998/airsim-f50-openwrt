@@ -19,6 +19,9 @@ echo "[3/7] 修改 /etc/bluetooth/main.conf"
 sed -i 's/^#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
 # 兜底名；真正的唯一名（F50-<地址后 6 位>）由 sprd-bt-attach.sh 起 hci0 后现算
 sed -i 's/^Name = .*/Name = F50/'          /etc/bluetooth/main.conf
+# 默认一直可被发现、可配对（0 = 不限时）
+sed -i 's/^#DiscoverableTimeout = 0/DiscoverableTimeout = 0/' /etc/bluetooth/main.conf
+sed -i 's/^#PairableTimeout = 0/PairableTimeout = 0/' /etc/bluetooth/main.conf
 
 echo "[4/7] 启用开机自启"
 /etc/init.d/dbus enable
