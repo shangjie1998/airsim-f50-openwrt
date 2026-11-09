@@ -149,8 +149,8 @@ ubus call network.interface.wan status | head -20      # up=true, l3_device=sipa
 `/mnt/mu300-disk/extra/airsim-audio/`）：
 
 ```sh
-scp airsim-audio-6.18.60-modules.tar.gz 装6.18音频模块.sh root@192.168.77.1:/tmp/
-ssh root@192.168.77.1 'mv /tmp/airsim-audio-6.18.60-modules.tar.gz /tmp/airsim-audio-6.18.60-modules.tar.gz'
+scp airsim-audio-6.18.60-modules.tar.gz root@192.168.77.1:/tmp/
+scp scripts/装6.18音频模块.sh root@192.168.77.1:/tmp/
 ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --install'
 # 然后重启一次（必须），起来后：
 ssh root@192.168.77.1 'mu300-audio-dsp status; cat /proc/asound/cards'
