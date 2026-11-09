@@ -1,0 +1,7 @@
+{
+  "luci-app-airsim-backup": {
+    "description": "Backup and restore AirSIM for F50",
+    "read": {"ubus": {"airsim-backup": ["fingerprint"]}},
+    "write": {"ubus": {"airsim-backup": ["make", "restore"]}}
+  }
+}

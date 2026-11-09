@@ -1,0 +1,117 @@
+#!/bin/sh
+# AirSIM for F50 —— 蓝牙开关（独立 rpcd 对象 airsim-bt）
+#
+# 只做一件事：把 /usr/sbin/f50-bt-switch.sh（on/off/status）包成 ubus 方法，
+# 让 LuCI 页面不必走 fs.exec 白名单。开关状态持久化在 /etc/config/f50-bt，
+# 值为 0 时开机脚本直接跳过拉起 —— 即「关了以后重启仍然是关」。
+#
+# 返回字段与 M8 的 airsim-bt 对齐（supported/enabled/attached/address/adapter/
+# up/bluetoothd/service/label），这样页面可以两端共用一份。
+#
+# 与上游的关系：不改上游任何文件，ubus 上多一个 airsim-bt 对象。
+
+. /usr/share/libubox/jshn.sh
+
+SW=/usr/sbin/f50-bt-switch.sh
+CONF=/etc/config/f50-bt
+HCI=/sys/class/bluetooth/hci0
+
+bt_state() {
+	en=$(uci -q get f50-bt.settings.enabled 2>/dev/null)
+	[ -n "$en" ] || en=unset
+
+	json_init
+	json_add_boolean supported 1
+	json_add_string label '蓝牙'
+	json_add_string service 'sprdbluetooth'
+	json_add_string adapter 'hci0'
+
+	if [ "$en" = 1 ]; then json_add_boolean enabled 1; else json_add_boolean enabled 0; fi
+
+	if [ -d "$HCI" ]; then
+		json_add_boolean attached 1
+	else
+		json_add_boolean attached 0
+	fi
+
+	addr=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
+	[ -n "$addr" ] && json_add_string address "$addr"
+
+	up=0
+	if command -v hciconfig >/dev/null 2>&1; then
+		hciconfig hci0 2>/dev/null | grep -qi 'UP RUNNING' && up=1
+	else
+		[ -d "$HCI" ] && up=1
+	fi
+	json_add_boolean up "$up"
+
+	bluetoothd=0
+	pgrep -f '[b]luetoothd' >/dev/null 2>&1 && bluetoothd=1
+	json_add_boolean bluetoothd "$bluetoothd"
+
+	case "$en" in
+	1) json_add_string hint '控制器已打开；手机、耳机可以直接搜到这台设备。' ;;
+	unset) json_add_string hint '还没有写过开关配置，按默认（开）处理。' ;;
+	*) json_add_string hint '已关闭；打开后控制器才挂载。' ;;
+	esac
+	json_dump
+}
+
+bt_set() {
+	IFS= read -r request
+	enable=0
+	if json_load "$request" 2>/dev/null; then
+		json_get_var enable enable 2>/dev/null
+	fi
+	case "$enable" in
+	1|true|on|yes) want=on ;;
+	*) want=off ;;
+	esac
+	if [ ! -x "$SW" ]; then
+		json_init
+		json_add_boolean ok 0
+		json_add_string error '蓝牙脚本不在位（/usr/sbin/f50-bt-switch.sh）'
+		json_dump
+		return
+	fi
+	out=$("$SW" "$want" 2>&1)
+
+	json_init
+	json_add_boolean ok 1
+	json_add_boolean supported 1
+	json_add_string label '蓝牙'
+	json_add_string service 'sprdbluetooth'
+	json_add_string adapter 'hci0'
+	if [ "$want" = on ]; then json_add_boolean enabled 1; else json_add_boolean enabled 0; fi
+	if [ -d "$HCI" ]; then json_add_boolean attached 1; else json_add_boolean attached 0; fi
+	addr=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
+	[ -n "$addr" ] && json_add_string address "$addr"
+	up=0
+	if command -v hciconfig >/dev/null 2>&1; then
+		hciconfig hci0 2>/dev/null | grep -qi 'UP RUNNING' && up=1
+	else
+		[ -d "$HCI" ] && up=1
+	fi
+	json_add_boolean up "$up"
+	bluetoothd=0
+	pgrep -f '[b]luetoothd' >/dev/null 2>&1 && bluetoothd=1
+	json_add_boolean bluetoothd "$bluetoothd"
+	json_add_string output "$out"
+	json_dump
+}
+
+case "$1" in
+	list)
+		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"}}'
+		;;
+	call)
+		case "$2" in
+		bt_get) bt_state ;;
+		bt_set) bt_set ;;
+		*) exit 1 ;;
+		esac
+		;;
+	*)
+		exit 1
+		;;
+esac

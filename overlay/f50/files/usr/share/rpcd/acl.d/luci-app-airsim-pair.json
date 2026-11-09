@@ -1,0 +1,7 @@
+{
+	"luci-app-airsim-pair": {
+		"description": "Grant access to paired client management",
+		"read": { "ubus": { "airsim-pair": [ "pair_clients" ] } },
+		"write": { "ubus": { "airsim-pair": [ "pair_remove" ] } }
+	}
+}

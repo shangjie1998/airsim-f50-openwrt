@@ -1,0 +1,208 @@
+#!/bin/sh
+# AirSIM for F50 —— 备份与恢复（独立 rpcd 对象 airsim-backup）
+#
+# 为什么另起一个脚本：上游的 /usr/libexec/rpcd/airsim 是整份覆盖文件，
+# 往里加动作等于把上游文件长期占住，下次上游一改就得重搬。这里只新增文件，
+# ubus 上多一个 airsim-backup 对象，与上游的 airsim 并存，互不影响。
+#
+# 授权由 /usr/share/rpcd/acl.d/luci-app-airsim-backup.json 控制。
+
+. /usr/share/libubox/jshn.sh
+
+DATA_DIR=/mnt/mu300-disk/extra/airsim/data
+CONF_MAIN=/etc/config/airsim
+CONF_BT=/etc/config/f50-bt
+SERVICE=airsim
+FORMAT=airsim-f50-backup
+MAXSIZE=8388608
+
+# 硬件指纹：eMMC cid + 设备树序列号。换 TF 卡不会变（状态数据恰在 TF 上，
+# 所以换卡后正好靠备份把 data/ 还原回去）。
+airsim_fingerprint() {
+	cid=$(cat /sys/block/mmcblk0/device/cid 2>/dev/null | tr -d '\n')
+	sn=$(tr -d '\0' < /proc/device-tree/serial-number 2>/dev/null)
+	printf '%s|%s' "$cid" "$sn" | sha256sum | cut -d' ' -f1
+}
+
+service_running() {
+	ubus call service list '{"name":"'"$SERVICE"'"}' 2>/dev/null \
+		| jsonfilter -e '@.'"$SERVICE"'.instances.*.running' 2>/dev/null | grep -q true
+}
+
+fingerprint_info() {
+	finger=$(airsim_fingerprint)
+	model=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
+	host=$(cat /proc/sys/kernel/hostname 2>/dev/null)
+	ver=$(cat /usr/lib/airsim/VERSION 2>/dev/null)
+	kern=$(uname -r 2>/dev/null)
+	json_init
+	json_add_string fingerprint "$finger"
+	json_add_string short_id "$(printf '%s' "$finger" | cut -c1-8)"
+	json_add_string model "$model"
+	json_add_string hostname "$host"
+	json_add_string plugin_version "$ver"
+	json_add_string kernel "$kern"
+	json_add_string data_dir "$DATA_DIR"
+	json_dump
+}
+
+backup_make() {
+	work=/tmp/airsim-backup.$$
+	rm -rf "$work"
+	mkdir -p "$work/backup/config" "$work/backup/data" 2>/dev/null || {
+		printf '%s\n' '{"ok":false,"error":"无法创建临时目录，检查 /tmp 空间"}'; return; }
+	[ -f "$CONF_MAIN" ] && cp -f "$CONF_MAIN" "$work/backup/config/airsim"
+	[ -f "$CONF_BT" ] && cp -f "$CONF_BT" "$work/backup/config/f50-bt"
+	if [ -d "$DATA_DIR" ]; then
+		cp -a "$DATA_DIR/." "$work/backup/data/" 2>/dev/null
+		# 日志与运行时锁不进备份：锁文件恢复回去会让服务以为还有人占着，起不来
+		rm -f "$work"/backup/data/*.log "$work"/backup/data/*.log.* "$work"/backup/data/*.lock 2>/dev/null
+	fi
+	finger=$(airsim_fingerprint)
+	model=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
+	ver=$(cat /usr/lib/airsim/VERSION 2>/dev/null)
+	host=$(cat /proc/sys/kernel/hostname 2>/dev/null)
+	created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	printf '{"format":"%s","format_version":1,"fingerprint":"%s","short_id":"%s","model":"%s","hostname":"%s","plugin_version":"%s","created_at":"%s"}\n' \
+		"$FORMAT" "$finger" "$(printf '%s' "$finger" | cut -c1-8)" "$model" "$host" "$ver" "$created" \
+		> "$work/backup/meta.json"
+	if ! tar czf "$work/out.tar.gz" -C "$work/backup" . 2>/dev/null; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"打包失败，请检查磁盘空间"}'
+		return
+	fi
+	siz=$(wc -c < "$work/out.tar.gz" | tr -d ' ')
+	sum=$(sha256sum "$work/out.tar.gz" | cut -d' ' -f1)
+	b64=$(openssl base64 -A -in "$work/out.tar.gz" 2>/dev/null)
+	stamp=$(date +%Y%m%d-%H%M)
+	rm -rf "$work"
+	json_init
+	json_add_boolean ok 1
+	json_add_string filename "airsim-f50-backup-$stamp.tar.gz"
+	json_add_int size "$siz"
+	json_add_string sha256 "$sum"
+	json_add_string fingerprint "$finger"
+	json_add_string short_id "$(printf '%s' "$finger" | cut -c1-8)"
+	json_add_string created_at "$created"
+	json_add_string data "$b64"
+	json_dump
+}
+
+backup_restore() {
+	IFS= read -r request
+	if ! json_load "$request"; then
+		printf '%s\n' '{"ok":false,"error":"无效恢复请求"}'; return
+	fi
+	json_get_var payload payload
+	if [ -z "$payload" ]; then
+		printf '%s\n' '{"ok":false,"error":"没有收到备份内容"}'; return
+	fi
+	work=/tmp/airsim-restore.$$
+	rm -rf "$work"
+	mkdir -p "$work/x" || { printf '%s\n' '{"ok":false,"error":"无法创建临时目录"}'; return; }
+	if ! printf '%s' "$payload" | openssl base64 -d -A > "$work/in.tar.gz" 2>/dev/null; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"文件解码失败，可能不是本插件导出的备份"}'
+		return
+	fi
+	siz=$(wc -c < "$work/in.tar.gz" | tr -d ' ')
+	if [ "$siz" -gt "$MAXSIZE" ]; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"备份包超过 8 MB，拒绝处理"}'
+		return
+	fi
+	if ! tar tzf "$work/in.tar.gz" > "$work/list" 2>/dev/null; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"不是有效的 gzip 备份包"}'
+		return
+	fi
+	# 白名单：只放行本插件自己写出来的路径。注意必须同时放行根条目 ./ 和目录条目，
+	# 否则 tar 列表里的 ./config/ 会把合法备份也挡掉（这个坑踩过）。
+	if grep -Ev '^\./?$|^\./meta\.json$|^\./config/?$|^\./config/(airsim|f50-bt)$|^\./data/?$|^\./data/.+$' "$work/list" \
+		| grep -q .; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"备份包内含不允许的路径，已拒绝导入"}'
+		return
+	fi
+	if ! tar xzf "$work/in.tar.gz" -C "$work/x" 2>/dev/null; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"解包失败"}'
+		return
+	fi
+	if [ ! -f "$work/x/meta.json" ]; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"备份包缺少 meta.json，无法确认是不是本机备份"}'
+		return
+	fi
+	bang=$(jsonfilter -e '@.format' < "$work/x/meta.json" 2>/dev/null)
+	if [ "$bang" != "$FORMAT" ]; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"这不是 AirSIM for F50 的备份文件"}'
+		return
+	fi
+	bver=$(jsonfilter -e '@.format_version' < "$work/x/meta.json" 2>/dev/null)
+	if [ "${bver:-0}" -gt 1 ] 2>/dev/null; then
+		rm -rf "$work"
+		printf '%s\n' '{"ok":false,"error":"备份格式版本过新，请先升级插件"}'
+		return
+	fi
+	filefinger=$(jsonfilter -e '@.fingerprint' < "$work/x/meta.json" 2>/dev/null)
+	localfinger=$(airsim_fingerprint)
+	if [ -z "$filefinger" ] || [ "$filefinger" != "$localfinger" ]; then
+		# 指纹不符就拒绝：别人的备份里带着别人的配对凭据，装进来只会连到错的设备
+		rm -rf "$work"
+		json_init
+		json_add_boolean ok 0
+		json_add_string error "这份备份不是本机的（设备指纹不符），已拒绝导入"
+		json_add_string file_id "$(printf '%s' "$filefinger" | cut -c1-8)"
+		json_add_string local_id "$(printf '%s' "$localfinger" | cut -c1-8)"
+		json_dump
+		return
+	fi
+	# 覆盖前留一份现场，出问题还能手工拿回来
+	keep=/tmp/airsim-before-restore-$(date +%Y%m%d-%H%M%S)
+	mkdir -p "$keep"
+	cp -f "$CONF_MAIN" "$keep/" 2>/dev/null
+	cp -f "$CONF_BT" "$keep/" 2>/dev/null
+	[ -d "$DATA_DIR" ] && cp -a "$DATA_DIR" "$keep/" 2>/dev/null
+	running=0
+	service_running && running=1
+	if [ "$running" -eq 1 ]; then /etc/init.d/$SERVICE stop >/dev/null 2>&1; fi
+	[ -f "$work/x/config/airsim" ] && cp -f "$work/x/config/airsim" "$CONF_MAIN"
+	[ -f "$work/x/config/f50-bt" ] && cp -f "$work/x/config/f50-bt" "$CONF_BT"
+	if [ -d "$work/x/data" ] && [ -n "$(ls -A "$work/x/data" 2>/dev/null)" ]; then
+		mkdir -p "$DATA_DIR"
+		cp -a "$work/x/data/." "$DATA_DIR/" 2>/dev/null
+		chmod 600 "$DATA_DIR/agent-id" 2>/dev/null
+	fi
+	rm -rf "$work"
+	if [ "$running" -eq 1 ]; then
+		/etc/init.d/$SERVICE enable >/dev/null 2>&1
+		/etc/init.d/$SERVICE start </dev/null >/tmp/airsim-restore-start.log 2>&1 &
+	fi
+	json_init
+	json_add_boolean ok 1
+	json_add_string message "备份已恢复，服务正在重启；配对与配置以备份内容为准"
+	json_add_string short_id "$(printf '%s' "$localfinger" | cut -c1-8)"
+	json_add_string before_copy "$keep"
+	json_add_boolean restarted "$running"
+	json_dump
+}
+
+case "$1" in
+list)
+	printf '%s\n' '{"fingerprint":{},"make":{},"restore":{"payload":""}}'
+	;;
+call)
+	case "$2" in
+	fingerprint) fingerprint_info ;;
+	make) backup_make ;;
+	restore) backup_restore ;;
+	*) printf '%s\n' '{"error":"未知方法"}' ;;
+	esac
+	;;
+*)
+	printf '%s\n' '{"error":"用法: airsim-backup {list|call}"}'
+	exit 1
+	;;
+esac

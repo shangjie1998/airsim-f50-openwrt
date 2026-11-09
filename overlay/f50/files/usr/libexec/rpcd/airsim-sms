@@ -1,0 +1,117 @@
+#!/bin/sh
+# AirSIM for F50 —— 短信薄封装（独立 rpcd 对象 airsim-sms）
+#
+# 目的：M8 的短信页/概览页调的是 airsim-sms（参数带 card），F50 的原生短信
+# 接口是 mu300dash（参数带 slot，单卡）。这里做一层翻译，页面可以原样搬，
+# 以后 M8 改页面不用重写。
+#
+# card → slot 映射：F50 只有一张卡，任何 card 值都落到默认槽位（不传即默认）。
+
+. /usr/share/libubox/jshn.sh
+
+DASH=mu300dash
+AGENT=http://127.0.0.1:8575
+
+req_get() {  # req_get <字段> [默认值]
+	json_get_var _v "$1" 2>/dev/null
+	printf '%s' "${_v:-${2:-}}"
+	_v=''
+}
+
+forward_sms_list() {
+	IFS= read -r request
+	page=''
+	if json_load "$request" 2>/dev/null; then page=$(req_get page); fi
+	json_init
+	[ -n "$page" ] && json_add_string page "$page"
+	ubus call "$DASH" sms_list "$(json_dump)" 2>/dev/null
+}
+
+forward_sms_show() {
+	IFS= read -r request
+	id=''
+	slot=''
+	if json_load "$request" 2>/dev/null; then id=$(req_get id); slot=$(req_get card); fi
+	json_init
+	[ -n "$id" ] && json_add_string id "$id"
+	[ -n "$slot" ] && json_add_string slot "$slot"
+	ubus call "$DASH" sms_show "$(json_dump)" 2>/dev/null
+}
+
+forward_sms_send() {
+	IFS= read -r request
+	num='' text='' slot=''
+	if json_load "$request" 2>/dev/null; then
+		num=$(req_get num); text=$(req_get text); slot=$(req_get card)
+	fi
+	if [ -z "$num" ]; then printf '%s\n' '{"error":"缺少收件号码"}'; return; fi
+	json_init
+	json_add_string num "$num"
+	json_add_string text "$text"
+	[ -n "$slot" ] && json_add_string slot "$slot"
+	ubus call "$DASH" sms_send "$(json_dump)" 2>/dev/null
+}
+
+forward_sms_job() {
+	IFS= read -r request
+	slot=''
+	if json_load "$request" 2>/dev/null; then slot=$(req_get card); fi
+	json_init
+	[ -n "$slot" ] && json_add_string slot "$slot"
+	ubus call "$DASH" sms_job "$(json_dump)" 2>/dev/null
+}
+
+# 单卡设备：直接报一张卡，字段名跟 M8 的页面保持一致
+sms_sims() {
+	ins=false; num=''; op=''
+	raw=$(curl -s -m 4 "$AGENT/api/status" 2>/dev/null)
+	if [ -n "$raw" ]; then
+		json_load "$raw" 2>/dev/null && {
+			json_get_var ins sim_inserted
+			json_get_var num phone_number
+		}
+	fi
+	json_init
+	json_add_array sims
+	json_add_object
+	json_add_string id '1'
+	json_add_string name 'SIM 1'
+	json_add_string number "$num"
+	json_add_string operator ''
+	case "$ins" in
+	1|true|yes) json_add_boolean present 1 ;;
+	*) json_add_boolean present 0 ;;
+	esac
+	json_add_boolean data '1'
+	json_close_object
+	json_close_array
+	json_dump
+}
+
+case "$1" in
+	list)
+		printf '%s\n' '{"sms_list":{"page":"String","card":"String"},"sms_show":{"id":"String"},"sms_send":{"num":"String","text":"String","card":"String"},"sms_job":{"card":"String"},"sms_sims":{},"sms_read_all":{},"sms_clear_batch":{"limit":"String"}}'
+		;;
+	call)
+		case "$2" in
+		sms_list) forward_sms_list ;;
+		sms_show) forward_sms_show ;;
+		sms_send) forward_sms_send ;;
+		sms_job) forward_sms_job ;;
+		sms_sims) sms_sims ;;
+		sms_read_all) ubus call "$DASH" sms_read_all '{}' 2>/dev/null ;;
+		sms_clear_batch)
+			IFS= read -r request
+			limit=''
+			json_load "$request" 2>/dev/null && limit=$(req_get limit)
+			json_init
+			[ -n "$limit" ] && json_add_string limit "$limit"
+			ubus call "$DASH" sms_clear_batch "$(json_dump)" 2>/dev/null
+			;;
+		*) exit 1 ;;
+		esac
+		;;
+	*)
+		exit 1
+		;;
+esac

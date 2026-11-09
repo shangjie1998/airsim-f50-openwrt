@@ -1,0 +1,17 @@
+{
+	"luci-app-airsim": {
+		"description": "F50 附加权限：概览页要读配对列表与 SIM 卡信息",
+		"read": {
+			"ubus": {
+				"airsim-pair": [ "pair_clients" ],
+				"airsim-sms": [ "sms_list", "sms_show", "sms_job", "sms_sims" ]
+			}
+		},
+		"write": {
+			"ubus": {
+				"airsim-pair": [ "pair_remove" ],
+				"airsim-sms": [ "sms_send", "sms_read_all", "sms_clear_batch" ]
+			}
+		}
+	}
+}

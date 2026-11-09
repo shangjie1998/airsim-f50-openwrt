@@ -1,0 +1,33 @@
+--- a/AirSIM/module/module-agent/sms.go
++++ b/AirSIM/module/module-agent/sms.go
+@@ -635,8 +635,29 @@
+ 		}
+ 		fields := splitCSV(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "+CNUM:")))
+ 		if len(fields) >= 2 {
+-			return decodeMaybeUCS2(fields[1])
++			return normalizeSelfNumber(decodeMaybeUCS2(fields[1]))
+ 		}
+ 	}
+ 	return ""
+ }
++
++// normalizeSelfNumber 把卡里存的本机号码规整成 E.164（带 + 号）。
++// 各家卡存法不一样：有的存 "+8613…"，有的存 "8613…"（少个加号，客户端会
++// 当成两个号码段），还有存 "0086…" 的。客户端只认 E.164，这里统一。
++func normalizeSelfNumber(raw string) string {
++	n := strings.TrimSpace(raw)
++	if n == "" {
++		return ""
++	}
++	if strings.HasPrefix(n, "+") {
++		return n
++	}
++	if strings.HasPrefix(n, "00") {
++		return "+" + strings.TrimPrefix(n, "00")
++	}
++	// 中国：86 + 11 位手机号。
++	if len(n) == 13 && strings.HasPrefix(n, "86") {
++		return "+" + n
++	}
++	return n
++}
