@@ -87,10 +87,12 @@ say "模块已放到 $dest（$(ls "$dest"/*.ko | wc -l) 个 .ko）"
 # 所以这里把“CONFIG 必须逐位相同”改成“只要 KERNEL 里声明了 CONFIG 就放行”，原文件先备份。
 if [ -f "$DSP" ] && [ ! -f "$DSP.orig" ]; then
     cp -f "$DSP" "$DSP.orig"
-    awk '
-        /config_sum\) = "\$_want"/ { sub(/\[ "\$\(config_sum\)" = "\$_want" \]/, "true"); }
-        { print }
-    ' "$DSP.orig" > "$DSP.NEW" && mv "$DSP.NEW" "$DSP"
+    cat > /tmp/patch-dsp.awk <<'AWK'
+# CONFIG 那行整行换成“只要声明了 CONFIG 就放行”；用 index/正则匹配 set_fits 里唯一那一行
+/config_sum\)/ && /_want/ { print "    [ -n \"$_want\" ] && true"; next }
+{ print }
+AWK
+    awk -f /tmp/patch-dsp.awk "$DSP.orig" > "$DSP.NEW" && mv "$DSP.NEW" "$DSP"
     chmod 755 "$DSP"
     say 'mu300-audio-dsp 的 CONFIG 校验已放宽（原文件 = mu300-audio-dsp.orig）'
 fi
