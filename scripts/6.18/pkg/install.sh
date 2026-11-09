@@ -84,6 +84,15 @@ fi
 # 这个脚本按 /etc/config/f50-bt 的 enabled 在开机时补这一脚；值为 0 时什么都不做。
 /etc/init.d/airsim-bt-boot enable >/dev/null 2>&1 || true
 
+# 蓝牙页只在真装了蓝牙栈的机器上露头：btattach 与 bluetoothd 都在才算有。
+# 没装的话把菜单、视图、acl 一起撤掉 —— 页面列表里根本不出现「蓝牙」这一项。
+# 菜单项本身依赖 luci-app-airsim-bt 这个 acl：acl 一撤，菜单和 tab 就自动不出现，
+# 所以这里只需要撤 acl 和视图，不用去改菜单文件。
+if ! command -v btattach >/dev/null 2>&1 || ! command -v bluetoothd >/dev/null 2>&1; then
+	rm -f /usr/share/rpcd/acl.d/luci-app-airsim-bt.json
+	rm -f /www/luci-static/resources/view/airsim/bluetooth.js
+fi
+
 # 音频保留页抢占重试（独立 rc 脚本，不覆盖上游的 airsim-audio-reserve）。
 # kano 那套 6.18 内核关了 COMPACTION / CONTIG_ALLOC，audio_reserve 只会「一次性」抢页，
 # 抢不全整条音频链就不启动；这个脚本在开机 S11 再轮询几轮。
