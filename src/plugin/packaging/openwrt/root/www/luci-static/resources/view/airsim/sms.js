@@ -102,7 +102,7 @@ return baseclass.extend({
   function prepare() {
    if (send.disabled || !valid()) return;
    draft = { number: number.value.trim(), text: body.value };
-   confirmationText.textContent = '确认发送至 ' + draft.number + '？将使用 F50 的 SIM 卡，可能产生短信费用。';
+   confirmationText.textContent = '确认发送至 ' + draft.number + '？将使用 MU300 的 SIM 卡，可能产生短信费用。';
    confirmationBody.textContent = draft.text;
    confirmation.hidden = false; update(); confirm.focus();
   }
@@ -142,7 +142,7 @@ return baseclass.extend({
   full.appendChild(close);
   var root = E('section', { 'class': 'as-card as-sms', 'aria-label': '短信' }, [
    E('div', { 'class': 'as-card-heading' }, [E('h3', {}, '短信'), count]),
-   E('p', { 'class': 'as-copy' }, '查看与发送 F50 SIM 卡的短信。'),
+   E('p', { 'class': 'as-copy' }, '查看与发送 MU300 SIM 卡的短信。'),
    refresh, listHint, list, E('div', { 'class': 'as-buttons as-sms-pages' }, [previous, next]), full,
    E('div', { 'class': 'as-sms-compose' }, [
     E('h4', {}, '新短信'), E('label', { 'for': 'as-sms-number', 'class': 'as-field-label' }, '收件号码'), number,

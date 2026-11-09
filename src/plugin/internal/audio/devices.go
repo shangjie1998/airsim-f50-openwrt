@@ -19,7 +19,7 @@ var pcmPattern = regexp.MustCompile(`(?m)^(\d+)-(\d+):\s+(\S+)`)
 func ParseDevices(cards, pcm string) (Devices, error) {
 	m := cardPattern.FindStringSubmatch(cards)
 	if m == nil {
-		return Devices{}, fmt.Errorf("F50 sound card not registered")
+		return Devices{}, fmt.Errorf("MU300 sound card not registered")
 	}
 	card, _ := strconv.Atoi(m[1])
 	d := Devices{Card: card}
@@ -37,7 +37,7 @@ func ParseDevices(cards, pcm string) (Devices, error) {
 		}
 	}
 	if d.Capture == "" || d.Playback == "" {
-		return d, fmt.Errorf("F50 call PCM endpoints missing")
+		return d, fmt.Errorf("MU300 call PCM endpoints missing")
 	}
 	return d, nil
 }
