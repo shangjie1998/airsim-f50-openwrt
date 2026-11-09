@@ -1,0 +1,43 @@
+name: build-plugin
+
+# 只编插件二进制（纯 Go，arm64）。内核模块 .ko 不在这里编：
+# 它绑死 6.18.60 的 vermagic 与自造 kit，属于归档物，见 docs/6.18/F50-6.18音频自编.md
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'overlay/f50/**'
+      - 'src/plugin/**'
+      - 'VERSION'
+      - 'AGENT-VERSION'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.7'
+
+      - name: 合成 src + overlay 并交叉编
+        run: |
+          set -eu
+          export GO_SDK="$(dirname "$(dirname "$(which go)")")"
+          echo "GO_SDK=$GO_SDK"
+          sh overlay/f50/build.sh out/f50
+
+      - name: 校验产物
+        run: |
+          set -eu
+          test -x out/f50/airsim-mu300d && test -x out/f50/airsim-agent
+          file out/f50/airsim-mu300d
+          strings out/f50/airsim-mu300d | grep -q "AirSIM for F50"
+          echo "版本: $(cat VERSION) / agent: $(cat AGENT-VERSION)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airsim-f50-binaries
+          path: out/f50/
+          retention-days: 30

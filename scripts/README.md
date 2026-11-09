@@ -19,4 +19,4 @@
 - `修断网.sh` —— 防火墙/flowtable 断网自检与修复（`--check` / `--fix`）
 - `通话实时监控.sh` —— 盯 `/status` 的通话帧数
 - `mu300-at-补stdin.sh` —— AT 通道补 stdin
-- `bump-version.sh` —— 版本号三处同步（根 `VERSION`、`pkg/` 内 `VERSION`、`MANIFEST`）
+- `bump-version.sh` —— 版本号三处同步（`VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`），遇非 6.18 线直接拒绝
