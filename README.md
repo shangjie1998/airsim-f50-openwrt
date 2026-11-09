@@ -23,7 +23,8 @@
 
 ## 0. 下载
 
-最新：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.3-r22-f50>
+安装包（5.4）：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.3-r22-f50>
+6.18.60 语音模块：<https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v6.18.60-audio-r22-f50>
 
 | 附件 | 说明 |
 |---|---|
