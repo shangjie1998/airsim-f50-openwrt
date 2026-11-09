@@ -43,5 +43,5 @@
 #   ubus call airsim status | grep audio_available  # 应为 true
 #   dns-sd -B _airsim-vowlan._tcp                   # 从同一局域网的 Mac 看，实例名应是 AirSIM-F50-<8位>
 #
-# 切回 5.4 后 device-patches/ 里那三个补丁（mu300-at 读 stdin、sipa-dele-start 放行、run-dir.sh）
-# 如果之前被 mu300-update apply 覆盖过，按 device-patches/README.md 重放。
+# 切回 5.4 后 archive/5.4-pkg/device-patches/ 里那三个补丁（mu300-at 读 stdin、sipa-dele-start 放行、run-dir.sh）
+# 如果之前被 mu300-update apply 覆盖过，按 archive/5.4-pkg/device-patches/README.md 重放。
