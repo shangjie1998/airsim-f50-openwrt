@@ -6,3 +6,5 @@
 AirSIM-e164-cnum.patch				normalizeSelfNumber	decodeMaybeUCS2
 AirSIM-pair-clients.patch	kai-wu-cortex/airsim-mu300	/pair/clients	map[string]int64;/pair/cancel
 AirSIM-mu300-sms-send.patch			send --stdin;mu300SentReply
+AirSIM-mu300-signal-operator.patch		mu300VendorSignalDBM	mu300RefreshModem;AT+CSQ
+AirSIM-f50-release-source.patch		airsim-f50-openwrt	kai-wu-cortex/airsim-mu300;luci-app-airsim-
