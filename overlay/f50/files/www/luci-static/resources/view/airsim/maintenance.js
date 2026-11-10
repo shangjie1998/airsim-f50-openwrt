@@ -359,9 +359,11 @@ return view.extend({
   function syncAud(info) {
    info = info || {};
    var installed = info.installed === true, busy = info.busy === true;
+   var matched = info.matched === true, kOk = info.kernel_ok === true, extOk = info.ext_present === true;
+   var kern = info.kernel || '未知', avail = String(info.available || '').replace(/\s+/g, ' ').trim();
    audBusy = busy;
-   audChip.textContent = busy ? '正在装' : (installed ? '已安装' : (info.ko_count > 0 ? (info.ko_count + '/' + (info.want_ko || 25)) : '未安装'));
-   audChip.className = 'as-pill ' + (installed || busy ? 'as-pill-green' : 'as-pill-neutral');
+   audChip.textContent = busy ? '正在装' : (installed ? '已安装' : (matched ? ((info.ko_count || 0) + '/' + (info.want_ko || 25)) : '内核不匹配'));
+   audChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (installed ? 'as-pill-green' : (matched ? 'as-pill-neutral' : 'as-pill-red')));
    audBtn.textContent = installed ? '重新安装音频模块' : '安装音频模块';
 
    if (busy) {
@@ -369,27 +371,26 @@ return view.extend({
     audMsg.textContent = info.message || '正在装，别断电。';
     return;
    }
-   var kOk = info.kernel_ok === true, extOk = info.ext_present === true;
-   audBtn.disabled = !(kOk && extOk);
-   if (!kOk) {
-    audMsg.textContent = '本机内核 ' + (info.kernel || '未知') + '，这包只对 ' + (info.want_kernel || '—') + ' 有效（内核模块必须跟内核一致）。';
-   }
-   else if (!extOk) {
+   audBtn.disabled = !(extOk && (matched || kOk));
+   if (!extOk) {
     audMsg.textContent = '本机没有厂商音频扩展目录（/mnt/mu300-disk/extra/airsim-audio），先有那一套才能补模块。';
+   }
+   else if (!matched) {
+    audMsg.textContent = '本机内核 ' + kern + '，扩展目录里现有的驱动是 ' + (avail ? avail.replace(/ /g, '、') : '（空）') + '，没有与当前内核 vermagic 对齐的一套：语音不会启动（服务、短信、来电通知照常）。等 ' + kern + ' 的驱动补进来会自动恢复，或者把系统切回上面任意一套内核。';
    }
    else if (info.state === 'failed') {
     audMsg.textContent = info.message || '这次没成。';
     setNotice(audNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
    }
    else if (installed) {
-    audMsg.textContent = '模块 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + ' 齐了' + (info.opt_version ? '（可选件 ' + info.opt_version + '）' : '') + '；页面出问题可以重装一遍，旧目录会先备份。';
+    audMsg.textContent = kern + ' 的模块 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + ' 齐了' + (info.opt_version ? '（可选件 ' + info.opt_version + '）' : '') + '；页面出问题可以重装一遍，旧目录会先备份。';
    }
    else {
     var lack = info.ko_missing || 0;
-    audMsg.textContent = '本机 6.18.60 的音频驱动模块缺 ' + lack + ' 个（现 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + '）。从这里补：约 420KB，走固定 tag ' + (info.version || 'audio-opt') + '，装前核对 sha256。';
+    audMsg.textContent = kern + ' 的音频驱动缺 ' + lack + ' 个（现 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + '）。从这里补：约 420KB，走固定 tag ' + (info.version || 'audio-opt') + '，装前核对 sha256。';
    }
-   if (kOk && extOk && info.dsp_present === false) audMsg.textContent += ' 注意：本机没有 mu300-audio-dsp，光补模块也放不出声。';
-   audBtn.title = audBtn.disabled ? '内核或扩展目录条件不满足' : '从 GitHub 拉可选件并安装';
+   if (matched && extOk && info.dsp_present === false) audMsg.textContent += ' 注意：本机没有 mu300-audio-dsp，光补模块也放不出声。';
+   audBtn.title = audBtn.disabled ? ('没有可用于 ' + kern + ' 的驱动包（可选件里是 ' + (info.opt_kernels || '—') + '）') : '从 GitHub 拉可选件并安装';
   }
 
   audBtn.addEventListener('click', function() {
