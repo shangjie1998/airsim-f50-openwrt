@@ -320,15 +320,234 @@ bt_unpair() {
 	json_dump
 }
 
+# ---- 附近设备 / 主动配对 / 被动请求应答 -------------------------------------
+# 真正干活的是一个常驻的 bluetoothctl（/usr/libexec/airsim-bt-agent，python3
+# 驱动 pty）。rpcd 这边只负责：把它拉起来、往 FIFO 里下命令、读它写的文件。
+AGT_DIR=/tmp/airsim-bt-agent
+AGT_RUN=/usr/libexec/airsim-bt-agent
+
+agt_ensure() {
+	mkdir -p "$AGT_DIR"
+	[ -p "$AGT_DIR/cmd" ] || mkfifo "$AGT_DIR/cmd" 2>/dev/null
+	# 心跳 5 秒没动 = 假活（脚本进程还在，但它里头的 bluetoothctl 已经没了），
+	# 这种时候往 FIFO 里写命令是有去无回，所以直接杀掉重起
+	if pgrep -f '[a]irsim-bt-agent' >/dev/null 2>&1; then
+		_now=$(date +%s)
+		_hb=0
+		[ -f "$AGT_DIR/heartbeat" ] && _hb=$(cat "$AGT_DIR/heartbeat" 2>/dev/null)
+		case "${_hb:-0}" in ''|*[!0-9]*) _hb=0 ;; esac
+		if [ $((_now - _hb)) -le 5 ]; then return 0; fi
+		kill $(pgrep -f '[a]irsim-bt-agent') 2>/dev/null
+		kill $(pgrep -x bluetoothctl) 2>/dev/null
+		rm -rf "$AGT_DIR"
+		mkdir -p "$AGT_DIR"
+		mkfifo "$AGT_DIR/cmd" 2>/dev/null
+	fi
+	[ -x "$AGT_RUN" ] || return 1
+	# 设备上的 start-stop-daemon 是 busybox 版，不认 -- python3 -- script 这种
+	# 带参数的形式（实测 rc=1 直接起不来）。它认 -x script，脚本本身有 shebang，
+	# 所以最稳的是直接后台跑，别指望它。
+	"$AGT_RUN" >/dev/null 2>&1 &
+	sleep 1
+	pgrep -f '[a]irsim-bt-agent' >/dev/null 2>&1
+}
+
+agt_send() {
+	agt_ensure || return 1
+	# FIFO 没有读端时直接 printf > fifo 会一直阻塞，ubus 那边就是 30 秒超时。
+	# 用读写方式打开（3<>）拿到两端，写完立刻关，不会卡。
+	( exec 3<> "$AGT_DIR/cmd" 2>/dev/null && printf '%s\n' "$1" >&3 ) 2>/dev/null
+}
+
+bt_nearby() {
+	agt_ensure >/dev/null 2>&1
+	ctrl=$(bt_ctrl_addr)
+	_con=$(hcitool con 2>/dev/null)
+	json_init
+	json_add_array nearby
+	# agent 每扫到一台就往 devices.tsv 写一行「地址<TAB>名字」，shell 直接按行读
+	if [ -s "$AGT_DIR/devices.tsv" ]; then
+		_now=$(date +%s)
+		while IFS='	' read -r _a _n _ts; do
+			[ -n "$_a" ] || continue
+			# 只留 3 分钟内见过的，免得把很久以前的残留设备当"附近"
+			case "${_ts:-0}" in ''|*[!0-9]*) _ts=0 ;; esac
+			[ "$_ts" -gt 0 ] && [ $((_now - _ts)) -gt 180 ] && continue
+			_a=$(printf '%s' "$_a" | tr 'a-f' 'A-F')
+			_p=0
+			[ -n "$ctrl" ] && [ -d "/var/lib/bluetooth/$ctrl/$_a" ] && _p=1
+			_c=0
+			printf '%s' "$_con" | grep -qi "$_a" && _c=1
+			json_add_object
+			json_add_string address "$_a"
+			json_add_string name "${_n:-未知设备}"
+			json_add_boolean paired "$_p"
+			json_add_boolean connected "$_c"
+			json_close_object
+		done < "$AGT_DIR/devices.tsv"
+	fi
+	json_close_array
+	json_dump
+}
+
+bt_scan() {
+	IFS= read -r request
+	want=on
+	if json_load "$request" 2>/dev/null; then
+		json_get_var want on 2>/dev/null
+	fi
+	case "$want" in
+	off|0|false|no)
+		agt_send scan_off >/dev/null 2>&1
+		json_init; json_add_boolean ok 1; json_add_boolean scanning 0; json_dump
+		return 0
+		;;
+	esac
+	if ! agt_send scan_on; then
+		json_init; json_add_boolean ok 0
+		json_add_string error '蓝牙执行器没起来（机器上缺 python3 或 agent 脚本）'
+		json_dump
+		return 0
+	fi
+	# 15 秒后自动停，省得一直扫着费电
+	( sleep 15; ( exec 3<> "$AGT_DIR/cmd" && printf 'scan_off\n' >&3 ) ) >/dev/null 2>&1 &
+	json_init
+	json_add_boolean ok 1
+	json_add_boolean scanning 1
+	json_add_int seconds 15
+	json_dump
+}
+
+bt_pair() {
+	IFS= read -r request
+	a=
+	if json_load "$request" 2>/dev/null; then json_get_var a address 2>/dev/null; fi
+	a=$(printf '%s' "$a" | tr 'a-f' 'A-F')
+	if ! printf '%s' "$a" | grep -qE '^([0-9A-F]{2}:){5}[0-9A-F]{2}$'; then
+		json_init; json_add_boolean ok 0; json_add_string error '地址格式不对'; json_dump; return 0
+	fi
+	if ! agt_send "pair $a"; then
+		json_init; json_add_boolean ok 0; json_add_string error '蓝牙执行器没起来'; json_dump; return 0
+	fi
+	json_init
+	json_add_boolean ok 1
+	json_add_string address "$a"
+	json_add_string message '已发起配对，等对方确认（30 秒内没反应就算失败）'
+	json_dump
+}
+
+bt_connect() {
+	IFS= read -r request
+	a=
+	if json_load "$request" 2>/dev/null; then json_get_var a address 2>/dev/null; fi
+	a=$(printf '%s' "$a" | tr 'a-f' 'A-F')
+	if ! printf '%s' "$a" | grep -qE '^([0-9A-F]{2}:){5}[0-9A-F]{2}$'; then
+		json_init; json_add_boolean ok 0; json_add_string error '地址格式不对'; json_dump; return 0
+	fi
+	if ! agt_send "connect $a"; then
+		json_init; json_add_boolean ok 0; json_add_string error '蓝牙执行器没起来'; json_dump; return 0
+	fi
+	json_init
+	json_add_boolean ok 1
+	json_add_string address "$a"
+	json_add_string message '正在连接，稍等'
+	json_dump
+}
+
+bt_action_result() {
+	r="$AGT_DIR/result.json"
+	json_init
+	if [ -f "$r" ]; then
+		ts=$(jsonfilter -i "$r" -e '@.ts' 2>/dev/null)
+		act=$(jsonfilter -i "$r" -e '@.action' 2>/dev/null)
+		ad=$(jsonfilter -i "$r" -e '@.address' 2>/dev/null)
+		dn=$(jsonfilter -i "$r" -e '@.done' 2>/dev/null)
+		ok=$(jsonfilter -i "$r" -e '@.ok' 2>/dev/null)
+		ms=$(jsonfilter -i "$r" -e '@.message' 2>/dev/null)
+		json_add_string action "${act:-}"
+		json_add_string address "${ad:-}"
+		json_add_boolean done "$([ "$dn" = true ] && echo 1 || echo 0)"
+		json_add_boolean ok "$([ "$ok" = true ] && echo 1 || echo 0)"
+		json_add_string message "${ms:-}"
+		json_add_int ts "${ts:-0}"
+	else
+		json_add_string action ''
+		json_add_boolean done 0
+		json_add_int ts 0
+	fi
+	json_dump
+}
+
+bt_pair_pending() {
+	p="$AGT_DIR/pending.json"
+	json_init
+	if [ -f "$p" ]; then
+		ts=$(jsonfilter -i "$p" -e '@.ts' 2>/dev/null)
+		ad=$(jsonfilter -i "$p" -e '@.address' 2>/dev/null)
+		nm=$(jsonfilter -i "$p" -e '@.name' 2>/dev/null)
+		kd=$(jsonfilter -i "$p" -e '@.kind' 2>/dev/null)
+		lb=$(jsonfilter -i "$p" -e '@.label' 2>/dev/null)
+		pk=$(jsonfilter -i "$p" -e '@.passkey' 2>/dev/null)
+		an=$(jsonfilter -i "$p" -e '@.answered' 2>/dev/null)
+		left=0
+		case "${ts:-0}" in
+		''|*[!0-9]*) ts=0 ;;
+		esac
+		now=$(date +%s)
+		if [ "${ts:-0}" -gt 0 ]; then
+			left=$((ts + 30 - now))
+			[ "$left" -lt 0 ] && left=0
+		fi
+		if [ -n "$an" ] || [ "$left" = 0 ]; then
+			json_add_boolean pending 0
+		else
+			json_add_boolean pending 1
+		fi
+		json_add_string address "${ad:-}"
+		json_add_string name "${nm:-}"
+		json_add_string kind "${kd:-}"
+		json_add_string label "${lb:-}"
+		json_add_string passkey "${pk:-}"
+		json_add_int seconds_left "$left"
+	else
+		json_add_boolean pending 0
+		json_add_int seconds_left 0
+	fi
+	json_dump
+}
+
+bt_pair_reply() {
+	IFS= read -r request
+	d=no
+	if json_load "$request" 2>/dev/null; then json_get_var d decision 2>/dev/null; fi
+	case "$d" in
+	yes|1|true|ok) d=yes ;;
+	*) d=no ;;
+	esac
+	mkdir -p "$AGT_DIR"
+	printf '%s' "$d" > "$AGT_DIR/decision" 2>/dev/null
+	json_init
+	json_add_boolean ok 1
+	json_add_string decision "$d"
+	json_dump
+}
+
 case "$1" in
 	list)
-		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"},"bt_unpair":{"address":"String"},"bt_opt_probe":{},"bt_opt_install":{}}'
+		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"},"bt_unpair":{"address":"String"},"bt_nearby":{},"bt_scan":{"on":"String"},"bt_pair":{"address":"String"},"bt_connect":{"address":"String"},"bt_action_result":{},"bt_pair_pending":{},"bt_pair_reply":{"decision":"String"},"bt_opt_probe":{},"bt_opt_install":{}}'
 		;;
 	call)
 		case "$2" in
 		bt_get) bt_state ;;
 		bt_set) bt_set ;;
 		bt_unpair) bt_unpair ;;
+		bt_nearby) bt_nearby ;;
+		bt_scan) bt_scan ;;
+		bt_pair) bt_pair ;;
+		bt_connect) bt_connect ;;
+		bt_action_result) bt_action_result ;;
+		bt_pair_pending) bt_pair_pending ;;
+		bt_pair_reply) bt_pair_reply ;;
 		bt_opt_probe) btopt_probe ;;
 		bt_opt_install) btopt_install ;;
 		*) exit 1 ;;

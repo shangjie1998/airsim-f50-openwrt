@@ -25,6 +25,25 @@ function segmented(options, current, onPick) {
 var btGet = rpc.declare({ object: 'airsim-bt', method: 'bt_get', expect: {} });
 var btSet = rpc.declare({ object: 'airsim-bt', method: 'bt_set', params: ['enable'], expect: {}, reject: true, nobatch: true });
 var btUnpair = rpc.declare({ object: 'airsim-bt', method: 'bt_unpair', params: ['address'], expect: {}, reject: true, nobatch: true });
+var btNearby = rpc.declare({ object: 'airsim-bt', method: 'bt_nearby', expect: {} });
+var btScan = rpc.declare({ object: 'airsim-bt', method: 'bt_scan', params: ['on'], expect: {}, reject: true, nobatch: true });
+var btPair = rpc.declare({ object: 'airsim-bt', method: 'bt_pair', params: ['address'], expect: {}, reject: true, nobatch: true });
+var btConnect = rpc.declare({ object: 'airsim-bt', method: 'bt_connect', params: ['address'], expect: {}, reject: true, nobatch: true });
+var btActionResult = rpc.declare({ object: 'airsim-bt', method: 'bt_action_result', expect: {} });
+var btPairPending = rpc.declare({ object: 'airsim-bt', method: 'bt_pair_pending', expect: {} });
+var btPairReply = rpc.declare({ object: 'airsim-bt', method: 'bt_pair_reply', params: ['decision'], expect: {}, reject: true, nobatch: true });
+
+ /* 待应答轮询：btCard 每次重画都会新建一遍闭包，所以定时器只在模块级起一次，
+  * 每次通过钩子指向当前那一次渲染出来的 pollPending。 */
+var _pollHook = null;
+var _pollStarted = false;
+
+function startPendingPoll() {
+ if (_pollStarted) return;
+ _pollStarted = true;
+ setTimeout(function() { if (_pollHook) _pollHook(); }, 400);
+ setInterval(function() { if (!document.hidden && _pollHook) _pollHook(); }, 3000);
+}
 
 function btCard(bt) {
  bt = bt || {};
@@ -81,6 +100,165 @@ function btCard(bt) {
     }, '删除')
    ]);
   }));
+ }
+
+ /* 有人往这台机器发起配对：重点是「30 秒内不点就自动拒绝」得写清楚，
+  * 不然用户一犹豫就被默默拒掉了。 */
+ var pendingBox = E('div', {}, []);
+ var pendingTimer = null;
+
+ function renderPending(p) {
+  pendingBox.textContent = '';
+  if (!p || !p.pending) return;
+  var who = (p.name || '一台设备') + (p.address ? '（' + p.address + '）' : '');
+  var extra = p.passkey ? '配对验证码 ' + p.passkey + '，请和对方屏幕上的一致；' : '';
+  var left = p.seconds_left > 0 ? p.seconds_left : 0;
+  pendingBox.appendChild(E('div', { 'class': 'as-card', style: 'border:1px solid rgba(255,140,80,.45);margin:0 0 14px' }, [
+   E('h3', {}, '有人要配对'),
+   E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, who + ' 想和这台机器配对。' + extra + (left ? '还剩 ' + left + ' 秒，超时就自动拒绝。' : '已经超时，会自动拒绝。')),
+   E('div', { style: 'display:flex;gap:10px;margin-top:12px' }, [
+    E('button', { 'type': 'button', 'class': 'as-btn', 'click': function() { replyPending('yes'); } }, '同意配对'),
+    E('button', { 'type': 'button', 'class': 'as-btn as-btn-ghost', 'click': function() { replyPending('no'); } }, '拒绝')
+   ])
+  ]));
+ }
+
+ function replyPending(decision) {
+  btPairReply(decision).then(function() {
+   pendingBox.textContent = '';
+   ui.toast(decision === 'yes' ? '已同意配对' : '已拒绝这次配对');
+   return L.resolveDefault(btGet(), {}).then(function(s) { apply(s || {}); });
+  }).catch(function(err) {
+   pendingBox.appendChild(E('p', { 'class': 'as-caption' }, '应答失败：' + (err && err.message ? err.message : err)));
+  });
+ }
+
+ function pollPending() {
+  btPairPending().then(function(p) {
+   renderPending(p || {});
+  }).catch(function() { /* 读不到就当没有请求，别弹报错 */ });
+ }
+
+ /* 附近设备：扫一次 15 秒，边扫边刷，完了把按钮放开 */
+ var nearBox = E('div', {}, [E('p', { 'class': 'as-caption' }, '点「扫描」找周围能连的设备（15 秒）。')]);
+ var scanBtn = E('button', { 'type': 'button', 'class': 'as-btn', 'click': function() { startScan(); } }, '扫描附近的设备');
+
+ function renderNearby(n) {
+  var list = (n && n.nearby) || [];
+  nearBox.textContent = '';
+  if (!list.length) {
+   nearBox.appendChild(E('p', { 'class': 'as-caption' }, '还没扫到设备。让对方的蓝牙可被发现，再点一次扫描。'));
+   return;
+  }
+
+  /* 附近经常一堆 BLE 信标，名字就是地址，全列出来没法用。
+  * 排序：已配对 > 有名字的 > 名字就是地址的。*/
+  var macName = function(d) {
+   return /^[0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2}$/.test(d.name || '');
+  };
+  list = list.slice().sort(function(a, b) {
+   if (!!a.paired !== !!b.paired) return a.paired ? -1 : 1;
+   if (macName(a) !== macName(b)) return macName(a) ? 1 : -1;
+   return (a.name || '').localeCompare(b.name || '');
+  });
+  var shown = list.slice(0, 12);
+  shown.forEach(function(d) {
+   var right = d.paired
+    ? E('button', { 'type': 'button', 'class': 'as-btn as-btn-ghost', 'style': 'flex:none;font-size:12px;padding:4px 10px',
+        'click': function() { doConnect(d); } }, d.connected ? '重新连接' : '连接')
+    : E('button', { 'type': 'button', 'class': 'as-btn', 'style': 'flex:none;font-size:12px;padding:4px 10px',
+        'click': function() { doPair(d); } }, '配对');
+   nearBox.appendChild(E('div', { style: 'display:flex;align-items:center;gap:10px;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)' }, [
+    E('span', {}, [
+     E('strong', {}, d.name || '未知设备'),
+     E('span', { 'class': 'as-caption' }, ' ' + d.address + (d.paired ? (d.connected ? ' · 已连接' : ' · 已配对') : ''))
+    ]),
+    right
+   ]));
+  });
+  if (list.length > shown.length)
+   nearBox.appendChild(E('p', { 'class': 'as-caption', style: 'margin-top:8px' }, '附近还有 ' + (list.length - shown.length) + ' 台没列出来（多半是蓝牙信标），要用的话再扫一次。'));
+ }
+
+ function refreshNearby() {
+  btNearby().then(function(n) { renderNearby(n || {}); }).catch(function() {});
+ }
+
+ function startScan() {
+  if (busy) return;
+  scanBtn.disabled = true;
+  scanBtn.textContent = '正在扫描…';
+  btScan('on').then(function() {
+   var ticks = 0;
+   var t = setInterval(function() {
+    refreshNearby();
+    if (++ticks >= 6) {
+     clearInterval(t);
+     scanBtn.disabled = false;
+     scanBtn.textContent = '再扫一次';
+    }
+   }, 2500);
+   refreshNearby();
+  }).catch(function(err) {
+   scanBtn.disabled = false;
+   scanBtn.textContent = '扫描附近的设备';
+   ui.toast('扫描失败：' + (err && err.message ? err.message : err));
+  });
+ }
+
+ /* 主动配对：发起后等结果（最长 35 秒），成了就把这台 trust 上、
+  * 再试着连一次，失败就把后端那句原话给用户看。 */
+ function waitResult(action, address, cb) {
+  var started = Math.floor(Date.now() / 1000) - 1;
+  var tries = 0;
+  var t = setInterval(function() {
+   btActionResult().then(function(r) {
+    if (r && r.done && r.action === action && r.address === address) {
+     clearInterval(t);
+     cb(r);
+    } else if (++tries > 24) {
+     clearInterval(t);
+     cb({ ok: false, done: false, message: '等了 35 秒没有结果，对方可能没点确认' });
+    }
+   }).catch(function() {});
+  }, 1500);
+ }
+
+ function doPair(d) {
+  if (busy) return;
+  lock(true);
+  info.textContent = '正在和「' + (d.name || d.address) + '」配对，让对方点一下确认…';
+  btPair(d.address).then(function() {
+   waitResult('pair', d.address, function(r) {
+    lock(false);
+    if (r.ok) {
+     info.textContent = '已和「' + (d.name || d.address) + '」配对，正在连接…';
+     doConnect(d, true);
+    } else {
+     info.textContent = '配对没成：' + (r.message || '对方没响应');
+    }
+    refreshNearby();
+   });
+  }).catch(function(err) {
+   lock(false);
+   info.textContent = '配对失败：' + (err && err.message ? err.message : err);
+  });
+ }
+
+ function doConnect(d, silent) {
+  if (busy) return;
+  lock(true);
+  if (!silent) info.textContent = '正在连接「' + (d.name || d.address) + '」…';
+  btConnect(d.address).then(function() {
+   waitResult('connect', d.address, function(r) {
+    lock(false);
+    info.textContent = r.ok ? '已连接「' + (d.name || d.address) + '」。' : '连接没成：' + (r.message || '对方没响应或者不在范围');
+    return L.resolveDefault(btGet(), {}).then(function(s) { apply(s || {}); });
+   });
+  }).catch(function(err) {
+   lock(false);
+   info.textContent = '连接失败：' + (err && err.message ? err.message : err);
+  });
  }
 
  /* 这四个值做成活节点：开关一动就整体重画，不留旧值 */
@@ -158,6 +336,10 @@ function btCard(bt) {
   });
  }
 
+ /* 每次重画把钩子指向本次的 pollPending；定时器模块级只起一次 */
+ _pollHook = pollPending;
+ startPendingPoll();
+
  var rows = [
   E('div', { 'class': 'as-row' }, [E('dt', {}, '状态'), stateValue]),
   E('div', { 'class': 'as-row' }, [E('dt', {}, '名称'), nameValue]),
@@ -167,6 +349,7 @@ function btCard(bt) {
  ];
 
  return [
+  pendingBox,
   E('h3', {}, bt.label || '蓝牙'),
   E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, '关掉会释放射频和一点待机功耗；打开后控制器会挂上，并默认保持可被发现、可配对，手机和耳机在蓝牙列表里能直接搜到这台设备。'),
   E('div', { 'class': 'as-field-label' }, '开关'),
@@ -174,7 +357,10 @@ function btCard(bt) {
   info,
   rows.length ? E('dl', { style: 'margin-top:10px' }, rows) : null,
   E('div', { 'class': 'as-field-label', style: 'margin-top:14px' }, '已配对设备'),
-  devValue
+  devValue,
+  E('div', { 'class': 'as-field-label', style: 'margin-top:18px' }, '附近的设备'),
+  E('div', { style: 'margin:8px 0 10px' }, scanBtn),
+  nearBox
  ].filter(function(item) { return item !== null; });
 }
 return view.extend({
@@ -192,7 +378,7 @@ return view.extend({
     E('div', {}, [
      E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 蓝牙'),
      E('h2', {}, '蓝牙在这儿。'),
-     E('p', {}, '开关、名字、已配对设备都在这页；关掉重启仍是关。')
+     E('p', {}, '开关、名字、已配对设备、扫描配对都在这页；关掉重启仍是关。')
     ])
    ]),
    E('div', { 'class': 'as-layout' }, [
@@ -206,7 +392,8 @@ return view.extend({
      E('h3', {}, '说明'),
      E('p', { 'class': 'as-caption', style: 'margin-top:10px' }, '名字按 F50-<蓝牙地址后 6 位> 自动生成，每台机器唯一、重启不变；手机蓝牙列表里看到的就是它。'),
      E('p', { 'class': 'as-caption' }, '控制器挂上后默认保持可被发现、可配对，不用每次手动点；配对由手机或耳机那边发起，配完会出现在「已配对设备」里，不要了就在那一条后面点「删除」。'),
-     E('p', { 'class': 'as-caption' }, '删除会先断开连接再删记录；删完「可被发现 / 可配对」会自动复位，不用再开一次开关。')
+     E('p', { 'class': 'as-caption' }, '删除会先断开连接再删记录；删完「可被发现 / 可配对」会自动复位，不用再开一次开关。'),
+     E('p', { 'class': 'as-caption' }, '两个方向都能配：这台机器主动去配别人，就在「附近的设备」里点「配对」；别人发起配对时，页面顶上会弹「有人要配对」，点同意才继续，30 秒不点就当拒绝。')
     ])
    ])
   ]);
