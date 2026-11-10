@@ -18,9 +18,11 @@
  --as-radius:20px; --as-radius-s:12px;
  --as-shadow:0 6px 24px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03);
  --as-blur:22px; --as-sat:180%;
- --as-pad:clamp(18px,3vw,34px);
+ --as-pad:28px;
  --as-gap:18px;
- --as-fs-body:15px; --as-fs-title:clamp(26px,3.2vw,34px); --as-fs-h3:22px; --as-fs-cap:13px; --as-fs-note:12px;
+ --as-fs-body:15px; --as-fs-title:30px; --as-fs-h3:22px; --as-fs-cap:13px; --as-fs-note:12px;
+ /* 版式尺子：卡片最小宽、卡片内边距、间距固定；列数随浏览器宽度 1/2/3 栏自适配 */
+ --as-card-min:300px; --as-card-pad:22px;
 }
 html[data-theme="dark"]{
  --as-bg:#101013;
@@ -37,7 +39,7 @@ html[data-theme="dark"]{
  --as-shadow:0 8px 32px rgba(0,0,0,.42),0 1px 2px rgba(0,0,0,.3);
 }
 html[data-transparency="solid"] *,html[data-transparency="solid"] *::before{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
-html[data-density="compact"]{--as-pad:clamp(12px,2vw,22px);--as-gap:12px;--as-fs-body:14px;--as-fs-h3:20px}
+html[data-density="compact"]{--as-pad:20px;--as-gap:12px;--as-card-pad:18px;--as-fs-body:14px;--as-fs-h3:20px;--as-fs-title:26px}
 html[data-transparency="solid"] .as-root,html[data-transparency="solid"] .as-modal{
  --as-surface:var(--as-bg-solid,rgba(255,255,255,.94));
 }
@@ -46,7 +48,7 @@ html[data-theme="dark"][data-transparency="solid"]{--as-surface:rgba(28,28,30,.9
 /* ---------- 根容器 ---------- */
 .as-root{
  box-sizing:border-box;color:var(--as-ink);font-family:var(--font);font-size:var(--as-fs-body);line-height:1.47;
- padding:var(--as-pad);border-radius:26px;margin:10px auto;max-width:1440px;-webkit-font-smoothing:antialiased;
+ padding:var(--as-pad);border-radius:26px;margin:10px auto;max-width:none;width:auto;-webkit-font-smoothing:antialiased;
  background:
   radial-gradient(1000px 620px at 10% -10%,color-mix(in srgb,var(--as-blue) 9%,transparent),transparent 64%),
   radial-gradient(820px 540px at 94% 2%,color-mix(in srgb,var(--as-green) 7%,transparent),transparent 62%),
@@ -79,16 +81,62 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
 .as-root>.as-header{position:static;inset:auto;height:auto;width:auto;z-index:auto;float:none;transform:none;background:transparent;box-shadow:none;padding:0}
 .as-root>.as-footer{position:static;inset:auto;width:auto;height:auto;float:none;padding:0;background:transparent;font-size:var(--as-fs-note);color:var(--as-faint);margin-top:22px;text-align:center}
 
+/* ---------- 顶部菜单（我们自己接管，不再依赖主题页签） ---------- */
+/* 顶部菜单吸顶：往下滚的时候一直在，问哪一页都看得见 */
+.as-menu{
+ /* 主题顶栏是 sticky 且 z-index 更高，所以吸在它下沿（57px），别被盖住 */
+ position:sticky;top:57px;z-index:13;margin:0 0 20px;
+ padding:10px 0 12px;
+ background:transparent;
+ backdrop-filter:blur(16px) saturate(150%);-webkit-backdrop-filter:blur(16px) saturate(150%);
+ border-radius:0 0 18px 18px;
+}
+.as-menu-strip{display:flex;flex-wrap:wrap;gap:8px}
+.as-menu-item{
+ display:inline-flex;align-items:center;min-height:38px;padding:8px 15px;border-radius:999px;
+ border:1px solid var(--as-line-strong);background:var(--as-surface-strong);
+ color:var(--as-muted);font-size:14px;font-weight:600;line-height:1;text-decoration:none;
+ transition:background-color .18s,color .18s,border-color .18s;
+}
+.as-menu-item:hover{color:var(--as-ink);border-color:color-mix(in srgb,var(--as-blue) 40%,var(--as-line-strong))}
+.as-menu-item.is-active{background:var(--as-blue);border-color:var(--as-blue);color:#fff}
+.as-menu-item:focus-visible{outline:3px solid color-mix(in srgb,var(--as-blue) 38%,transparent);outline-offset:2px}
+.as-menu-narrow{display:none;align-items:center;gap:10px}
+.as-menu-current{font-size:var(--as-fs-body);font-weight:650;color:var(--as-ink);flex-shrink:0}
+.as-menu-narrow .as-menu-select{width:auto;flex:1 1 auto;min-width:0;margin:0}
+/* 宽度不够时不折行、不让后面的项被裁掉，直接换成下拉 */
+@media(max-width:520px){
+ .as-menu-strip{display:none}
+ .as-menu-narrow{display:flex}
+ .as-root{--as-pad:16px;--as-card-pad:18px;--as-gap:14px;--as-fs-title:24px;--as-fs-h3:20px}
+}
+html[data-transparency="solid"] .as-menu-item{background:var(--as-bg)}
+/* 主题那排同名页签在 AirSIM 页让位（只认我们这条） */
+body.as-menu-on #tabmenu,
+body.as-menu-on .sidebar-submenu,
+body.as-menu-on .mobile-nav-submenu,
+body.as-menu-on > header .nav{display:none!important}
+
 /* ---------- 布局 ---------- */
-.as-layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:var(--as-gap);align-items:start}
-.as-actions{display:flex;flex-direction:column;gap:var(--as-gap);min-width:0}
-.as-wide{grid-column:1/-1}
-@media(max-width:720px){.as-layout{grid-template-columns:1fr}.as-wide{grid-column:auto}}
+/* 瀑布流：卡片按自身内容高低往下排，列数随可用宽度 1/2/3 栏铺满。
+ * 这样每张卡都是内容撑开的高度，不会为对齐而拉出一块空白，也不会挤成一团。
+ * 单张卡（.as-wide）跨所有列，占满一行。间距、内边距、卡片最小宽都是固定值。 */
+.as-layout{columns:var(--as-card-min);column-gap:var(--as-gap)}
+.as-layout>*{break-inside:avoid;margin:0 0 var(--as-gap);width:100%}
+.as-layout>*:last-child{margin-bottom:0}
+.as-wide{column-span:all}
+/* 整页只有一张卡时别缩在半栏里，直接占满 */
+.as-layout>:only-child{column-span:all}
+/* 概览页右侧那一摞：用 display:contents 让里头的卡片直接参与分列，
+ * 不再整块塞进一列，避免左列留一大片空白 */
+.as-actions{display:contents}
+.as-actions>*{margin:0 0 var(--as-gap);break-inside:avoid}
+@media(max-width:720px){.as-layout{columns:1}}
 
 /* ---------- 玻璃卡 ---------- */
 .as-card{
  background:var(--as-surface);border:1px solid var(--as-line);border-radius:var(--as-radius);
- padding:clamp(18px,2.4vw,26px);box-shadow:var(--as-shadow);min-width:0;
+ padding:var(--as-card-pad);box-shadow:var(--as-shadow);min-width:0;
  backdrop-filter:blur(var(--as-blur)) saturate(var(--as-sat));-webkit-backdrop-filter:blur(var(--as-blur)) saturate(var(--as-sat));
 }
 .as-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:2px}
@@ -102,12 +150,25 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
 .as-step-heading{display:flex;align-items:center;gap:11px;margin-bottom:10px}
 .as-step{font-size:12px;font-weight:700;color:var(--as-blue);background:color-mix(in srgb,var(--as-blue) 10%,transparent);border-radius:9px;width:28px;height:28px;display:grid;place-items:center;flex-shrink:0}
 
+/* ---------- 通用补位（页面只写类名，样式全在这儿） ---------- */
+.as-lead{margin-top:8px}
+.as-inline{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.as-facts{margin-top:10px}
+.as-notice{border-color:color-mix(in srgb,var(--as-blue) 42%,var(--as-line));background:color-mix(in srgb,var(--as-blue) 8%,var(--as-surface))}
+.as-devs{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:2px}
+.as-dev-item{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--as-line);min-width:0}
+.as-dev-item:last-child{border-bottom:0}
+.as-dev-item>span{min-width:0;overflow-wrap:anywhere}
+.as-root .as-mini{font-size:12px;min-height:32px;padding:7px 12px;border-radius:10px;flex:none}
+.as-root .as-danger-quiet{background:transparent;color:var(--as-muted);border-color:var(--as-line-strong)}
+.as-root .as-danger-quiet:hover:not(:disabled){background:var(--as-red-bg);color:var(--as-red);border-color:color-mix(in srgb,var(--as-red) 30%,transparent)}
+
 /* ---------- 正文块 ---------- */
 .as-root .as-copy{font-size:var(--as-fs-body);color:var(--as-muted);line-height:1.6}
 .as-root .as-caption{font-size:var(--as-fs-cap);color:var(--as-muted);line-height:1.7}
 .as-label{font-size:var(--as-fs-note);color:var(--as-muted)}
 .as-number-block{padding:18px 0 14px;border-bottom:1px solid var(--as-line);margin-bottom:6px}
-.as-number{font-size:clamp(24px,2.8vw,34px);font-weight:600;line-height:1.3;letter-spacing:-.8px;margin:6px 0 8px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.as-number{font-size:30px;font-weight:600;line-height:1.3;letter-spacing:-.8px;margin:6px 0 8px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 
 /* ---------- 行（标签 + 值） ---------- */
 .as-row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:11px 0;border-bottom:1px solid var(--as-line);font-size:var(--as-fs-body)}
@@ -117,6 +178,11 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
 .as-details{margin-top:16px;border-top:1px solid var(--as-line);padding-top:14px}
 .as-details summary{cursor:pointer;font-size:var(--as-fs-cap);color:var(--as-muted);padding:4px 0;min-height:32px}
 .as-details .as-row{font-size:var(--as-fs-cap)}
+/* 可选配件里每一项的统一样式：一条细分隔线 + 一致的上下间距 */
+.as-opt{padding-top:16px;margin-top:16px;border-top:1px solid var(--as-line)}
+.as-opt:first-of-type{padding-top:0;margin-top:6px;border-top:0}
+.as-opt .as-buttons{margin-top:10px}
+.as-opt .as-row{padding:0 0 6px;border-bottom:0}
 .as-root .as-technical{font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;color:var(--as-muted);padding:10px;background:var(--as-surface-strong);border-radius:9px;margin-top:8px}
 .as-root .as-updated{font-size:var(--as-fs-note);color:var(--as-faint);margin-top:18px}
 
@@ -191,6 +257,12 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
 .as-root .as-sms-input:disabled{background:color-mix(in srgb,var(--as-ink) 6%,transparent);color:var(--as-muted)}
 .as-root .as-sms [hidden]{display:none!important}
 .as-root .as-sms-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.as-root .as-tag{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:600;line-height:1.5;border:1px solid transparent;white-space:nowrap}
+.as-root .as-tag-ok{background:var(--as-green-bg);color:var(--as-green);border-color:color-mix(in srgb,var(--as-green) 34%,transparent)}
+.as-root .as-tag-bad{background:var(--as-red-bg);color:var(--as-red);border-color:color-mix(in srgb,var(--as-red) 34%,transparent)}
+.as-root .as-tag-warn{background:color-mix(in srgb,var(--as-blue) 14%,transparent);color:var(--as-blue);border-color:color-mix(in srgb,var(--as-blue) 30%,transparent)}
+.as-root .as-tag-dim{background:color-mix(in srgb,var(--as-faint) 14%,transparent);color:var(--as-muted)}
+.as-root .as-sms-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .as-root .as-sms-meta .as-sim-tag{background:color-mix(in srgb,var(--as-faint) 16%,transparent);color:var(--as-ink);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500}
 
 /* ---------- 弹层（挂在 body 下，不复用 .as-root 作用域） ---------- */
@@ -233,7 +305,7 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
 .as-root .as-check-label input[type="checkbox"]{width:17px;height:17px;margin:1px 0 0;accent-color:var(--as-blue);flex-shrink:0}
 .as-root hr{border:0;border-top:1px solid var(--as-line);margin:22px 0}
 .as-root .as-history{max-height:320px;overflow:auto;margin-top:12px}
-.as-root .as-history-row{display:grid;grid-template-columns:minmax(8rem,1fr) minmax(6rem,1fr) minmax(0,2fr);gap:8px;padding:10px 0;border-bottom:1px solid var(--as-line);font-size:var(--as-fs-note);overflow-wrap:anywhere}
+.as-root .as-history-row{display:grid;grid-template-columns:minmax(8rem,1fr) minmax(6rem,1fr) auto;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--as-line);font-size:var(--as-fs-note);overflow-wrap:anywhere}
 .as-root .as-history-row:last-child{border-bottom:0}
 .as-root .as-relay-line{font-size:var(--as-fs-note);color:var(--as-muted);overflow-wrap:anywhere;margin-top:8px}
 @media(max-width:480px){.as-root .as-history-row{grid-template-columns:1fr 1fr}.as-root .as-history-row>:last-child{grid-column:1/-1}}
@@ -255,6 +327,7 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
  .as-root{padding:16px;border-radius:20px}
  .as-root h2{font-size:26px}
  .as-root h3,.as-root h4{font-size:19px}
+ .as-opt{padding-top:14px;margin-top:14px}
  .as-row{display:block;padding:10px 0}
  .as-row dd{text-align:left;margin-top:3px}
  .as-buttons .as-button{flex:1 1 100%}

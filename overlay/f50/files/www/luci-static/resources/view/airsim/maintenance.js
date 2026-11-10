@@ -14,6 +14,8 @@ var backupMake = rpc.declare({ object: 'airsim-backup', method: 'make', expect: 
 var backupRestore = rpc.declare({ object: 'airsim-backup', method: 'restore', params: ['payload'], expect: {}, reject: true, nobatch: true });
 var btProbe = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_probe', expect: {}, reject: true });
 var btInstall = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_install', expect: {}, reject: true, nobatch: true });
+var audioProbe = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_probe', expect: {}, reject: true });
+var audioInstall = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_install', expect: {}, reject: true, nobatch: true });
 
 var releasesURL = 'https://github.com/shangjie1998/airsim-f50-openwrt/releases';
 
@@ -191,7 +193,7 @@ return view.extend({
    var messages = {
     available: '发现新版本', current: '当前已是此频道最新版本', ahead: '当前构建领先于公开 Release',
     unknown_version: '当前开发版本无法自动比较',
-    no_release: 'F50 是自编整包，网页不做在线安装；请从「打开项目 Release」下载后手动装'
+    no_release: '这个频道暂时没有可用的整包；可以先去「打开项目 Release」看一眼'
    };
    updateResult.textContent = (messages[result.status] || '版本状态未知') + (valid ? ' · ' + result.latest : '') + (result.prerelease ? '（开发预览）' : '') + (result.checked_at ? ' · 检查于 ' + new Date(result.checked_at).toLocaleString() : '');
    updateLink.href = valid ? releasesURL + '/tag/' + result.latest : releasesURL;
@@ -256,32 +258,37 @@ return view.extend({
 
   showUpdateStatus(updateInfo);
 
-  var backupCard = E('section', { 'class': 'as-card as-wide' }, [
-   E('h3', {}, '备份与恢复'),
-   E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, '把插件配置、配对凭据和运行状态打成一个 .tar.gz 存到电脑；换固件、刷机、折腾完再导回来。'),
-   E('p', { 'class': 'as-caption' }, '备份包按本机硬件指纹标记，恢复时先校验指纹，别人的备份会被直接拒绝。日志、音频、短信正文都不进包。'),
+  /* 备份、恢复分两张卡：一件事一张卡，宽屏并排，窄屏上下 */
+  var backupCard = E('section', { 'class': 'as-card' }, [
+   E('h3', {}, '备份'),
+   E('p', { 'class': 'as-copy as-lead' }, '把插件配置、配对凭据和运行状态打成一个 .tar.gz 存到电脑。'),
+   E('p', { 'class': 'as-caption' }, '备份包按本机硬件指纹标记，日志、音频、短信正文都不进包。'),
    E('div', { 'class': 'as-buttons' }, [backupBtn]),
-   backupNote,
-   E('hr', {}),
+   backupNote
+  ]);
+
+  var restoreCard = E('section', { 'class': 'as-card' }, [
+   E('h3', {}, '恢复'),
+   E('p', { 'class': 'as-copy as-lead' }, '换固件、刷机、折腾完再导回来；先校验指纹，别人的备份会被直接拒绝。'),
    dropZone, fileInput, pickButton, pickedName,
    E('div', { 'class': 'as-buttons' }, [restoreBtn]),
    restorePanel,
-   E('p', { 'class': 'as-caption', style: 'margin-top:10px' }, '恢复会覆盖当前配置与配对资料并重启服务，覆盖前自动把现在的状态存到 /tmp/airsim-before-restore-*。')
+   E('p', { 'class': 'as-caption as-lead' }, '恢复会覆盖当前配置与配对资料并重启服务，覆盖前自动把现在的状态存到 /tmp/airsim-before-restore-*。')
   ]);
 
-  var updateCard = E('section', { 'class': 'as-card as-wide' }, [
+  var updateCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '插件更新'),
    E('label', { 'class': 'as-check', 'for': 'as-auto-update' }, [automatic, E('span', {}, '自动检查更新（每 6 小时）')]),
    E('label', { 'class': 'as-check', 'for': 'as-previews' }, [previews, E('span', {}, '包含开发预览版')]),
    E('p', { 'class': 'as-caption' }, '自动检查只取公开版本信息，不自动安装。要先在概览页关掉电话服务再更新。'),
    E('div', { 'class': 'as-buttons' }, [checkBtn]),
    updateResult, jobNote, updateLink,
-   E('p', { 'class': 'as-caption' }, 'F50 是自编整包：这里只显示版本与链接，不在网页里直接升级，免得把上游作者的整包盖到本项目的 overlay 上。要升级就下 Release 手动装。')
+   E('p', { 'class': 'as-caption' }, 'F50 是自编整包，更新源指本项目：发现新版本时可以在这里一键装（先关电话服务，装完重启服务）。装的是固定 tag 的整包，装前核对 sha256。')
   ]);
 
   var diagCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '诊断导出'),
-   E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, '导出一份可分享的状态报告，出问题时直接发给维护的人。'),
+   E('p', { 'class': 'as-copy as-lead' }, '导出一份可分享的状态报告，出问题时直接发给维护的人。'),
    E('p', { 'class': 'as-caption' }, '不读取短信正文，不导出号码、IP、Relay 地址、标识、配对码、密钥、原始日志或音频；不会自动上传。'),
    E('div', { 'class': 'as-buttons' }, [diagBtn]),
    diagNote
@@ -341,14 +348,85 @@ return view.extend({
    });
   });
 
+
+  /* ---------------- 可选配件：6.18 音频模块 ---------------- */
+  var audNote = noticeBox();
+  var audChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '检查中');
+  var audMsg = E('p', { 'class': 'as-caption' }, '正在问本机音频模块齐不齐。');
+  var audBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装音频模块');
+  var audBusy = false;
+
+  function syncAud(info) {
+   info = info || {};
+   var installed = info.installed === true, busy = info.busy === true;
+   audBusy = busy;
+   audChip.textContent = busy ? '正在装' : (installed ? '已安装' : (info.ko_count > 0 ? (info.ko_count + '/' + (info.want_ko || 25)) : '未安装'));
+   audChip.className = 'as-pill ' + (installed || busy ? 'as-pill-green' : 'as-pill-neutral');
+   audBtn.textContent = installed ? '重新安装音频模块' : '安装音频模块';
+
+   if (busy) {
+    audBtn.disabled = true;
+    audMsg.textContent = info.message || '正在装，别断电。';
+    return;
+   }
+   var kOk = info.kernel_ok === true, extOk = info.ext_present === true;
+   audBtn.disabled = !(kOk && extOk);
+   if (!kOk) {
+    audMsg.textContent = '本机内核 ' + (info.kernel || '未知') + '，这包只对 ' + (info.want_kernel || '—') + ' 有效（内核模块必须跟内核一致）。';
+   }
+   else if (!extOk) {
+    audMsg.textContent = '本机没有厂商音频扩展目录（/mnt/mu300-disk/extra/airsim-audio），先有那一套才能补模块。';
+   }
+   else if (info.state === 'failed') {
+    audMsg.textContent = info.message || '这次没成。';
+    setNotice(audNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
+   }
+   else if (installed) {
+    audMsg.textContent = '模块 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + ' 齐了' + (info.opt_version ? '（可选件 ' + info.opt_version + '）' : '') + '；页面出问题可以重装一遍，旧目录会先备份。';
+   }
+   else {
+    var lack = info.ko_missing || 0;
+    audMsg.textContent = '本机 6.18.60 的音频驱动模块缺 ' + lack + ' 个（现 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + '）。从这里补：约 420KB，走固定 tag ' + (info.version || 'audio-opt') + '，装前核对 sha256。';
+   }
+   if (kOk && extOk && info.dsp_present === false) audMsg.textContent += ' 注意：本机没有 mu300-audio-dsp，光补模块也放不出声。';
+   audBtn.title = audBtn.disabled ? '内核或扩展目录条件不满足' : '从 GitHub 拉可选件并安装';
+  }
+
+  audBtn.addEventListener('click', function() {
+   if (audBusy) return;
+   audBtn.disabled = true;
+   audMsg.textContent = '正在启动安装……';
+   audioInstall().then(function(res) {
+    res = res || {};
+    if (res.ok !== true) {
+     audBtn.disabled = false;
+     setNotice(audNote, '没启动', res.error || '启动失败', 'error');
+     return;
+    }
+    setNotice(audNote, '开始装了', '下载 → 核 sha256 → 解包 → 放模块，几秒到几十秒。页面会自动刷新进度。', 'info');
+    audMsg.textContent = '正在下载……';
+   }).catch(function(e) {
+    audBtn.disabled = false;
+    setNotice(audNote, '没启动', String(e && e.message || e), 'error');
+   });
+  });
+
   var optCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '可选配件'),
-   E('p', { 'class': 'as-copy' }, '蓝牙不是主包的一部分：驱动模块（sprdbt_tty）与 bluez 那套要么本机自带，要么从这里装。刷过机、升过级的机器如果蓝牙页不见了，就是这一套没了。'),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '蓝牙'), E('dd', {}, [optChip])]),
-   optMsg,
-   E('div', { 'class': 'as-buttons' }, [optBtn]),
-   optNote,
-   E('p', { 'class': 'as-caption' }, '只装可选件本身：不动开关状态（/etc/config/f50-bt），不动已配对记录。装的是固定 tag 的包，内核对不上会直接拒绝，不会装半截。')
+   E('p', { 'class': 'as-copy' }, '这两样都不在主包里：刷机、升级之后如果对应页面没了或者放不出声，就是这一套缺了，从这里补回来。'),
+   E('div', { 'class': 'as-opt' }, [
+    E('div', { 'class': 'as-row' }, [E('dt', {}, '蓝牙'), E('dd', {}, [optChip])]),
+    optMsg,
+    E('div', { 'class': 'as-buttons' }, [optBtn]),
+    optNote
+   ]),
+   E('div', { 'class': 'as-opt' }, [
+    E('div', { 'class': 'as-row' }, [E('dt', {}, '音频模块'), E('dd', {}, [audChip])]),
+    audMsg,
+    E('div', { 'class': 'as-buttons' }, [audBtn]),
+    audNote
+   ]),
+   E('p', { 'class': 'as-caption' }, '只装可选件本身：蓝牙不动开关状态（/etc/config/f50-bt）和已配对记录；音频只补 6.18.60 的 .ko，不动 DSP 以外的程序。两者都走固定 tag，内核对不上会直接拒绝，不会装半截。')
   ]);
 
   var versionCard = E('section', { 'class': 'as-card' }, [
@@ -364,9 +442,11 @@ return view.extend({
   ]);
 
   btProbe().then(syncOpt).catch(function() { optMsg.textContent = '这台机器没有安装器接口（主包版本较旧）。'; });
+  audioProbe().then(syncAud).catch(function() { audMsg.textContent = '这台机器没有音频可选件接口（主包版本较旧）。'; });
 
   poll.add(function() {
-   var jobs = [btProbe().then(syncOpt).catch(function() { return null; })];
+   var jobs = [btProbe().then(syncOpt).catch(function() { return null; }),
+               audioProbe().then(syncAud).catch(function() { return null; })];
    if (pending || busyFlag) return Promise.all(jobs);
    jobs.push(getStatus().catch(function() { return {}; }).then(function(r) { state = r[0] || state; }));
    jobs.push(updateStatus().catch(function() { return {}; }).then(function(r) { showUpdateStatus(r[1] || {}); }));
@@ -374,12 +454,13 @@ return view.extend({
   }, 5);
 
   return E('div', { 'class': 'as-root' }, [
+   (ui.menu ? ui.menu('maintenance') : ''),
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 维护'), E('h2', {}, '备份、更新、诊断。'), E('p', {}, '折腾完想回退的时候，这里能救回来。')]),
     E('span', { 'class': 'as-version' }, 'v' + (state.version || '—'))
    ]),
-   E('div', { 'class': 'as-layout' }, [backupCard, updateCard, optCard, diagCard, versionCard]),
+   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, optCard, diagCard, versionCard]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 维护')
   ]);
  },

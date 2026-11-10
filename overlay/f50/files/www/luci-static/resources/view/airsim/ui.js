@@ -84,9 +84,67 @@ function install() {
 
 /* 页面统一用这个挂样式表，路径只写一次。
  * ui.css 改了要跟着改样式版本号，否则浏览器会一直吃旧缓存（这坑踩过两次）。 */
-var CSSVERSION = '20261109';
+var CSSVERSION = '20261112';
 function stylesheet(name) {
  return E('link', { 'rel': 'stylesheet', 'href': L.resource('view/airsim/' + (name || 'ui.css')) + '?v=' + CSSVERSION });
+}
+
+/* ---------------- 顶部菜单（我们自己接管） ----------------
+ * 为什么不交给主题：aurora 的横向页签在窄了以后会把后面几项裁掉，越加页越糟。
+ * 这里自绘一条菜单：宽屏一行平铺、放不下就折行；窄屏（<=520）整条换成下拉。
+ * 主题那边同名的 .sidebar-submenu / .mobile-nav-submenu 在 ui.css 里按页面前缀关掉了。
+ */
+var PAGES = [
+ { id: 'overview',    title: '设备概览' },
+ { id: 'connect',     title: '连接' },
+ { id: 'call',        title: '来电转发' },
+ { id: 'sms',         title: '短信' },
+ { id: 'maintenance', title: '维护' },
+ { id: 'settings',    title: '外观与设置' },
+ { id: 'bluetooth',   title: '蓝牙' }
+];
+
+/* 链接一律交给 L.url 生成：它知道 /cgi-bin/luci 这层前缀和实际脚本名。
+ * 早先自己从 pathname 截一段，遇到 /admin/services/airsim（不带页名）就截成
+ * /admin/services/，于是点蓝牙直接 404 —— 别再自己拼。 */
+function menu(current) {
+ current = current || '';
+ var base = L.url('admin/services/airsim');
+ var items = [];
+ var activeTitle = '';
+
+ PAGES.forEach(function(page) {
+  var active = page.id === current;
+  if (active) activeTitle = page.title;
+  items.push(E('a', {
+   'class': 'as-menu-item' + (active ? ' is-active' : ''),
+   'href': base + '/' + page.id,
+   'aria-current': active ? 'page' : null
+  }, page.title));
+ });
+
+ if (!activeTitle) activeTitle = 'AirSIM';
+
+ /* 菜单一挂上，就给 body 打标记；ui.css 靠这个标记才去关主题那排页签。
+  * 万一浏览器还在用旧版 ui.js（没有 menu 函数），页面只传 null，主题页签照旧可用，不会整页没有导航。 */
+ try { document.body.classList.add('as-menu-on'); } catch (e) { /* 忽略 */ }
+
+ var picker = E('select', { 'class': 'as-input as-menu-select', 'aria-label': '切换到其它页面' },
+  PAGES.map(function(page) {
+   return E('option', { 'value': base + '/' + page.id, 'selected': page.id === current ? '' : null }, page.title);
+  })
+ );
+ picker.addEventListener('change', function() {
+  if (picker.value) window.location.href = picker.value;
+ });
+
+ return E('nav', { 'class': 'as-menu', 'aria-label': 'AirSIM 页面' }, [
+  E('div', { 'class': 'as-menu-strip' }, items),
+  E('div', { 'class': 'as-menu-narrow' }, [
+   E('span', { 'class': 'as-menu-current' }, activeTitle),
+   picker
+  ])
+ ]);
 }
 
 /* 确认框：替代 vendor 模块的 confirmBox，样式走 ui.css 的 .as-modal。
@@ -160,6 +218,7 @@ return baseclass.extend({
  paint: paint,
  subscribe: subscribe,
  stylesheet: stylesheet,
+ menu: menu,
  dialog: dialog,
  toast: toast,
  busy: busy,

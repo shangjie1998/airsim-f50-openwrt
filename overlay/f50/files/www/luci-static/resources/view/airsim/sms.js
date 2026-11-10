@@ -74,9 +74,10 @@ return view.extend({
       var sim = String(m.sim || (m.card === '0' ? 'SIM1' : m.card === '1' ? 'SIM2' : '来源未知'));
       list.appendChild(E('article', { 'class': 'as-sms-item' }, [
        E('div', { 'class': 'as-sms-meta' }, [E('strong', {}, String(m.peer || '未知号码')),
-        E('span', { 'class': 'as-sim-tag' }, sim), E('span', {}, m.dir === 'mo' ? '已发送' : m.status === 'unread' ? '未读' : '已读')]),
+        E('span', { 'class': 'as-sim-tag' }, sim)]),
        E('p', { 'class': 'as-caption' }, String(m.time || '时间未知')),
-       E('p', { 'class': 'as-sms-preview' }, String(m.preview || '（无预览）')), read
+       E('p', { 'class': 'as-sms-preview' }, String(m.preview || '（无预览）')),
+       E('div', { 'class': 'as-sms-tags' }, [E('span', { 'class': 'as-tag ' + (m.dir === 'mo' ? 'as-tag-ok' : m.status === 'unread' ? 'as-tag-warn' : 'as-tag-dim') }, m.dir === 'mo' ? '已发送' : m.status === 'unread' ? '未读' : '已读')]), read
       ]));
      });
      if (!result.msgs.length) list.appendChild(E('p', { 'class': 'as-caption' }, filterCard === '' ? '暂无短信。新短信由设备原生服务自动接收。' : '这张卡下暂无短信。'));
@@ -280,23 +281,27 @@ return view.extend({
    E('div', { 'class': 'as-sms-toolbar' }, [filterLabel, filterSelect, refresh]),
    E('div', { 'class': 'as-buttons as-sms-ops' }, [markReadAll, clearAll]),
    opsNote,
-   listHint, list, E('div', { 'class': 'as-buttons as-sms-pages' }, [previous, next]), full,
-   E('div', { 'class': 'as-sms-compose' }, [
-    E('h4', {}, '新短信'),
-    sendLabel, sendCardSelect,
-    E('label', { 'for': 'as-sms-number', 'class': 'as-field-label' }, '收件号码'), number,
-    E('label', { 'for': 'as-sms-text', 'class': 'as-field-label' }, '短信内容'), body, counter,
-    E('p', { id: 'as-sms-help', 'class': 'as-caption' }, '本页每条最多 70 字，暂不支持 emoji 和长短信拆分。短信只在本设备管理，不转发至 AirSIM 客户端。'),
-    E('div', { 'class': 'as-buttons' }, [send]), confirmation, feedback, ack
-   ])
+   listHint, list, E('div', { 'class': 'as-buttons as-sms-pages' }, [previous, next]), full
+  ]);
+
+  /* 发短信单独一张卡：收件箱归收件箱，发送归发送，别挤在一张里 */
+  var composeCard = E('section', { 'class': 'as-card as-sms', 'aria-label': '发送短信' }, [
+   E('h3', {}, '发短信'),
+   E('p', { 'class': 'as-caption' }, '走设备本机的 SIM 卡发出。'),
+   sendLabel, sendCardSelect,
+   E('label', { 'for': 'as-sms-number', 'class': 'as-field-label' }, '收件号码'), number,
+   E('label', { 'for': 'as-sms-text', 'class': 'as-field-label' }, '短信内容'), body, counter,
+   E('p', { id: 'as-sms-help', 'class': 'as-caption' }, '本页每条最多 70 字，暂不支持 emoji 和长短信拆分。短信只在本设备管理，不转发至 AirSIM 客户端。'),
+   E('div', { 'class': 'as-buttons' }, [send]), confirmation, feedback, ack
   ]);
   var rootEl = E('div', { 'class': 'as-root' }, [
+   (ui.menu ? ui.menu('sms') : ''),
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 短信'), E('h2', {}, multiSim ? '短信，两张卡一页管。' : '短信，一页管好。'), E('p', {}, multiSim ? '查看、标记已读、清空与发送 F50 两张 SIM 卡的短信。' : '查看、标记已读、清空与发送本机 SIM 卡的短信。')]),
     E('span', { 'class': 'as-version' }, state && state.version ? 'v' + state.version : '')
    ]),
-   E('div', { 'class': 'as-layout' }, [card]),
+   E('div', { 'class': 'as-layout' }, [card, composeCard]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 短信')
   ]);
   update(); loadSims(); refreshList(); checkJob();

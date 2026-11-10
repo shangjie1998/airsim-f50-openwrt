@@ -25,7 +25,43 @@ MISSING=/sys/module/audio_reserve/parameters/missing
 RETRY=/sys/module/audio_reserve/parameters/retry
 LOG=/tmp/airsim-audio-claim.log
 
+# 开机顺手清点一遍音频模块：齐不齐、版本对不对。结果写到 /tmp/airsim-audio-status
+# 供维护页 audio_opt_probe 读，免得页面为了一个数字又去敲一遍 find。
+# 这一步不改任何文件，只做体检。
+EXT=${EXT:-/mnt/mu300-disk/extra/airsim-audio}
+WANT_KO=25
+STATUS=/tmp/airsim-audio-status
+
+check_modules() {
+	krel="$(uname -r)"
+	dir="$EXT/modules/$krel"
+	n=0
+	[ -d "$dir" ] && n="$(ls "$dir"/*.ko 2>/dev/null | wc -l | tr -d ' ')"
+	ver=""
+	[ -f "$EXT/audio-opt-version" ] && ver="$(cat "$EXT/audio-opt-version" 2>/dev/null)"
+	dsp=0
+	[ -x "$EXT/bin/mu300-audio-dsp" ] && dsp=1
+	ext=0
+	[ -d "$EXT" ] && ext=1
+
+	{
+		echo "kernel=$krel"
+		echo "ext_present=$ext"
+		echo "ko_count=$n"
+		echo "want_ko=$WANT_KO"
+		echo "version=$ver"
+		echo "dsp_present=$dsp"
+	} > "$STATUS"
+
+	if [ "$ext" = 1 ] && [ "$n" -lt "$WANT_KO" ]; then
+		logger -t airsim-audio-opt "模块不齐：$n/$WANT_KO（$dir）"
+	elif [ "$ext" = 0 ]; then
+		logger -t airsim-audio-opt "音频扩展目录不在：$EXT"
+	fi
+}
+
 boot() {
+	check_modules
 	[ -r "$MISSING" ] || return 0
 	rounds="${F50_CLAIM_ROUNDS:-20}"
 	sleep_for="${F50_CLAIM_SLEEP:-3}"
