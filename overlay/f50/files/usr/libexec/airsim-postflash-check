@@ -1,0 +1,198 @@
+#!/bin/sh
+# AirSIM for F50 —— 刷机后自检 / 补齐
+#
+# 干什么：把「刷机之后一步一个坑」压成一次体检。只查不改（默认），或者只补那些
+#         本机已经有源文件的件（--fix）。
+# 不干什么：不装内核、不刷 boot、不改分区，不替配件包装它们自己的东西。
+#
+# 用法：
+#   airsim-postflash-check            人看的清单
+#   airsim-postflash-check --json     JSON（给页面用）
+#   airsim-postflash-check --fix     先补能补的，再出一遍清单
+set -u
+EXT=${EXT:-/mnt/mu300-disk/extra/airsim-audio}
+KEEP=${KEEP:-/mnt/mu300-disk/openwrt}
+KREL=$(uname -r)
+FIX=0
+JSON=0
+
+for a in "$@"; do
+	case $a in
+		--fix) FIX=1 ;;
+		--json) JSON=1 ;;
+		--help|-h) echo 'Usage: airsim-postflash-check [--json] [--fix]'; exit 0 ;;
+		*) echo "未知参数：$a" >&2; exit 2 ;;
+	esac
+done
+
+cfg_hash() { gzip -dc /proc/config.gz 2>/dev/null | grep -E '^(CONFIG_|# CONFIG_)' | LC_ALL=C sort | sha256sum | cut -d' ' -f1; }
+
+# 结果收集：每项一行，字段用 | 分隔（name|state|fixable|detail）
+R=/tmp/airsim-postflash-check.$$.res
+: > "$R"
+add() { printf '%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" >> "$R"; }
+
+first_of() { for f in "$@"; do [ -f "$f" ] && { echo "$f"; return 0; }; done; return 1; }
+
+# ---- 1. 内核线 ----
+case "$KREL" in
+	6.18.*) add '内核版本' ok 0 "6.18 线：$KREL" ;;
+	*) add '内核版本' fail 0 "$KREL 不属于 6.18 线，音频模块装不上" ;;
+esac
+
+# ---- 2. 内核模块树 ----
+if [ -d "/lib/modules/$KREL" ]; then
+	n=$(find "/lib/modules/$KREL" -name '*.ko' 2>/dev/null | wc -l | tr -d ' ')
+	if [ "$n" -ge 100 ]; then
+		add '内核模块树' ok 0 "/lib/modules/$KREL 有 $n 个 .ko"
+	else
+		add '内核模块树' fail 0 "/lib/modules/$KREL 只有 $n 个 .ko，内核没装全"
+	fi
+else
+	add '内核模块树' fail 0 "/lib/modules/$KREL 不存在"
+fi
+
+# ---- 3. DSP 内存预留（audio_reserve 抢页结果）----
+m=$(cat /sys/module/audio_reserve/parameters/missing 2>/dev/null || echo '')
+if [ "$m" = "0" ]; then
+	add 'DSP 内存预留' ok 0 'missing=0，抢到了'
+elif [ -n "$m" ]; then
+	if [ -x /etc/init.d/airsim-audio-reserve ]; then
+		add 'DSP 内存预留' fail 0 "missing=$m：开机没抢到，改不了，只能重启再来一次"
+	else
+		add 'DSP 内存预留' fail 1 "missing=$m，而且本机没有开机预留脚本（先补脚本再重启）"
+	fi
+else
+	add 'DSP 内存预留' fail 1 'audio_reserve 没加载（内核或模块缺）'
+fi
+
+# ---- 4. 开机预留脚本（S10）----
+if [ -x /etc/init.d/airsim-audio-reserve ]; then
+	if ls /etc/rc.d/S10airsim-audio-reserve >/dev/null 2>&1; then
+		add '开机预留脚本' ok 0 'S10airsim-audio-reserve 已挂'
+	else
+		add '开机预留脚本' fail 1 '脚本在，但没 enable'
+	fi
+else
+	add '开机预留脚本' fail 1 '/etc/init.d/airsim-audio-reserve 不在位'
+fi
+
+# ---- 5. 音频 KERNEL 元数据 ----
+kf=$EXT/modules/$KREL/KERNEL
+want=$(cfg_hash)
+if [ -f "$kf" ]; then
+	got=$(sed -n 's/^CONFIG=//p' "$kf" | head -1)
+	if [ "$got" = "$want" ]; then
+		add '音频身份元数据' ok 0 'CONFIG 与本机内核一致'
+	else
+		add '音频身份元数据' fail 1 "CONFIG 对不上（文件 ${got%${got#????????}}…，本机 ${want%${want#????????}}…）"
+	fi
+else
+	add '音频身份元数据' fail 1 "缺 $kf，工具会拒绝加载"
+fi
+
+# ---- 6. 蓝牙三件（属蓝牙配件包，不是主包）----
+miss=''
+[ -x /usr/sbin/f50-bt-switch.sh ] || miss="$miss f50-bt-switch.sh"
+[ -x /etc/init.d/sprdbluetooth ] || miss="$miss sprdbluetooth"
+[ -x /usr/sbin/sprd-bt-attach.sh ] || miss="$miss sprd-bt-attach.sh"
+if [ -z "$miss" ]; then
+	add '蓝牙支撑文件' ok 0 '三个文件都在'
+else
+	add '蓝牙支撑文件' fail 1 "缺：$miss（属蓝牙配件包）"
+fi
+
+# ---- 7. 蓝牙适配器 ----
+if [ -d /sys/class/bluetooth/hci0 ]; then
+	add '蓝牙适配器' ok 0 'hci0 在'
+else
+	add '蓝牙适配器' fail 0 'hci0 没起来（先补支撑文件，再开开关）'
+fi
+
+# ---- 8. 主服务与 ubus ----
+if pidof airsim-mu300d >/dev/null 2>&1; then
+	c=$(ubus list 2>/dev/null | grep -c '^airsim')
+	if [ "$c" -ge 7 ]; then
+		add '主服务' ok 0 "airsim-mu300d 在跑，ubus 对象 $c 个"
+	else
+		add '主服务' fail 0 "进程在，但 ubus 只挂了 $c 个对象"
+	fi
+else
+	add '主服务' fail 0 'airsim-mu300d 没在跑'
+fi
+
+# ---- 修复（只补本机有源文件的件）----
+fixed=''
+if [ "$FIX" = 1 ]; then
+	# 1) 开机预留脚本：优先厂商扩展，其次上次保留的 rootfs 副本
+	if [ ! -x /etc/init.d/airsim-audio-reserve ]; then
+		src=$(first_of "$EXT/integration/airsim-audio-reserve" "$KEEP/etc/init.d/airsim-audio-reserve")
+		if [ -n "$src" ]; then
+			cp -f "$src" /etc/init.d/airsim-audio-reserve && chmod 755 /etc/init.d/airsim-audio-reserve
+			/etc/init.d/airsim-audio-reserve enable >/dev/null 2>&1 || true
+			fixed="$fixed 开机预留脚本"
+		fi
+	elif ! ls /etc/rc.d/S10airsim-audio-reserve >/dev/null 2>&1; then
+		/etc/init.d/airsim-audio-reserve enable >/dev/null 2>&1 || true
+		fixed="$fixed 预留脚本 enable"
+	fi
+
+	# 2) KERNEL 元数据：按本机内核配置现算
+	if [ -d "$EXT/modules/$KREL" ]; then
+		got=$(sed -n 's/^CONFIG=//p' "$kf" 2>/dev/null | head -1)
+		if [ "$got" != "$want" ]; then
+			key=$(printf '%s' "$KREL" | cut -d. -f1-2)
+			printf 'KEY=%s\nKREL=%s\nCONFIG=%s\nTAG=%s\n' "$key" "$KREL" "$want" "$(cat "$EXT/audio-opt-tag" 2>/dev/null || echo unknown)" > "$kf"
+			fixed="$fixed 音频身份元数据"
+		fi
+	fi
+
+	# 3) 蓝牙三件：从上次保留的 rootfs 副本补（os 升级会留这一份）
+	if [ -d "$KEEP" ]; then
+		[ -x /usr/sbin/f50-bt-switch.sh ] || {
+			[ -f "$KEEP/usr/sbin/f50-bt-switch.sh" ] && cp -f "$KEEP/usr/sbin/f50-bt-switch.sh" /usr/sbin/f50-bt-switch.sh && chmod 755 /usr/sbin/f50-bt-switch.sh && fixed="$fixed f50-bt-switch.sh"
+		}
+		[ -x /usr/sbin/sprd-bt-attach.sh ] || {
+			[ -f "$KEEP/usr/sbin/sprd-bt-attach.sh" ] && cp -f "$KEEP/usr/sbin/sprd-bt-attach.sh" /usr/sbin/sprd-bt-attach.sh && chmod 755 /usr/sbin/sprd-bt-attach.sh && fixed="$fixed sprd-bt-attach.sh"
+		}
+		[ -x /etc/init.d/sprdbluetooth ] || {
+			[ -f "$KEEP/etc/init.d/sprdbluetooth" ] && cp -f "$KEEP/etc/init.d/sprdbluetooth" /etc/init.d/sprdbluetooth && chmod 755 /etc/init.d/sprdbluetooth && /etc/init.d/sprdbluetooth enable >/dev/null 2>&1 && fixed="$fixed sprdbluetooth"
+		}
+	fi
+fi
+
+# ---- 输出 ----
+if [ "$JSON" = 1 ]; then
+	okc=0; tot=0; fixc=0
+	while IFS='|' read -r name st fb detail; do
+		tot=$((tot+1))
+		[ "$st" = ok ] && okc=$((okc+1))
+		[ "$fb" = 1 ] && [ "$st" != ok ] && fixc=$((fixc+1))
+	done < "$R"
+	printf '{"ok":true,"kernel":"%s","total":%s,"ok_count":%s,"fixable_count":%s,"fixed":"%s","items":[' \
+		"$KREL" "$tot" "$okc" "$fixc" "$(printf '%s' "$fixed" | sed 's/^ / /')"
+	first=1
+	while IFS='|' read -r name st fb detail; do
+		[ "$first" = 1 ] || printf ','
+		first=0
+		printf '{"name":"%s","ok":%s,"fixable":%s,"detail":"%s"}' \
+			"$name" "$([ "$st" = ok ] && echo true || echo false)" \
+			"$([ "$fb" = 1 ] && echo true || echo false)" "$detail"
+	done < "$R"
+	printf ']}\n'
+else
+	echo "== 刷机后自检（内核 $KREL）=="
+	while IFS='|' read -r name st fb detail; do
+		if [ "$st" = ok ]; then
+			mark='✓'
+		elif [ "$fb" = 1 ]; then
+			mark='✗ 可补'
+		else
+			mark='✗'
+		fi
+		printf '  %-4s %-14s %s\n' "$mark" "$name" "$detail"
+	done < "$R"
+	[ -n "$fixed" ] && echo "  已补：$fixed"
+fi
+rm -f "$R"
+exit 0

@@ -16,6 +16,8 @@ var btProbe = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_probe', expect:
 var btInstall = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_install', expect: {}, reject: true, nobatch: true });
 var audioProbe = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_probe', expect: {}, reject: true });
 var audioInstall = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_install', expect: {}, reject: true, nobatch: true });
+var scRun = rpc.declare({ object: 'airsim-audio', method: 'selfcheck_run', expect: {}, reject: true, nobatch: true });
+var scFix = rpc.declare({ object: 'airsim-audio', method: 'selfcheck_fix', expect: {}, reject: true, nobatch: true });
 
 var releasesURL = 'https://github.com/shangjie1998/airsim-f50-openwrt/releases';
 
@@ -412,6 +414,65 @@ return view.extend({
    });
   });
 
+  /* ---------------- 刷机后自检 ---------------- */
+  var scChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '没查');
+  var scMsg = E('p', { 'class': 'as-caption' }, '刷机、升级、换内核之后点一次：内核、模块树、DSP 内存预留、开机脚本、身份元数据、蓝牙三件、hci0、主服务，八项一起看。');
+  var scList = E('ul', { 'class': 'as-instructions' }, []);
+  var scBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '运行自检');
+  var scFixBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '补齐能补的');
+  var scBusy = false;
+
+  function renderSc(res) {
+   res = res || {};
+   if (res.ok !== true) {
+    scChip.textContent = '不可用';
+    scChip.className = 'as-pill as-pill-red';
+    scMsg.textContent = res.error || '自检没跑起来（主包可能较旧）。';
+    scBtn.disabled = false;
+    scFixBtn.disabled = true;
+    return;
+   }
+   var items = res.items || [], okc = res.ok_count || 0, tot = res.total || items.length;
+   scChip.textContent = okc + '/' + tot + ' 项正常';
+   scChip.className = 'as-pill ' + (okc === tot ? 'as-pill-green' : (okc >= tot - 2 ? 'as-pill-neutral' : 'as-pill-red'));
+   scMsg.textContent = '内核 ' + (res.kernel || '未知') + (res.fixed ? '；刚补了：' + res.fixed : '') + (okc === tot ? '；这一套齐了。' : '；下面标 ✗ 的就是缺的。');
+   while (scList.firstChild) scList.removeChild(scList.firstChild);
+   items.forEach(function(it) {
+    scList.appendChild(E('li', {}, (it.ok ? '✓ ' : '✗ ') + it.name + ' —— ' + (it.detail || '')));
+   });
+   scBtn.disabled = false;
+   scFixBtn.disabled = (res.fixable_count || 0) < 1;
+   scFixBtn.title = scFixBtn.disabled ? '没有能就地补的缺件（缺的多半属配件包，要装对应包）' : '补开机预留脚本、身份元数据、蓝牙三件（只用本机已有副本）';
+  }
+
+  function runSc(fix) {
+   if (scBusy) return;
+   scBusy = true;
+   scBtn.disabled = true;
+   scFixBtn.disabled = true;
+   scMsg.textContent = fix ? '正在补能补的缺件……' : '正在检查……';
+   (fix ? scFix() : scRun()).then(function(res) {
+    scBusy = false;
+    renderSc(res);
+   }).catch(function(e) {
+    scBusy = false;
+    scBtn.disabled = false;
+    scMsg.textContent = '自检接口没反应：' + String((e && e.message) || e);
+   });
+  }
+
+  scBtn.addEventListener('click', function() { runSc(false); });
+  scFixBtn.addEventListener('click', function() { runSc(true); });
+
+  var scCard = E('section', { 'class': 'as-card' }, [
+   E('h3', {}, '刷机后自检'),
+   E('p', { 'class': 'as-copy' }, '刷机丢的往往不是主包，是散在配件包里的那几件。这里一次查完，缺什么、归谁、能不能就地补，都写清楚。'),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '体检结果'), E('dd', {}, [scChip])]),
+   scMsg,
+   scList,
+   E('div', { 'class': 'as-buttons' }, [scBtn, scFixBtn])
+  ]);
+
   var optCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '可选配件'),
    E('p', { 'class': 'as-copy' }, '这两样都不在主包里：刷机、升级之后如果对应页面没了或者放不出声，就是这一套缺了，从这里补回来。'),
@@ -442,6 +503,7 @@ return view.extend({
    ])
   ]);
 
+  scRun().then(renderSc).catch(function() { scMsg.textContent = '这台机器没有自检接口（主包版本较旧）。'; });
   btProbe().then(syncOpt).catch(function() { optMsg.textContent = '这台机器没有安装器接口（主包版本较旧）。'; });
   audioProbe().then(syncAud).catch(function() { audMsg.textContent = '这台机器没有音频可选件接口（主包版本较旧）。'; });
 
@@ -461,7 +523,7 @@ return view.extend({
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 维护'), E('h2', {}, '备份、更新、诊断。'), E('p', {}, '折腾完想回退的时候，这里能救回来。')]),
     E('span', { 'class': 'as-version' }, 'v' + (state.version || '—'))
    ]),
-   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, optCard, diagCard, versionCard]),
+   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, optCard, scCard, diagCard, versionCard]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 维护')
   ]);
  },

@@ -160,14 +160,27 @@ aud_install() {
 	json_dump
 }
 
+sc_run() {
+	# 刷机后自检：把「一处一处查」压成一次输出。--fix 只补本机已有源文件的件。
+	# 原始 JSON 直接透传，页面端只负责渲染，不在 shell 里二次解析。
+	# 两种模式都必须吐 JSON：ubus 端按 JSON 解析，输出人读文本会被判 Invalid argument
+	_flags=--json
+	[ "${1:-}" = fix ] && _flags='--json --fix'
+_out=$(sh /usr/libexec/airsim-postflash-check $_flags 2>/dev/null) || _out='{"ok":false,"error":"自检脚本没在（主包较旧）","items":[]}'
+	[ -n "$_out" ] || _out='{"ok":false,"error":"自检脚本没有输出","items":[]}'
+	printf '%s\n' "$_out"
+}
+
 case "$1" in
 	list)
-		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{}}'
+		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{},"selfcheck_run":{},"selfcheck_fix":{}}'
 		;;
 	call)
 		case "$2" in
 			audio_opt_probe) aud_probe ;;
 			audio_opt_install) aud_install ;;
+			selfcheck_run) sc_run ;;
+			selfcheck_fix) sc_run fix ;;
 		esac
 		;;
 	*)
