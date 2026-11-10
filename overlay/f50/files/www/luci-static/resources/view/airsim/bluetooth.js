@@ -81,16 +81,15 @@ function btCard(bt) {
   var list = (s && s.devices) || [];
   if (!s || !s.attached) return E('p', { 'class': 'as-caption' }, '控制器没挂上，暂时读不到已配对设备。');
   if (!list.length) return E('p', { 'class': 'as-caption' }, '还没有已配对设备。手机、耳机搜到「' + (s.name || 'F50') + '」后点连接就会出现在这里。');
-  return E('ul', { 'class': 'as-devs', style: 'margin:6px 0 0;padding-left:18px;line-height:1.9' }, list.map(function(d) {
-   return E('li', { style: 'display:flex;align-items:center;gap:10px;justify-content:space-between' }, [
+  return E('ul', { 'class': 'as-devs' }, list.map(function(d) {
+   return E('li', { 'class': 'as-dev-item' }, [
     E('span', {}, [
      E('strong', {}, d.name || '未命名'),
      E('span', { 'class': 'as-caption' }, ' ' + d.address + (d.connected ? ' · 已连接' : '')),
     ]),
     E('button', {
      'type': 'button',
-     'class': 'as-btn as-btn-ghost',
-     'style': 'flex:none;font-size:12px;padding:4px 10px',
+     'class': 'as-button as-mini as-danger-quiet',
      'click': function(ev) {
       ev.preventDefault();
       if (!onRemove) return;
@@ -113,12 +112,12 @@ function btCard(bt) {
   var who = (p.name || '一台设备') + (p.address ? '（' + p.address + '）' : '');
   var extra = p.passkey ? '配对验证码 ' + p.passkey + '，请和对方屏幕上的一致；' : '';
   var left = p.seconds_left > 0 ? p.seconds_left : 0;
-  pendingBox.appendChild(E('div', { 'class': 'as-card', style: 'border:1px solid rgba(255,140,80,.45);margin:0 0 14px' }, [
+  pendingBox.appendChild(E('div', { 'class': 'as-card as-notice' }, [
    E('h3', {}, '有人要配对'),
-   E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, who + ' 想和这台机器配对。' + extra + (left ? '还剩 ' + left + ' 秒，超时就自动拒绝。' : '已经超时，会自动拒绝。')),
-   E('div', { style: 'display:flex;gap:10px;margin-top:12px' }, [
-    E('button', { 'type': 'button', 'class': 'as-btn', 'click': function() { replyPending('yes'); } }, '同意配对'),
-    E('button', { 'type': 'button', 'class': 'as-btn as-btn-ghost', 'click': function() { replyPending('no'); } }, '拒绝')
+   E('p', { 'class': 'as-copy as-lead' }, who + ' 想和这台机器配对。' + extra + (left ? '还剩 ' + left + ' 秒，超时就自动拒绝。' : '已经超时，会自动拒绝。')),
+   E('div', { 'class': 'as-inline' }, [
+    E('button', { 'type': 'button', 'class': 'as-button as-primary', 'click': function() { replyPending('yes'); } }, '同意配对'),
+    E('button', { 'type': 'button', 'class': 'as-button as-secondary', 'click': function() { replyPending('no'); } }, '拒绝')
    ])
   ]));
  }
@@ -164,11 +163,11 @@ function btCard(bt) {
   var shown = list.slice(0, 12);
   shown.forEach(function(d) {
    var right = d.paired
-    ? E('button', { 'type': 'button', 'class': 'as-btn as-btn-ghost', 'style': 'flex:none;font-size:12px;padding:4px 10px',
+    ? E('button', { 'type': 'button', 'class': 'as-button as-mini as-secondary',
         'click': function() { doConnect(d); } }, d.connected ? '重新连接' : '连接')
-    : E('button', { 'type': 'button', 'class': 'as-btn', 'style': 'flex:none;font-size:12px;padding:4px 10px',
+    : E('button', { 'type': 'button', 'class': 'as-button as-mini as-primary',
         'click': function() { doPair(d); } }, '配对');
-   nearBox.appendChild(E('div', { style: 'display:flex;align-items:center;gap:10px;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)' }, [
+   nearBox.appendChild(E('div', { 'class': 'as-dev-item' }, [
     E('span', {}, [
      E('strong', {}, d.name || '未知设备'),
      E('span', { 'class': 'as-caption' }, ' ' + d.address + (d.paired ? (d.connected ? ' · 已连接' : ' · 已配对') : ''))
@@ -177,7 +176,7 @@ function btCard(bt) {
    ]));
   });
   if (list.length > shown.length)
-   nearBox.appendChild(E('p', { 'class': 'as-caption', style: 'margin-top:8px' }, '附近还有 ' + (list.length - shown.length) + ' 台没列出来（多半是蓝牙信标），要用的话再扫一次。'));
+   nearBox.appendChild(E('p', { 'class': 'as-caption as-lead' }, '附近还有 ' + (list.length - shown.length) + ' 台没列出来（多半是蓝牙信标），要用的话再扫一次。'));
  }
 
  function refreshNearby() {
@@ -348,20 +347,26 @@ function btCard(bt) {
   E('div', { 'class': 'as-row' }, [E('dt', {}, '蓝牙服务'), E('dd', {}, bt.service || '—')]),
  ];
 
- return [
-  pendingBox,
-  E('h3', {}, bt.label || '蓝牙'),
-  E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, '关掉会释放射频和一点待机功耗；打开后控制器会挂上，并默认保持可被发现、可配对，手机和耳机在蓝牙列表里能直接搜到这台设备。'),
-  E('div', { 'class': 'as-field-label' }, '开关'),
-  group,
-  info,
-  rows.length ? E('dl', { style: 'margin-top:10px' }, rows) : null,
-  E('div', { 'class': 'as-field-label', style: 'margin-top:14px' }, '已配对设备'),
-  devValue,
-  E('div', { 'class': 'as-field-label', style: 'margin-top:18px' }, '附近的设备'),
-  E('div', { style: 'margin:8px 0 10px' }, scanBtn),
-  nearBox
- ].filter(function(item) { return item !== null; });
+ /* 一张卡只装一件事：开关、本机信息、已配对、附近设备各归各卡 */
+ return {
+  pending: pendingBox,
+  switchCard: [
+   E('p', { 'class': 'as-copy' }, '关掉会释放射频和一点待机功耗；打开后控制器会挂上，并默认保持可被发现、可配对，手机和耳机在蓝牙列表里能直接搜到这台设备。'),
+   E('div', { 'class': 'as-field-label' }, '开关'),
+   group,
+   info
+  ],
+  infoCard: [
+   E('p', { 'class': 'as-caption' }, '名字按 F50-<蓝牙地址后 6 位> 自动生成，每台机器唯一、重启不变。'),
+   rows.length ? E('dl', { 'class': 'as-facts' }, rows) : null
+  ].filter(function(item) { return item !== null; }),
+  devCard: [ devValue ],
+  nearCard: [
+   E('p', { 'class': 'as-caption' }, '点「扫描」找周围能连的设备（15 秒）。已配对的点「连接」，没配过的点「配对」。'),
+   E('div', { 'class': 'as-buttons' }, [scanBtn]),
+   nearBox
+  ]
+ };
 }
 return view.extend({
  load: function() {
@@ -372,7 +377,33 @@ return view.extend({
   ui.install();
   var version = bt.version ? 'v' + bt.version : '';
 
+  /* 卡片先攒成一个平数组再交给布局；嵌套数组会被 E 当文本渲染成 [object HTMLDivElement] */
+  var cards = [];
+
+  if (bt.supported === false) {
+   cards.push(E('section', { 'class': 'as-card as-wide' }, [
+    E('h3', {}, '蓝牙'),
+    E('p', { 'class': 'as-caption as-lead' }, '这台设备没有蓝牙服务（/usr/libexec/rpcd/airsim-bt 不在位），装好蓝牙那一套再回来看。')
+   ]));
+  }
+  else {
+   var c = btCard(bt);
+   if (c.pending) cards.push(c.pending);
+   cards.push(E('section', { 'class': 'as-card as-wide' }, [E('h3', {}, bt.label || '蓝牙')].concat(c.switchCard)));
+   cards.push(E('section', { 'class': 'as-card' }, [E('h3', {}, '本机蓝牙')].concat(c.infoCard)));
+   cards.push(E('section', { 'class': 'as-card' }, [E('h3', {}, '已配对设备')].concat(c.devCard)));
+   cards.push(E('section', { 'class': 'as-card' }, [E('h3', {}, '附近的设备')].concat(c.nearCard)));
+  }
+
+  cards.push(E('section', { 'class': 'as-card as-wide' }, [
+   E('h3', {}, '说明'),
+   E('p', { 'class': 'as-caption as-lead' }, '名字按 F50-<蓝牙地址后 6 位> 自动生成，每台机器唯一、重启不变；手机蓝牙列表里看到的就是它。'),
+   E('p', { 'class': 'as-caption' }, '控制器挂上后默认保持可被发现、可配对，不用每次手动点；配对由手机或耳机那边发起，不要了就在「已配对设备」那一条后面点「删除」，删除会先断开再删记录，可被发现、可配对自动复位。'),
+   E('p', { 'class': 'as-caption' }, '两个方向都能配：这台机器主动去配别人，就在「附近的设备」里点「配对」；别人发起配对时，页面顶上会弹「有人要配对」，点同意才继续，30 秒不点就当拒绝。')
+  ]));
+
   return E('div', { 'class': 'as-root' }, [
+   (ui.menu ? ui.menu('bluetooth') : ''),
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [
@@ -381,21 +412,7 @@ return view.extend({
      E('p', {}, '开关、名字、已配对设备、扫描配对都在这页；关掉重启仍是关。')
     ])
    ]),
-   E('div', { 'class': 'as-layout' }, [
-    bt.supported === false
-     ? E('section', { 'class': 'as-card as-wide' }, [
-        E('h3', {}, '蓝牙'),
-        E('p', { 'class': 'as-caption', style: 'margin-top:10px' }, '这台设备没有蓝牙服务（/usr/libexec/rpcd/airsim-bt 不在位），装好蓝牙那一套再回来看。')
-       ])
-     : E('section', { 'class': 'as-card as-wide' }, btCard(bt)),
-    E('section', { 'class': 'as-card as-wide' }, [
-     E('h3', {}, '说明'),
-     E('p', { 'class': 'as-caption', style: 'margin-top:10px' }, '名字按 F50-<蓝牙地址后 6 位> 自动生成，每台机器唯一、重启不变；手机蓝牙列表里看到的就是它。'),
-     E('p', { 'class': 'as-caption' }, '控制器挂上后默认保持可被发现、可配对，不用每次手动点；配对由手机或耳机那边发起，配完会出现在「已配对设备」里，不要了就在那一条后面点「删除」。'),
-     E('p', { 'class': 'as-caption' }, '删除会先断开连接再删记录；删完「可被发现 / 可配对」会自动复位，不用再开一次开关。'),
-     E('p', { 'class': 'as-caption' }, '两个方向都能配：这台机器主动去配别人，就在「附近的设备」里点「配对」；别人发起配对时，页面顶上会弹「有人要配对」，点同意才继续，30 秒不点就当拒绝。')
-    ])
-   ])
+   E('div', { 'class': 'as-layout' }, cards)
   ]);
  }
 });

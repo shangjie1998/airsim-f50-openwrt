@@ -108,6 +108,7 @@ return view.extend({
   }
 
   var root = E('div', { 'class': 'as-root' }, [
+   (ui.menu ? ui.menu('call') : ''),
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 来电通知'), E('h2', {}, '来电话，第一时间知道。'), E('p', {}, '来电、接通、挂断、漏接，按你选的渠道推出去。')]),
@@ -115,14 +116,17 @@ return view.extend({
    ]),
    E('div', { 'class': 'as-layout' }, [
     E('section', { 'class': 'as-card' }, [
+     E('h3', {}, '开关'),
+     E('p', { 'class': 'as-copy' }, '点一下立刻生效，不用再点下面的保存设置。'),
+     E('label', { 'class': 'as-check', 'for': 'as-call-enabled' }, [enabled, E('span', {}, '启用来电通知')]),
+     E('p', { 'class': 'as-caption' }, '关掉后不再推任何通话事件，转发服务照常运行，随时能再打开。')
+    ]),
+    E('section', { 'class': 'as-card' }, [
      E('div', { 'class': 'as-card-heading' }, [E('h3', {}, '推送渠道')]),
      E('p', { 'class': 'as-caption', style: 'margin-top:8px' }, '跟随短信转发时，地址、请求方法、正文格式、超时和请求头都用短信那边的设置，这里只给通话事件准备正文模板。'),
      field('source', '渠道来源', sourceSelect),
      field('preset', '填入推送预设', presetSelect, '预设只填表单，密钥要换成自己的再保存。'),
-     sourceNote,
-     E('hr', {}),
-     E('label', { 'class': 'as-check', 'for': 'as-call-enabled' }, [enabled, E('span', {}, '启用来电通知')]),
-     E('p', { 'class': 'as-caption' }, '关掉后不再推任何通话事件，转发服务照常运行，随时能再打开。')
+     sourceNote
     ]),
     E('section', { 'class': 'as-card' }, [
      E('h3', {}, '推送哪些状态'),
@@ -132,7 +136,7 @@ return view.extend({
      E('label', { 'class': 'as-check', 'for': 'as-call-notify_missed' }, [notifyMissed, E('span', {}, '响铃未接时推送')]),
      E('p', { 'class': 'as-caption', style: 'margin-top:10px' }, '设备信息每 5 分钟刷新一次；通话期间不碰 modem。')
     ]),
-    E('section', { 'class': 'as-card as-wide' }, [
+    E('section', { 'class': 'as-card' }, [
      E('h3', {}, '请求与正文'),
      channelBlock,
      E('div', { 'class': 'as-setting' }, [E('label', { 'for': 'as-call-body', 'class': 'as-field-label' }, '正文模板'), bodyArea]),
@@ -143,7 +147,7 @@ return view.extend({
      serviceLine, channelLine, lastLine,
      E('p', { 'class': 'as-caption' }, '转发由设备自己执行，关掉网页照样生效；只在有新通话时推，失败不自动重发。')
     ]),
-    E('section', { 'class': 'as-card as-wide' }, [
+    E('section', { 'class': 'as-card' }, [
      E('h3', {}, '测试与最近投递'),
      E('p', { 'class': 'as-caption', style: 'margin-top:8px' }, '测试会走真实渠道发一条固定消息（号码取设备本机号），用来确认地址和密钥对不对。'),
      E('div', { 'class': 'as-buttons' }, [saveBtn, testBtn, refreshBtn, clearBtn]),
@@ -222,9 +226,10 @@ return view.extend({
    history.replaceChildren();
    (s.history || []).slice(0, 30).forEach(function(item) {
     var row = E('div', { 'class': 'as-history-row' });
-    [new Date(Number(item.time) * 1000).toLocaleString(), KINDS[item.kind] || item.kind || '事件', result(item.result) + (item.http_code ? ' · HTTP ' + item.http_code : '')].forEach(function(value) {
-     row.appendChild(E('span', {}, value));
-    });
+    row.appendChild(E('span', {}, new Date(Number(item.time) * 1000).toLocaleString()));
+    row.appendChild(E('span', {}, KINDS[item.kind] || item.kind || '事件'));
+    var detail = result(item.result) + (item.http_code ? ' · HTTP ' + item.http_code : '');
+    row.appendChild(E('span', { 'class': 'as-tag ' + (item.result === 'success' ? 'as-tag-ok' : 'as-tag-bad'), 'title': detail }, item.result === 'success' ? '发送成功' : detail));
     history.appendChild(row);
    });
    if (!history.childNodes.length) history.textContent = '暂无投递';
@@ -254,6 +259,30 @@ return view.extend({
   methodSelect.addEventListener('change', function() { bodyArea.disabled = methodSelect.value === 'GET'; });
   [urlInput, timeoutInput, expectInput, headersArea, bodyArea].forEach(function(el) {
    el.addEventListener('input', markSaved);
+  });
+
+  /* 开关是单点生效：勾上就立刻存一次，不必再点保存设置。
+     只改 enabled 这一项，同一个表单里别的没保存的改动不会被顶掉。 */
+  enabled.addEventListener('change', async function() {
+   var on = this.checked, base = {};
+   try { base = JSON.parse(self.savedPayload || '{}'); } catch (_) { base = {}; }
+   var next = Object.assign({}, base, { enabled: on ? '1' : '0' });
+   var problem = validate(next, status);
+   if (problem) { this.checked = !on; error(problem); return; }
+   this.disabled = true;
+   try {
+    var r = await L.resolveDefault(rpcSave(JSON.stringify(next)), {});
+    if (!r || !r.ok) throw Error((r && r.error) || '保存失败');
+    self.savedPayload = JSON.stringify(next);
+    status = Object.assign({}, status, { enabled: on ? '1' : '0' });
+    statePill.textContent = on ? '通知已开启' : '通知未开启';
+    statePill.className = 'as-pill ' + (on ? 'as-pill-green' : 'as-pill-neutral');
+    error(''); markSaved();
+    ui.toast(on ? '已开启来电通知' : '已关闭来电通知', { type: 'success' });
+   } catch (e) {
+    this.checked = !on;
+    error('切换失败：' + (e.message || '请稍后再试') + '。');
+   } finally { this.disabled = false; }
   });
 
   saveBtn.addEventListener('click', async function() {

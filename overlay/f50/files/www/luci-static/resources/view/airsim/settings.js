@@ -47,6 +47,7 @@ return view.extend({
   var deviceId = current.agent_id ? '…' + String(current.agent_id).slice(-8) : '—';
 
   return E('div', { 'class': 'as-root' }, [
+   (ui.menu ? ui.menu('settings') : ''),
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 设置'), E('h2', {}, '按你的习惯来。'), E('p', {}, '外观与显示偏好，只影响这台设备的网页界面。')]),
@@ -68,7 +69,7 @@ return view.extend({
      transparencyGroup,
      E('p', { 'class': 'as-caption', style: 'margin-top:12px' }, '玻璃模糊在低配置设备或老浏览器上可能掉帧，掉帧就切「纯色背景」。')
     ]),
-    E('section', { 'class': 'as-card as-wide' }, [
+    E('section', { 'class': 'as-card' }, [
      E('h3', {}, '关于'),
      E('dl', { 'style': 'margin-top:10px' }, [
       E('div', { 'class': 'as-row' }, [E('dt', {}, '插件版本'), E('dd', {}, version)]),
