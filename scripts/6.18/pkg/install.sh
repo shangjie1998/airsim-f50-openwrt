@@ -66,6 +66,14 @@ cp -f "$HERE/MANIFEST" /usr/lib/airsim/MANIFEST
 # --- 铺 overlay 树（files/ 就是设备绝对路径的镜像）---
 ( cd "$HERE/files" && tar cf - . ) | ( cd / && tar xf - )
 
+# --- 配置保护：包里的 /etc/config/* 只当“没有配置时的默认值”，
+# 升级场景一律以安装前的备份为准，否则 enabled、relay 地址这些会被默认值盖掉 ---
+if [ "$FRESH" = 0 ] && [ -d "$BK/config" ]; then
+	for f in "$BK"/config/*; do
+		[ -f "$f" ] && cp -p "$f" "/etc/config/$(basename "$f")"
+	done
+fi
+
 # 老菜单文件（已合并成一份）留着会让同一页出现两次，删掉
 rm -f /usr/share/luci/menu.d/luci-app-airsim-maintenance.json \
       /usr/share/luci/menu.d/luci-app-airsim-pages.json 2>/dev/null || true
