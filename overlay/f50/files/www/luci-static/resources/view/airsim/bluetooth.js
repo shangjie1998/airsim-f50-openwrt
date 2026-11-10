@@ -24,6 +24,7 @@ function segmented(options, current, onPick) {
 
 var btGet = rpc.declare({ object: 'airsim-bt', method: 'bt_get', expect: {} });
 var btSet = rpc.declare({ object: 'airsim-bt', method: 'bt_set', params: ['enable'], expect: {}, reject: true, nobatch: true });
+var btUnpair = rpc.declare({ object: 'airsim-bt', method: 'bt_unpair', params: ['address'], expect: {}, reject: true, nobatch: true });
 
 function btCard(bt) {
  bt = bt || {};
@@ -55,15 +56,29 @@ function btCard(bt) {
   return (s.discoverable ? '可被发现' : '不可被发现') + ' · ' + (s.pairable ? '可配对' : '不可配对');
  }
 
- /* 已配对设备：没有就直说没有，别留一片空白让人以为坏了 */
- function devList(s) {
+ /* 已配对设备：没有就直说没有，别留一片空白让人以为坏了。
+  * 每台后面跟一个「删除」——删之前先问一句，删完重新拉一次状态。 */
+ function devList(s, onRemove) {
   var list = (s && s.devices) || [];
   if (!s || !s.attached) return E('p', { 'class': 'as-caption' }, '控制器没挂上，暂时读不到已配对设备。');
   if (!list.length) return E('p', { 'class': 'as-caption' }, '还没有已配对设备。手机、耳机搜到「' + (s.name || 'F50') + '」后点连接就会出现在这里。');
-  return E('ul', { 'class': 'as-devs', style: 'margin:6px 0 0;padding-left:18px;line-height:1.7' }, list.map(function(d) {
-   return E('li', {}, [
-    E('strong', {}, d.name || '未命名'),
-    E('span', { 'class': 'as-caption' }, ' ' + d.address + (d.connected ? ' · 已连接' : '')),
+  return E('ul', { 'class': 'as-devs', style: 'margin:6px 0 0;padding-left:18px;line-height:1.9' }, list.map(function(d) {
+   return E('li', { style: 'display:flex;align-items:center;gap:10px;justify-content:space-between' }, [
+    E('span', {}, [
+     E('strong', {}, d.name || '未命名'),
+     E('span', { 'class': 'as-caption' }, ' ' + d.address + (d.connected ? ' · 已连接' : '')),
+    ]),
+    E('button', {
+     'type': 'button',
+     'class': 'as-btn as-btn-ghost',
+     'style': 'flex:none;font-size:12px;padding:4px 10px',
+     'click': function(ev) {
+      ev.preventDefault();
+      if (!onRemove) return;
+      if (!window.confirm('删除「' + (d.name || d.address) + '」的配对？\n删了以后，这台设备下次连接要重新配对。')) return;
+      onRemove(d);
+     }
+    }, '删除')
    ]);
   }));
  }
@@ -74,7 +89,7 @@ function btCard(bt) {
  var nameValue = E('dd', {}, (bt && bt.name) || '—');
  var addrValue = E('dd', {}, (bt && bt.address) || '—');
  var visValue = E('dd', {}, visText(bt));
- var devValue = E('div', {}, devList(bt));
+ var devValue = E('div', {}, devList(bt, removeDev));
 
  var group = segmented([
   { value: '1', label: '开' }, { value: '0', label: '关' }
@@ -93,7 +108,32 @@ function btCard(bt) {
   addrValue.textContent = (s && s.address) || '—';
   visValue.textContent = visText(s);
   devValue.textContent = '';
-  devValue.appendChild(devList(s));
+  devValue.appendChild(devList(s, removeDev));
+ }
+
+ /* 删一台已配对设备：后端先断开再 remove，删完重拉一遍整页状态 */
+ function removeDev(d) {
+  if (busy) return;
+  lock(true);
+  info.textContent = '正在删除「' + (d.name || d.address) + '」…';
+  btUnpair(d.address).then(function(res) {
+   var r = res || {};
+   if (r.ok === false) {
+    lock(false);
+    info.textContent = '删除失败：' + (r.error || '蓝牙服务没响应，刷新后再试一次');
+    return;
+   }
+   return L.resolveDefault(btGet(), {}).then(function(s) {
+    lock(false);
+    paint(!!(s && s.enabled));
+    apply(s || {});
+    info.textContent = r.message || ('已删除「' + (d.name || d.address) + '」');
+    ui.toast('已删除配对：' + (d.name || d.address));
+   });
+  }).catch(function(err) {
+   lock(false);
+   info.textContent = '删除失败：' + (err && err.message ? err.message : err);
+  });
  }
 
  function lock(flag) {
@@ -165,7 +205,8 @@ return view.extend({
     E('section', { 'class': 'as-card as-wide' }, [
      E('h3', {}, '说明'),
      E('p', { 'class': 'as-caption', style: 'margin-top:10px' }, '名字按 F50-<蓝牙地址后 6 位> 自动生成，每台机器唯一、重启不变；手机蓝牙列表里看到的就是它。'),
-     E('p', { 'class': 'as-caption' }, '控制器挂上后默认保持可被发现、可配对，不用每次手动点；配对由手机或耳机那边发起，配完会出现在「已配对设备」里。')
+     E('p', { 'class': 'as-caption' }, '控制器挂上后默认保持可被发现、可配对，不用每次手动点；配对由手机或耳机那边发起，配完会出现在「已配对设备」里，不要了就在那一条后面点「删除」。'),
+     E('p', { 'class': 'as-caption' }, '删除会先断开连接再删记录；删完「可被发现 / 可配对」会自动复位，不用再开一次开关。')
     ])
    ])
   ]);
