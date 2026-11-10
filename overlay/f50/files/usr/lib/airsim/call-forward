@@ -30,11 +30,32 @@ AT_BIN=/usr/libexec/unisoc-modem/at
 SLOTS="0"
 DEVICE_NAME=F50
 HISTORY_MAX=30
+# /etc/config 里带的出厂正文；用户没动过它时，跟随模式就换成短信那套正文
+LEGACY_BODY='{"event":"{event}","number":"{number}","state":"{state}","time":"{time}","device":"{device}"}'
+DEFAULT_BODY='{"title":"来自F50-来电","content":"来电号码: {number}\n来电时间: {time}\n{tag}\n卡槽: {slot}\n\n本机号码: {self}\n开机时长: {uptime}\n运营商: {operator}\n信号: {signal}","template":"txt"}'
 
 log() { logger -t airsim-call-forward "$*" 2>/dev/null || :; }
 
 cfg() { uci -q get "airsim-call-forward.forward.$1" 2>/dev/null; }
-sms_cfg() { uci -q get "e5-notify.forward.$1" 2>/dev/null; }
+# 短信转发的渠道参数有两个来源：M8/旧版在 uci e5-notify.forward.*，
+# F50 上短信转发是厂商 mu300dash 管的，配置落在 /etc/unisoc-modem/forward/config.json，
+# 键名带 webhook_ 前缀。F50 上 e5-notify 根本不存在，只读它就会拿到空地址。
+SMS_JSON=/etc/unisoc-modem/forward/config.json
+sms_cfg() {
+	_v=$(uci -q get "e5-notify.forward.$1" 2>/dev/null)
+	[ -z "$_v" ] || { printf '%s' "$_v"; return; }
+	[ -f "$SMS_JSON" ] || return 0
+	_k=$1
+	case "$1" in
+	url)          _k=webhook_url ;;
+	method)       _k=webhook_method ;;
+	content_type) _k=webhook_content_type ;;
+	timeout)      _k=webhook_timeout ;;
+	expect)       _k=webhook_expect ;;
+	headers)      _k=webhook_headers ;;
+	esac
+	jsonfilter -i "$SMS_JSON" -e "\$.$_k" 2>/dev/null
+}
 
 field() { printf '%s' "$1" | sed -n 's/.*"'"$2"'":"\([^"]*\)".*/\1/p'; }
 
@@ -50,6 +71,18 @@ record() {  # record <kind> <result> <http_code>
 }
 
 # Event names a notification reader can filter on, same style as the SMS side.
+# 短信模板的 {text} 在通话这边没有对应物，用一句人话顶上。
+event_text() {
+	case "$1" in
+	ringing)  printf '来电（振铃中）' ;;
+	answered) printf '来电已接通' ;;
+	ended)    printf '通话结束' ;;
+	missed)   printf '响铃未接' ;;
+	test)     printf '测试消息（来电转发）' ;;
+	*)        printf '%s' "$1" ;;
+	esac
+}
+
 event_tag() {
 	case "$1" in
 	ringing)  printf '#CALL #CALL_IN' ;;
@@ -202,6 +235,9 @@ tpl() {
 		| sed "s|{direction}|$5|g" \
 		| sed "s|{slot}|$(slot_label "${7:-}")|g" \
 		| sed "s|{time}|$6|g" \
+		| sed "s|{from}|$3|g" \
+		| sed "s|{text}|$(event_text "$2")|g" \
+		| sed "s|{sim}|$(slot_label "${7:-}")|g" \
 		| sed "s|{device}|$DEVICE_NAME|g" \
 		| sed "s|{self}|${SEND_SELF:-${INFO_SELF:-}}|g" \
 		| sed "s|{operator}|${INFO_OPERATOR:-}|g" \
@@ -336,11 +372,23 @@ load_config() {
 	[ -n "$_expect" ] || _expect=$(sms_cfg webhook_expect)
 	[ -n "$_headers" ] || _headers=$(sms_cfg webhook_headers)
 
+	# 「跟随短信转发」＝本页没填自己的地址。这时候正文也一并跟随：
+	# 短信模板里带着 token / topic 这类鉴权字段，只继承地址、正文留默认，
+	# 服务端会回「token 不能为空」，页面就显示发送失败。
+	# 用户自己改过正文（与出厂默认不同）时尊重用户的。
+	if [ -z "$(cfg url)" ]; then
+		_sms_body=$(sms_cfg webhook_body)
+		if [ -n "$_sms_body" ] && { [ -z "$_body_tpl" ] || [ "$_body_tpl" = "$DEFAULT_BODY" ] || [ "$_body_tpl" = "$LEGACY_BODY" ]; }; then
+			# 短信标题里的「短信」在来电场景换成「来电」，内容本身由 {text} 顶上
+			_body_tpl=$(printf '%s' "$_sms_body" | sed 's|短信 |来电 |')
+		fi
+	fi
+
 	[ -n "$_method" ] || _method=POST
 	[ -n "$_ctype" ] || _ctype=application/json
 	[ -n "$_timeout" ] || _timeout=12
 	[ -n "$_poll" ] || _poll=2
-	[ -n "$_body_tpl" ] || _body_tpl='{"title":"来自F50-来电","content":"来电号码: {number}\n来电时间: {time}\n{tag}\n卡槽: {slot}\n\n本机号码: {self}\n开机时长: {uptime}\n运营商: {operator}\n信号: {signal}","template":"txt"}'
+	[ -n "$_body_tpl" ] || _body_tpl=$DEFAULT_BODY
 }
 
 notify_enabled() {

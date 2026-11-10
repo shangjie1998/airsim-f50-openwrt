@@ -7,7 +7,19 @@ SECTION=airsim-call-forward.forward
 HISTORY=/mnt/mu300-disk/extra/airsim/data/call-forward-history
 
 opt() { uci -q get "$SECTION.$1" 2>/dev/null; }
-sms_opt() { uci -q get "e5-notify.forward.$1" 2>/dev/null; }
+SMS_JSON=/etc/unisoc-modem/forward/config.json
+# 同 call-forward：F50 的短信转发配置在厂商的 config.json，e5-notify 是 M8/旧版的来源。
+sms_opt() {
+	_v=$(uci -q get "e5-notify.forward.$1" 2>/dev/null)
+	[ -z "$_v" ] || { printf '%s' "$_v"; return; }
+	[ -f "$SMS_JSON" ] || return 0
+	_k=$1
+	case "$1" in
+	webhook_url) _k=webhook_url ;;
+	enabled)     _k=enabled ;;
+	esac
+	jsonfilter -i "$SMS_JSON" -e "\$.$_k" 2>/dev/null
+}
 
 add_opt() { json_add_string "$1" "$(opt "$1")"; }
 
@@ -15,7 +27,8 @@ history_json() {
 	json_add_array history
 	[ -f "$HISTORY" ] || { json_close_array; return; }
 	# newest last on disk; the page shows newest first
-	_tail=$(tail -n 30 "$HISTORY" 2>/dev/null | tac 2>/dev/null || tail -n 30 "$HISTORY" 2>/dev/null)
+	# busybox 上没有 tac，用 awk 倒着打一遍：页面要最新的排最上面
+	_tail=$(tail -n 30 "$HISTORY" 2>/dev/null | awk '{a[NR]=$0} END{for(i=NR;i>=1;i--) print a[i]}')
 	_old_ifs=$IFS
 	IFS='
 '
