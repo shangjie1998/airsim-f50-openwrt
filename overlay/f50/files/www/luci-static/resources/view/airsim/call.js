@@ -123,7 +123,7 @@ return view.extend({
     ]),
     E('section', { 'class': 'as-card' }, [
      E('div', { 'class': 'as-card-heading' }, [E('h3', {}, '推送渠道')]),
-     E('p', { 'class': 'as-caption', style: 'margin-top:8px' }, '跟随短信转发时，地址、请求方法、正文格式、超时和请求头都用短信那边的设置，这里只给通话事件准备正文模板。'),
+     E('p', { 'class': 'as-caption', style: 'margin-top:8px' }, '跟随短信转发时，地址、请求方法、正文、超时和请求头都取短信那边的设置（正文里带着密钥，所以要一起跟随）；只有你在这页改过正文，才用你自己的模板。'),
      field('source', '渠道来源', sourceSelect),
      field('preset', '填入推送预设', presetSelect, '预设只填表单，密钥要换成自己的再保存。'),
      sourceNote
@@ -225,11 +225,17 @@ return view.extend({
    channelLine.textContent = '当前渠道：' + (s.channel === 'own' ? '本页单独配置' : '跟随短信转发') + (s.sms_url ? ' · 短信渠道：' + s.sms_url : ' · 短信渠道尚未填写地址');
    history.replaceChildren();
    (s.history || []).slice(0, 30).forEach(function(item) {
+    // 后端成功码是 sent（测试消息也可能是 test），别拿 success 去比，否则全被标成失败
+    var ok = item.result === 'sent' || item.result === 'test';
+    var label = item.result === 'sent' ? '发送成功' : result(item.result);
+    var detail = label + (item.http_code ? ' · HTTP ' + item.http_code : '');
     var row = E('div', { 'class': 'as-history-row' });
-    row.appendChild(E('span', {}, new Date(Number(item.time) * 1000).toLocaleString()));
-    row.appendChild(E('span', {}, KINDS[item.kind] || item.kind || '事件'));
-    var detail = result(item.result) + (item.http_code ? ' · HTTP ' + item.http_code : '');
-    row.appendChild(E('span', { 'class': 'as-tag ' + (item.result === 'success' ? 'as-tag-ok' : 'as-tag-bad'), 'title': detail }, item.result === 'success' ? '发送成功' : detail));
+    row.appendChild(E('div', { 'class': 'as-history-head' }, [
+     E('span', { 'class': 'as-history-when' }, new Date(Number(item.time) * 1000).toLocaleString()),
+     E('span', { 'class': 'as-history-kind' }, KINDS[item.kind] || item.kind || '事件'),
+     E('span', { 'class': 'as-tag ' + (ok ? 'as-tag-ok' : 'as-tag-bad') }, ok ? '发送成功' : '投递失败')
+    ]));
+    row.appendChild(E('p', { 'class': 'as-history-detail' }, detail));
     history.appendChild(row);
    });
    if (!history.childNodes.length) history.textContent = '暂无投递';
