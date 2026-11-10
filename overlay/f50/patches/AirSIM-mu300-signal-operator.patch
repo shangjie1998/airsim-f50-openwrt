@@ -1,0 +1,106 @@
+--- a/AirSIM/module/module-agent/mu300.go
++++ b/AirSIM/module/module-agent/mu300.go
+@@ -288,7 +288,23 @@
+ 	if !a.mu300MetadataIdle() {
+ 		return
+ 	}
++	// 运营商数据源：+COPS 回 PLMN（46001 之类），normalizeOperator 再翻成中文名。
++	// 这一条以前只在 MU300 老链条上取，F50 这条刷新路径漏了，页面才一直空着。
++	cops, copsErr := a.at.command("AT+COPS?", 3*time.Second)
++	if !a.mu300MetadataIdle() {
++		return
++	}
+ 	_, _ = a.mu300RefreshNumber()
++	// CSQ 在 5G 独立组网下回 99,99（CSQ 只覆盖 2G/3G 测量），这时才去问厂商接口；
++	// 调用放在锁外，别拿着 modem 写锁跑 5 秒外部命令。
++	var csqDBM *int
++	if csqErr == nil {
++		csqDBM = parseSignalDBM(csq)
++	}
++	fallbackDBM := (*int)(nil)
++	if csqDBM == nil {
++		fallbackDBM = mu300VendorSignalDBM()
++	}
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
+ 	if pinErr == nil {
+@@ -297,9 +313,18 @@
+ 	if regErr == nil {
+ 		a.modem.RegistrationText = registrationText(parseRegistration(reg))
+ 	}
+-	if csqErr == nil {
+-		a.modem.SignalDBM = parseSignalDBM(csq)
++	if copsErr == nil {
++		if operator := normalizeOperator(parseOperator(cops)); operator != "" {
++			a.modem.Operator = operator
++		}
+ 	}
++	if csqDBM != nil {
++		a.modem.SignalDBM = csqDBM
++	} else if fallbackDBM != nil {
++		// 厂商 mu300.modem 的 signal 接口，原厂首页显示的也是这份数据；
++		// 两边都拿不到就维持 nil，页面照旧显示「基带暂未提供」。
++		a.modem.SignalDBM = fallbackDBM
++	}
+ }
+ 
+ func (a *agent) mu300RefreshNumber() (string, error) {
+--- a/AirSIM/module/module-agent/mu300_signal.go
++++ b/AirSIM/module/module-agent/mu300_signal.go
+@@ -0,0 +1,56 @@
++package main
++
++import (
++	"context"
++	"encoding/json"
++	"os/exec"
++	"time"
++)
++
++// mu300VendorSignalDBM 从厂商 mu300.modem 的 signal 接口取当前服务小区的 RSRP。
++//
++// 为什么不用 AT+CSQ：F50（Unisoc）注册在 5G 独立组网上，AT+CSQ（以及 AT+CESQ 的
++// 前两格）固定回 99,99——CSQ 只覆盖 2G/3G 的测量，NR 不往里填。原厂首页的信号
++// 格数取的也是 mu300.modem 这份数据（sig/lte 里的 rsrp，单位 dBm）。
++//
++// 取不到就返回 nil，上层保持信号未知，页面照旧显示「基带暂未提供」。
++func mu300VendorSignalDBM() *int {
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	output, err := exec.CommandContext(ctx, "ubus", "call", "mu300.modem", "signal", `{"slot":"0"}`).Output()
++	if err != nil {
++		return nil
++	}
++	var payload struct {
++		Sig *struct {
++			Rsrp *float64 `json:"rsrp"`
++		} `json:"sig"`
++		Lte *struct {
++			Rsrp *float64 `json:"rsrp"`
++		} `json:"lte"`
++	}
++	if json.Unmarshal(output, &payload) != nil {
++		return nil
++	}
++	for _, candidate := range []*float64{rsrpOf(payload.Sig), rsrpOf(payload.Lte)} {
++		if candidate == nil {
++			continue
++		}
++		value := int(*candidate)
++		// 0 和正数说明字段没填或单位不对，不当真值用。
++		if value < -140 || value > -30 {
++			continue
++		}
++		return &value
++	}
++	return nil
++}
++
++func rsrpOf(block *struct {
++	Rsrp *float64 `json:"rsrp"`
++}) *float64 {
++	if block == nil {
++		return nil
++	}
++	return block.Rsrp
++}
