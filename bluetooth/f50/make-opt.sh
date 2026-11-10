@@ -54,7 +54,23 @@ AirSIM for F50 · 蓝牙可选件 bt-opt ${VER}（内核 ${KVER}）
   * 不提供音频协议栈（A2DP/HFP）：不能拿耳机放歌
 EOF
 
-tar czf "$OUT" -C "$BUILD" airsim-f50-bt-opt
+# 固定所有文件时间戳再用 gzip -n 压缩：同样的内容每次打出来 sha 一样，
+# 这样 rpcd/安装器里钉的 sha256 才是稳定的（否则一重打就对不上）。
+find "$BUILD" -exec touch -t 202601010000 {} + 2>/dev/null || true
+tar cf - -C "$BUILD" airsim-f50-bt-opt | gzip -n -9 > "$OUT"
 echo "== 打好: $OUT"
 echo "== 大小: $(du -h "$OUT" | cut -f1)  条目: $(tar tzf "$OUT" | wc -l | tr -d ' ')"
-echo "== sha256: $(shasum -a 256 "$OUT" | cut -d' ' -f1)"
+SUM=$(shasum -a 256 "$OUT" | cut -d' ' -f1)
+echo "== sha256: $SUM"
+
+# 守卫：rpcd 与安装器里钉的 tag/文件名必须跟刚打出来的这个包一致。
+# 完整性不钉 tarball 的 sha（tar 每次打的 sha 会变），改由安装器逐文件核对包内
+# manifest.sha256 —— 那个只跟内容有关。
+R="$REPO_DIR/overlay/f50/files/usr/libexec/rpcd/airsim-bt"
+I="$REPO_DIR/overlay/f50/files/usr/libexec/airsim-btopt-install"
+bad=0
+grep -q "bt-opt-v$VER" "$R" || { echo "!! rpcd 里的 tag 不是 bt-opt-v$VER" >&2; bad=1; }
+grep -q "$(basename "$OUT")" "$R" || { echo "!! rpcd 里的文件名对不上 $(basename "$OUT")" >&2; bad=1; }
+grep -q "bt-opt-v$VER" "$I" || { echo "!! 安装器里的 tag 不是 bt-opt-v$VER" >&2; bad=1; }
+[ "$bad" = 0 ] || { echo "== 守卫拦住：先把 rpcd / 安装器的 pin 改到这次的包里再发" >&2; exit 2; }
+echo "== 守卫通过：rpcd 与安装器的 pin 与本次包一致"
