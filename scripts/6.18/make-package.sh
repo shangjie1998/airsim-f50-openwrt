@@ -60,7 +60,10 @@ chmod 755 "$STAGE/install.sh" "$STAGE/uninstall.sh"
 	printf 'install_note=覆盖 /usr/lib/airsim、/usr/libexec/rpcd、/www/luci-static/resources/view/airsim、/etc，装前备份到 /usr/lib/airsim/backup-<VER>\n'
 } > "$STAGE/MANIFEST"
 
-tar czf "$OUT" -C "$HERE/dist/stage" "$NAME"
+# macOS 的 bsdtar 默认会把扩展属性打成 ._* 影子文件塞进包里，
+# 有些设备的安装逻辑按「顶层只有一个目录」判结构，多出来一条 ._ 文件就误判。
+# 关掉元数据与 AppleDouble，保证包内只有我们自己的文件。
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$OUT" -C "$HERE/dist/stage" "$NAME"
 rm -rf "$HERE/dist/stage"
 cd "$HERE/dist" && shasum -a 256 "$NAME.tar.gz" | awk '{print $1"  "$2}' | tee "$NAME.tar.gz.sha256"
 echo "== 打好 =="
