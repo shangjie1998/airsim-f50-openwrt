@@ -208,7 +208,8 @@ return view.extend({
    set('sim', !online ? '等待服务启动' : sim.sim_inserted ? '已就绪' : '未就绪');
    set('network', sim.reg_status_text || '等待检测');
    set('signal', sim.signal_dbm != null ? sim.signal_dbm + ' dBm' : '基带暂未提供');
-   set('battery', sim.battery ? sim.battery.percent + '%' + (sim.battery.charging ? '（充电中）' : '（未充电）') : '读取中');
+   batteryRow.style.display = sim.battery ? '' : 'none';
+   set('battery', sim.battery ? sim.battery.percent + '%' + (sim.battery.charging ? '（充电中）' : '（未充电）') : '');
    set('call', s.call_active ? '通话进行中' : online ? '待机' : '—');
    set('audio', setupBlocked ? s.audio_setup === 'reboot_required' ? '需重启完成准备' : '尚未准备完成' : s.audio_available ? '已识别' : '等待检测');
    set('address', s.lan_ip || '—');
@@ -369,6 +370,9 @@ return view.extend({
     syncCalls(current);
    } catch (_) { simsLine.textContent = 'SIM 卡信息读取失败，拨号仍按默认卡处理。'; }
   }
+  // F50 没有电池：后端只在 U30 Air 上读电量，这里拿不到就当这行不存在，
+  // 免得页面挂一行永远「读取中」。有电池的机型（battery 有值）照常显示。
+  var batteryRow = row('设备电量', 'battery');
   root = E('div', { 'class': 'as-root' }, [
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 电话网关'), E('h2', {}, '让连接，简单一点。'), E('p', {}, 'F50 的运行状态与客户端连接，在这里管理。')]), text('version', 'span', 'as-version')]),
@@ -376,7 +380,7 @@ return view.extend({
     E('section', { 'class': 'as-card as-status', 'aria-label': '设备状态' }, [
      E('div', { 'class': 'as-card-heading' }, [E('h3', {}, '设备状态'), text('live', 'span', 'as-pill')]),
      E('div', { 'class': 'as-number-block' }, [E('span', { 'class': 'as-label' }, 'SIM 本机号码'), text('number', 'div', 'as-number'), text('numberHint', 'p', 'as-caption'), simsLine]),
-     E('dl', { 'class': 'as-status-list' }, [row('SIM 卡', 'sim'), row('移动网络', 'network'), row('信号强度', 'signal'), row('设备电量', 'battery'), row('当前通话', 'call'), row('音频设备', 'audio'), row('设备地址', 'address')]),
+     E('dl', { 'class': 'as-status-list' }, [row('SIM 卡', 'sim'), row('移动网络', 'network'), row('信号强度', 'signal'), batteryRow, row('当前通话', 'call'), row('音频设备', 'audio'), row('设备地址', 'address')]),
      E('details', { 'class': 'as-details' }, [E('summary', {}, '连接与诊断'), E('dl', {}, [row('云端 Relay', 'relay'), row('上行 / 下行帧', 'frames'), row('最近音频错误', 'audioError')]), text('relayError', 'p', 'as-technical')]),
      text('updated', 'p', 'as-updated')
     ]),

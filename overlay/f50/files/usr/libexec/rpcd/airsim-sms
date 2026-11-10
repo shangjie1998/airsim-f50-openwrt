@@ -136,8 +136,21 @@ forward_sms_job() {
 }
 
 # 单卡设备：直接报一张卡，字段名跟 M8 的页面保持一致
+# 运营商名字：AT+COPS? 回的是 PLMN（46001 这种），F50 这条链上没有别的地方能给，
+# 页面 SIM 标签和短信占位符 {operator} 都要它，所以这里现取现翻。
+operator_name() {
+	_plmn=$(mu300-at -t 3 'AT+COPS?' 2>/dev/null | sed -n 's/.*"\([0-9]\{5,6\}\)".*/\1/p' | head -n 1)
+	case "$_plmn" in
+	46000|46002|46007|46008) echo 中国移动 ;;
+	46001|46006|46009) echo 中国联通 ;;
+	46003|46005|46011) echo 中国电信 ;;
+	46015) echo 中国广电 ;;
+	*) echo '' ;;
+	esac
+}
+
 sms_sims() {
-	ins=false; num=''; op=''
+	ins=false; num=''
 	raw=$(curl -s -m 4 "$AGENT/api/status" 2>/dev/null)
 	if [ -n "$raw" ]; then
 		json_load "$raw" 2>/dev/null && {
@@ -146,12 +159,17 @@ sms_sims() {
 		}
 	fi
 	json_init
+	# F50 单卡：卡槽号固定 0。页面拿 s.card 和 current 做数值比较，两边都得是数字，
+	# 对不上就会被判成「未驻留 · 无实时测量」，所以这里用 json_add_int。
+	json_add_int current 0
 	json_add_array sims
 	json_add_object
 	json_add_string id '1'
+	json_add_int card 0
 	json_add_string name 'SIM 1'
 	json_add_string number "$num"
-	json_add_string operator ''
+	op=$(operator_name)
+	json_add_string operator "$op"
 	case "$ins" in
 	1|true|yes) json_add_boolean present 1 ;;
 	*) json_add_boolean present 0 ;;

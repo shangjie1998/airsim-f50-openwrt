@@ -1,0 +1,40 @@
+--- a/plugin/cmd/airsim-mu300d/management.go
++++ b/plugin/cmd/airsim-mu300d/management.go
+@@ -242,17 +242,21 @@
+ 	}
+ }
+ 
+-const releasePage = "https://github.com/kai-wu-cortex/airsim-mu300/releases"
+-const releasesAPI = "https://api.github.com/repos/kai-wu-cortex/airsim-mu300/releases?per_page=30"
++// F50 这条线发的是自编整包（airsim-f50-<ver>-r<n>-<kver>.tar.gz），
++// 版本口径 v0.1.0.N-r23-6.18，跟上游 MU300 的 v0.1.0-r23 不是一套，
++// 所以仓库地址、tag 规则、安装包名都按本项目来。
++const releasePage = "https://github.com/shangjie1998/airsim-f50-openwrt/releases"
++const releasesAPI = "https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases?per_page=30"
+ 
+-var releasePattern = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)-r(\d+)$`)
++var releasePattern = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)\.(\d+)-r(\d+)-(\d+)\.(\d+)$`)
+ 
+ func versionParts(v string) ([]int, bool) {
+ 	m := releasePattern.FindStringSubmatch(v)
+ 	if m == nil {
+ 		return nil, false
+ 	}
+-	p := make([]int, 4)
++	// 0.1.0.13-r23-6.18 拆成 {0,1,0,13,23,6,18}，逐段比大小。
++	p := make([]int, 7)
+ 	for i := range p {
+ 		n, e := strconv.Atoi(m[i+1])
+ 		if e != nil {
+@@ -297,8 +301,10 @@
+ 			continue
+ 		}
+ 		installable := false
++		// 本项目的主包名，例如 airsim-f50-0.1.0.13-r23-6.18.tar.gz
++		pkg := "airsim-f50-" + strings.TrimPrefix(r.Tag, "v") + ".tar.gz"
+ 		for _, a := range r.Assets {
+-			if a.Name == "luci-app-airsim-"+strings.TrimPrefix(r.Tag, "v")+".apk" {
++			if a.Name == pkg {
+ 				installable = true
+ 			}
+ 		}
