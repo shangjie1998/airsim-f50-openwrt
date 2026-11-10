@@ -38,7 +38,69 @@ if [ -x /etc/init.d/mu300-voice ]; then
 	fi
 fi
 # start is idempotent when the DSP is already running; never call stop/reset.
-if [ ! -f /run/airsim-dsp-prepared ]; then
-	mu300-audio-dsp start
-	touch /run/airsim-dsp-prepared
+#
+# 音频驱动与内核强绑定：mu300-linux 换内核 release 后，/mnt 上的驱动包很可能
+# 只有旧版本的 .ko。此时 DSP 必炸，但插件本体（页面、短信、来电通知）仍可用。
+# 所以这里先做一次自检，再决定是否启动 DSP：
+#   - 目录约定 $EXTRA/modules/<KREL>/，同一 KREL 多套构建时 <KREL>+<tag>/
+#   - 判据是 vermagic 与 uname -r 完全对齐，不看目录名
+#   - 不匹配 → 自动写 /etc/airsim/no-audio（首行 auto: 说明原因），跳过 DSP
+#   - 之后再匹配上（比如系统回滚/驱动补齐）→ 自动删掉 auto 标记，恢复语音
+#   - 手工写的标记（内容不以 auto: 开头）永远尊重，不会被自动清掉
+AUDIO_EXTRA=${AIRSIM_AUDIO_EXTRA:-/mnt/mu300-disk/extra/airsim-audio}
+FLAG_DIR=/etc/airsim
+FLAG=$FLAG_DIR/no-audio
+KREL=$(uname -r)
+
+vermagic_of() {
+	grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 | cut -d= -f2
+}
+
+audio_extra_for_kernel() {
+	_c=
+	for _d in "$AUDIO_EXTRA/modules/$KREL" "$AUDIO_EXTRA/modules/$KREL"+*; do
+		[ -d "$_d" ] || continue
+		[ -f "$_d/audio_reserve.ko" ] || continue
+		_v=$(vermagic_of "$_d/audio_reserve.ko")
+		case $_v in "$KREL"|"$KREL "*) _c=$_d; break ;; esac
+	done
+	[ -n "$_c" ] && { echo "$_c"; return 0; }
+	return 1
+}
+
+known_krels() {
+	ls "$AUDIO_EXTRA/modules" 2>/dev/null | tr '\n' ' '
+}
+
+if [ -f "$FLAG" ]; then
+	_note=$(cat "$FLAG" 2>/dev/null || true)
+	if [ "${_note#auto}" != "$_note" ] && _dir=$(audio_extra_for_kernel); then
+		rm -f "$FLAG"
+		logger -t airsim "audio drivers for $KREL found again ($_dir); resuming DSP"
+	elif [ "${_note#auto}" != "$_note" ]; then
+		logger -t airsim "audio skipped: kernel $KREL has no matching drivers (have: $(known_krels))"
+	else
+		logger -t airsim "audio skipped: manual flag $FLAG"
+	fi
+fi
+
+if [ -f "$FLAG" ]; then
+	:  # 跳过 DSP（见上面的日志）
+elif _dir=$(audio_extra_for_kernel); then
+	if [ ! -f /run/airsim-dsp-prepared ]; then
+		mu300-audio-dsp start
+		touch /run/airsim-dsp-prepared
+	fi
+	rm -f "$FLAG_DIR/no-audio.reason"
+else
+	mkdir -p "$FLAG_DIR"
+	{
+		echo "auto: kernel $KREL has no matching audio drivers"
+		echo "kernel: $KREL"
+		echo "available: $(known_krels)"
+		echo "path: $AUDIO_EXTRA/modules"
+		echo "note: 语音不可用，页面/短信/来电通知正常。装好对应内核的驱动后重启一次或 restart 服务，会自动恢复。"
+	} > "$FLAG"
+	logger -t airsim "audio drivers for $KREL missing (have: $(known_krels)); DSP skipped"
+	echo "音频驱动与内核 $KREL 不匹配（现有：$(known_krels)），本次跳过 DSP：语音不可用，其余功能正常。" >&2
 fi

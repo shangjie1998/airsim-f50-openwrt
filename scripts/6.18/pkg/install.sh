@@ -25,10 +25,18 @@ case "$K" in
 	;;
 esac
 
-[ -f /usr/lib/airsim/airsim-mu300d ] || { echo "插件未安装，本包只做覆盖更新" >&2; exit 1; }
+# 刷机后 /usr/lib/airsim 是空的，这时候按首次安装走：不备份、直接铺。
+# 有旧插件时才是覆盖更新，先备份再铺。
+FRESH=0
+if [ ! -f /usr/lib/airsim/airsim-mu300d ]; then
+	FRESH=1
+	mkdir -p /usr/lib/airsim
+	echo "  未检测到已装插件（刷机后？）：按首次安装处理，不备份"
+fi
 [ -d "$AUD" ] || echo "  注意：$AUD 不存在，语音会不可用（先装 6.18 音频模块）" >&2
 
 # --- 备份：二进制、页面、菜单/ACL、rpcd 后端、init.d 与 uci ---
+if [ "$FRESH" = 0 ]; then
 mkdir -p "$BK/view" "$BK/rpcd" "$BK/acl" "$BK/initd" "$BK/config"
 for f in /usr/lib/airsim/airsim-mu300d /usr/lib/airsim/airsim-agent /usr/lib/airsim/VERSION; do
 	[ -f "$f" ] && cp -p "$f" "$BK/" || true
@@ -43,6 +51,7 @@ done
 for f in /etc/config/airsim /etc/config/airsim-call-forward /etc/config/f50-bt; do
 	[ -f "$f" ] && cp -p "$f" "$BK/config/" || true
 done
+fi
 
 # --- 停服务 ---
 /etc/init.d/airsim stop >/dev/null 2>&1 || true
@@ -108,9 +117,19 @@ fi
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
 
+# 上游默认是 enabled=0（装完得自己开）。首次安装时直接打开，
+# 覆盖更新不动用户已经选好的状态。
+if [ "$FRESH" = 1 ] && [ -f /etc/config/airsim ]; then
+	uci -q set airsim.main.enabled=1 && uci -q commit airsim || true
+fi
+/etc/init.d/airsim enable >/dev/null 2>&1 || true
+
 /etc/init.d/airsim start >/dev/null 2>&1 || /etc/init.d/airsim restart >/dev/null 2>&1 || true
 [ "$(uci get airsim-call-forward.main.enabled 2>/dev/null || echo 0)" = 1 ] && /etc/init.d/airsim-call-forward start >/dev/null 2>&1 || true
 
+if [ "$FRESH" = 1 ]; then
+	echo "  首次安装完成（没有备份可列）"
+else
 cat <<EOF
   备份在 $BK
   验证：
@@ -120,3 +139,4 @@ cat <<EOF
     wget -qO- http://127.0.0.1:8575/api/status | grep phone_number
   装完 LuCI 请开新标签页重登（rpcd 重启会把旧会话踢掉）。
 EOF
+fi

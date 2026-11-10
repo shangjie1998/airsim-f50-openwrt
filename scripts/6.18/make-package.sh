@@ -33,6 +33,15 @@ cp -f "$HERE/out/f50/airsim-agent" "$HERE/out/f50/airsim-mu300d" "$STAGE/"
 chmod 755 "$STAGE/airsim-agent" "$STAGE/airsim-mu300d"
 printf '%s\n' "$VER" > "$STAGE/VERSION"
 
+# 上游基础层（ubus 对象 /usr/libexec/rpcd/airsim、/etc/init.d/airsim、菜单与 ACL 骨架）
+# 先铺它，再用 overlay/f50/files 覆盖同名文件（我们的页面、菜单合并版、自定义 rpcd）。
+# 刷机后设备上只有内核+LuCI，没这层的话 ubus 里连 airsim 对象都没有。
+if [ -d "$HERE/src/plugin/packaging/openwrt/root" ]; then
+	rsync -a "$HERE/src/plugin/packaging/openwrt/root/" "$STAGE/files/"
+else
+	echo "  缺少 src/plugin/packaging/openwrt/root，打出来的是纯覆盖包" >&2
+fi
+
 # overlay/f50/files 整棵树照抄，权限按「有 shebang 就 755」处理
 rsync -a "$HERE/overlay/f50/files/" "$STAGE/files/"
 find "$STAGE/files" -type f | while read -r f; do
