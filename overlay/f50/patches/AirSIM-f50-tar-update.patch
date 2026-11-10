@@ -9,7 +9,14 @@
  		return true
  	}
  	return false
-@@ -264,7 +264,10 @@
+@@ -258,13 +258,16 @@
+ 	if !allowedReleaseDownload(raw) {
+ 		return errors.New("更新下载地址无效")
+ 	}
+-	client := &http.Client{Timeout: 3 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
++	client := &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+ 		if len(via) > 5 || !allowedReleaseDownload(r.URL.String()) {
+ 			return errors.New("更新下载跳转被拒绝")
  		}
  		return nil
  	}}
@@ -20,10 +27,11 @@
  	resp, e := client.Do(req)
  	if e != nil {
  		return errors.New("下载失败，请检查网络后重试")
-@@ -284,6 +287,39 @@
+@@ -283,7 +286,40 @@
+ 		return errors.New("下载不完整或文件超出限制")
  	}
  	return f.Sync()
- }
++}
 +// 用 api.github.com 取某个 tag 的附件地址（API 地址带 /assets/<id>，
 +// 配 Accept: application/octet-stream 能直接下二进制；github.com 上的
 +// browser_download_url 在这台设备上访问不到）。
@@ -55,12 +63,12 @@
 +		out[a.Name] = a.URL
 +	}
 +	return out, nil
-+}
+ }
 +
  func checksumFor(manifest []byte, name string) (string, error) {
  	found := ""
  	for _, line := range strings.Split(string(manifest), "\n") {
-@@ -338,25 +374,48 @@
+@@ -338,25 +374,66 @@
  	return nil
  }
  
@@ -98,19 +106,37 @@
 +	dir, e := os.MkdirTemp("/tmp", "airsim-pkg-")
 +	if e != nil {
 +		return e
- 	}
++	}
 +	defer os.RemoveAll(dir)
 +	report("installing", "正在解包并覆盖安装，请勿断电或关闭设备")
 +	if _, e = run(ctx, "tar", "-xzf", pkg, "-C", dir); e != nil {
 +		return errors.New("安装包解压失败，未安装")
 +	}
 +	entries, e := os.ReadDir(dir)
-+	if e != nil || len(entries) != 1 || entries[0].IsDir() == false {
-+		return errors.New("安装包结构异常，未安装")
++	if e != nil {
++		return errors.New("读取解包目录失败，未安装")
+ 	}
++	// 不苛求「顶层恰好一个目录」：找到带 install.sh 的那层就行。
++	root := ""
++	if _, err := os.Stat(filepath.Join(dir, "install.sh")); err == nil {
++		root = dir
 +	}
-+	root := filepath.Join(dir, entries[0].Name())
-+	if _, e = os.Stat(filepath.Join(root, "install.sh")); e != nil {
-+		return errors.New("安装包里没有 install.sh，未安装")
++	if root == "" {
++		for _, en := range entries {
++			if en.IsDir() {
++				if _, err := os.Stat(filepath.Join(dir, en.Name(), "install.sh")); err == nil {
++					root = filepath.Join(dir, en.Name())
++					break
++				}
++			}
++		}
++	}
++	if root == "" {
++		names := ""
++		for _, en := range entries {
++			names += en.Name() + " "
++		}
++		return errors.New("安装包里没有 install.sh（顶层： " + strings.TrimSpace(names) + " ），未安装")
 +	}
 +	if _, e = run(ctx, "sh", "-c", "cd '"+root+"' && sh ./install.sh"); e != nil {
 +		return errors.New("安装脚本执行失败；请检查设备状态，未自动回滚")
@@ -118,7 +144,7 @@
  	installed, e := run(ctx, "/usr/lib/airsim/airsim-mu300d", "--manage", "get")
  	var v struct {
  		Version string `json:"version"`
-@@ -468,43 +527,24 @@
+@@ -468,43 +545,24 @@
  			return errors.New("Release 或更新频道已变化，请重新检查更新")
  		}
  		set("downloading", "正在下载安装包；电话服务保持关闭")

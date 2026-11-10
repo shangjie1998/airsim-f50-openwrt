@@ -375,6 +375,7 @@ return view.extend({
   var batteryRow = row('设备电量', 'battery');
   root = E('div', { 'class': 'as-root' }, [
    ui.stylesheet(),
+   (ui.menu ? ui.menu('overview') : ''),
    E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 电话网关'), E('h2', {}, '让连接，简单一点。'), E('p', {}, 'F50 的运行状态与客户端连接，在这里管理。')]), text('version', 'span', 'as-version')]),
    E('div', { 'class': 'as-layout' }, [
     E('section', { 'class': 'as-card as-status', 'aria-label': '设备状态' }, [

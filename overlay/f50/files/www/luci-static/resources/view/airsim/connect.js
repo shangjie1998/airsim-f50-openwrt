@@ -150,6 +150,7 @@ return view.extend({
   ]);
 
   var rootEl = E('div', { 'class': 'as-root' }, [
+   (ui.menu ? ui.menu('connect') : ''),
    ui.stylesheet(),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 连接'), E('h2', {}, '连接方式，自己定。'), E('p', {}, '只管 F50 这一侧，不动 AirSIM 客户端。')]),
