@@ -1,20 +1,21 @@
 #!/bin/sh
-# AirSIM for F50 —— 6.18 音频模块可选件安装脚本
+# AirSIM for F50 —— 音频模块可选件安装脚本（支持一个包带多套内核）
 #
-# 干什么：把本包 modules/6.18.60/ 下 25 个 .ko 放进厂商音频扩展目录
-#         /mnt/mu300-disk/extra/airsim-audio/modules/6.18.60/，
+# 干什么：把本包 modules/<KREL>/ 下的 .ko 放进厂商音频扩展目录
+#         /mnt/mu300-disk/extra/airsim-audio/modules/<KREL>/，
 #         并按需要给 mu300-audio-dsp 放行 CONFIG 逐位比对与 aplay 探针。
 #
-# 不干什么：不碰内核、不碰 boot、不动分区、不加载模块（重启由原 prepare.local 负责）。
+# 不干什么：不碰内核、不碰 boot、不动分区、不加载模块（重启由 prepare 里的自检决定）。
 #
-# 用法：sh install.sh            装模块
+# 用法：sh install.sh            装包里所有内核目录（当前内核那套会被标出来）
 #       sh install.sh --verify   只看当前状态，不改任何文件
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 VER=$(cat "$HERE/VERSION" 2>/dev/null || echo '?')
 EXT=${EXT:-/mnt/mu300-disk/extra/airsim-audio}
 DSP=$EXT/bin/mu300-audio-dsp
-KREL_WANT=6.18.60
+KREL=$(uname -r)
+MODS=$HERE/modules
 
 die() { echo "装音频模块: $*" >&2; exit 1; }
 say() { echo "装音频模块: $*"; }
@@ -22,12 +23,21 @@ say() { echo "装音频模块: $*"; }
 dest=$EXT/modules/$KREL_WANT
 count() { ls "$dest"/*.ko 2>/dev/null | wc -l; }
 
+vermagic_of() { grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 | cut -d= -f2; }
+pkg_krels() { ls "$MODS" 2>/dev/null | tr '\n' ' '; }
+
+count() { ls "$EXT/modules/$1"/*.ko 2>/dev/null | wc -l | tr -d ' '; }
+
 verify() {
-	echo "  内核      : $(uname -r)"
+	echo "  当前内核  : $KREL"
 	echo "  扩展目录  : $EXT $([ -d "$EXT" ] && echo '存在' || echo '不存在')"
 	echo "  DSP       : $DSP $([ -x "$DSP" ] && echo '在' || echo '缺')"
-	echo "  .ko 数量  : $(count) / 25"
+	echo "  包内内核  : $(pkg_krels)"
+	for k in $(pkg_krels); do
+		echo "  modules/$k : 已装 $(count "$k") 个"
+	done
 	echo "  包版本    : $VER"
+	[ -d "$EXT/modules/$KREL" ] && echo "  匹配判断  : 当前内核有目录，但仍以 vermagic 为准" || echo "  匹配判断  : 当前内核 $KREL 没有对应目录"
 }
 
 [ "$(id -u)" = 0 ] || die '要用 root 跑'
@@ -37,42 +47,37 @@ if [ "${1:-}" = "--verify" ]; then
 	exit 0
 fi
 
-krel=$(uname -r)
-[ "$krel" = "$KREL_WANT" ] || die "当前内核是 $krel，本包只给 $KREL_WANT 用"
-
 [ -d "$EXT" ] || die "音频扩展目录不存在：$EXT（需要先有厂商那份音频扩展）"
-[ -d "$HERE/modules/$KREL_WANT" ] || die "包里没有 modules/$KREL_WANT"
+[ -d "$MODS" ] || die '包里没有 modules/ 目录'
+[ -n "$(pkg_krels)" ] || die '包里一个内核目录都没有'
 
-# vermagic 对一遍：跟设备上现成的 .ko 必须一致，否则 insmod 会被内核拒。
-src=$HERE/modules/$KREL_WANT
-ourko=$src/sprd_audcp_boot.ko
-[ -f "$ourko" ] || die "包里没有 sprd_audcp_boot.ko"
-get_vermagic() { strings "$1" 2>/dev/null | sed -n 's/^vermagic=/vermagic=/p' | head -1; }
-if command -v strings >/dev/null 2>&1; then
-	stock=$(find /lib/modules -maxdepth 3 -name '*.ko' 2>/dev/null | head -1 || true)
-	ours=$(get_vermagic "$ourko")
-	[ -n "$ours" ] || die '取不到本包模块的 vermagic'
-	if [ -n "$stock" ]; then
-		theirs=$(get_vermagic "$stock")
-		say "设备现成模块 vermagic: ${theirs:-未知}"
-		say "本包模块     vermagic: $ours"
-		[ "$theirs" = "$ours" ] || die 'vermagic 不一致，装了也加载不了（内核不是同一套构建）'
-	else
-		say "设备上没有可对照的 .ko，跳过 vermagic 比对（$ours）"
+matched=0
+for k in $(pkg_krels); do
+	src=$MODS/$k
+	n=$(ls "$src"/*.ko 2>/dev/null | wc -l | tr -d ' ')
+	[ "$n" -gt 0 ] || continue
+	base=${k%%+*}
+	v=$(vermagic_of "$src/audio_reserve.ko")
+	case $v in
+		"$base"|"$base "*) ;;
+		*) die "包内 modules/$k 的 vermagic='$v' 与目录名 $base 不一致，装了内核也拒" ;;
+	esac
+	dest=$EXT/modules/$k
+	if [ -d "$dest" ]; then
+		bak=$dest.bak.$(date +%Y%m%d%H%M%S)
+		mv "$dest" "$bak"
+		say "$k：已有目录，备份到 $bak"
 	fi
-else
-	say '设备上没有 strings，跳过 vermagic 比对'
-fi
+	mkdir -p "$dest"
+	cp -f "$src"/*.ko "$dest"/
+	[ -f "$src/KERNEL" ] && cp -f "$src/KERNEL" "$dest/KERNEL"
+	say "$k：模块已放到 $dest（$(count "$k") 个 .ko，vermagic=$v）"
+	[ "$base" = "$KREL" ] && matched=1
+done
 
-# 旧的先备份，再整目录换新
-if [ -d "$dest" ]; then
-	bak=$EXT/modules/$KREL_WANT.bak.$(date +%Y%m%d%H%M%S)
-	mv "$dest" "$bak"
-	say "已有 $KREL_WANT 目录，备份到 $bak"
+if [ "$matched" = 0 ]; then
+	say "注意：包内没有与当前内核 $KREL 匹配的一套（只有 $(pkg_krels)），装完不会立刻出声；换到对应内核时这些模块才生效。"
 fi
-mkdir -p "$dest"
-cp -f "$src"/*.ko "$dest"/
-say "模块已放到 $dest（$(count) 个 .ko）"
 
 # mu300-audio-dsp 的 set_fits 拿 KERNEL 的 CONFIG 与设备 /proc/config.gz 逐位比。
 # 我们这棵树只差两个纯调试项，ABI 与 vermagic 都一致，所以改成「声明了 CONFIG 就放行」。
