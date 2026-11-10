@@ -20,9 +20,6 @@ MODS=$HERE/modules
 die() { echo "装音频模块: $*" >&2; exit 1; }
 say() { echo "装音频模块: $*"; }
 
-dest=$EXT/modules/$KREL_WANT
-count() { ls "$dest"/*.ko 2>/dev/null | wc -l; }
-
 vermagic_of() { grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 | cut -d= -f2; }
 pkg_krels() { ls "$MODS" 2>/dev/null | tr '\n' ' '; }
 
@@ -70,13 +67,39 @@ for k in $(pkg_krels); do
 	fi
 	mkdir -p "$dest"
 	cp -f "$src"/*.ko "$dest"/
-	[ -f "$src/KERNEL" ] && cp -f "$src/KERNEL" "$dest/KERNEL"
+	# KERNEL 元数据必须在位：mu300-audio-dsp 的 set_fits 拿它的 CONFIG 跟本机 /proc/config.gz 比，
+	# 缺文件就报「built for another build ()」直接拒绝加载。包里没带就按本机内核配置补一份。
+	if [ -f "$src/KERNEL" ]; then
+		cp -f "$src/KERNEL" "$dest/KERNEL"
+	elif [ "$base" = "$KREL" ]; then
+		cfg=$(gzip -dc /proc/config.gz 2>/dev/null | grep -E '^(CONFIG_|# CONFIG_)' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+		printf 'KEY=%s\nKREL=%s\nCONFIG=%s\nTAG=unknown\n' "${base%%.*}" "$base" "$cfg" > "$dest/KERNEL"
+		say "$k：包内没有 KERNEL 元数据，按本机内核配置补写 CONFIG=$cfg"
+	fi
 	say "$k：模块已放到 $dest（$(count "$k") 个 .ko，vermagic=$v）"
 	[ "$base" = "$KREL" ] && matched=1
 done
 
 if [ "$matched" = 0 ]; then
 	say "注意：包内没有与当前内核 $KREL 匹配的一套（只有 $(pkg_krels)），装完不会立刻出声；换到对应内核时这些模块才生效。"
+fi
+
+# 开机预留脚本必须在位：缺了它 audio_reserve 那 2304 页物理内存抢不到，
+# 整条音频链（声卡 → prepare → agent）会静默不起来，而且只有重启能重来。
+# 脚本本体来自厂商音频扩展 integration/，我们负责落到 /etc/init.d/ 并挂到 S10。
+RES=$EXT/integration/airsim-audio-reserve
+if [ -f "$RES" ]; then
+	if cmp -s "$RES" /etc/init.d/airsim-audio-reserve 2>/dev/null; then
+		/etc/init.d/airsim-audio-reserve enable >/dev/null 2>&1 || true
+		say '开机预留脚本已在位（/etc/init.d/airsim-audio-reserve，S10）'
+	else
+		cp -f "$RES" /etc/init.d/airsim-audio-reserve
+		chmod 755 /etc/init.d/airsim-audio-reserve
+		/etc/init.d/airsim-audio-reserve enable >/dev/null 2>&1 || true
+		say '开机预留脚本已装好并启用（/etc/init.d/airsim-audio-reserve，S10）'
+	fi
+else
+	say '注意：音频扩展里没有 integration/airsim-audio-reserve，开机不会抢 DSP 内存（重启后音频起不来）'
 fi
 
 # mu300-audio-dsp 的 set_fits 拿 KERNEL 的 CONFIG 与设备 /proc/config.gz 逐位比。

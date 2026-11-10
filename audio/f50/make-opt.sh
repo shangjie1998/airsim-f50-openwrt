@@ -25,11 +25,13 @@ vermagic_of() { grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 |
 if [ $# -gt 0 ]; then
 	KRELS="$*"
 else
-	KRELS=$(ls "$PAY" 2>/dev/null | tr '\n' ' ')
+	# 下划线开头的目录是待重建占位（还只有 README），全量打包时跳过
+	KRELS=$(ls "$PAY" 2>/dev/null | grep -v '^_' | tr '\n' ' ')
 fi
 [ -n "$KRELS" ] || die "payload/ 下没有内核目录"
 
 for k in $KRELS; do
+	case $k in _*) die "payload/$k 是待重建占位，还不能打包" ;; esac
 	[ -d "$PAY/$k" ] || die "payload/$k 不存在"
 	n=$(ls "$PAY/$k"/*.ko 2>/dev/null | wc -l | tr -d ' ')
 	[ "$n" -gt 0 ] || die "payload/$k 里没有 .ko"
