@@ -3,3 +3,4 @@ src/plugin/out/
 .DS_Store
 out/
 out/
+bluetooth/f50/payload/root/
