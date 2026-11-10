@@ -44,6 +44,30 @@ unblock_bt
 		_btname="F50${_suf:+-$_suf}"
 		hciconfig hci0 name "$_btname" >/dev/null 2>&1
 		echo "sprd-bt: 显示名 $_btname"
+
+		# 光设控制器不够：bluetoothd 一重启（删配对、装可选件、手动重启服务）
+		# 就会按 /etc/bluetooth/main.conf 的 Name 把名字改回去。这里把 main.conf
+		# 也改成同一份名字，重启后仍然是 F50-<后6位>。
+		_conf=/etc/bluetooth/main.conf
+		if [ -f "$_conf" ] && [ -n "$_btname" ]; then
+			if grep -qE '^[[:space:]]*Name[[:space:]]*=' "$_conf"; then
+				sed -i "s|^[[:space:]]*Name[[:space:]]*=.*|Name = $_btname|" "$_conf"
+			elif grep -q '^\[General\]' "$_conf"; then
+				sed -i "s|^\[General\]|[General]\nName = $_btname|" "$_conf"
+			else
+				printf '[General]\nName = %s\n' "$_btname" >> "$_conf"
+			fi
+			# 已经在跑的 bluetoothd 不会重读配置，重启一次让它认这个名字；
+			# 重启会把可被发现/可配对清掉，紧接着补回来。
+			if pgrep -f '[b]luetoothd' >/dev/null 2>&1; then
+				/etc/init.d/bluetoothd restart >/dev/null 2>&1
+				sleep 2
+				hciconfig hci0 piscan >/dev/null 2>&1
+				if command -v bluetoothctl >/dev/null 2>&1; then
+					printf 'pairable on\ndiscoverable on\nquit\n' | bluetoothctl >/dev/null 2>&1
+				fi
+			fi
+		fi
 	fi
 ) &
 

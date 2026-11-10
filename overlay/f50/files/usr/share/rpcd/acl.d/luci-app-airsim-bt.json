@@ -2,6 +2,6 @@
 	"luci-app-airsim-bt": {
 		"description": "Grant access to F50 bluetooth switch",
 		"read": { "ubus": { "airsim-bt": [ "bt_get", "bt_opt_probe" ] } },
-		"write": { "ubus": { "airsim-bt": [ "bt_set", "bt_opt_install" ] } }
+		"write": { "ubus": { "airsim-bt": [ "bt_set", "bt_opt_install", "bt_unpair" ] } }
 	}
 }

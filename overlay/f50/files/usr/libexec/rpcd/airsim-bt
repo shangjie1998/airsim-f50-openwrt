@@ -17,8 +17,8 @@ CONF=/etc/config/f50-bt
 HCI=/sys/class/bluetooth/hci0
 
 # 可选件（bt-opt）：固定 tag + 固定 sha256，跟主包版本解耦
-BT_OPT_TAG=bt-opt-v1.0.2
-BT_OPT_FILE=airsim-f50-bt-opt-1.0.2-k6.18.60.tar.gz
+BT_OPT_TAG=bt-opt-v1.0.3
+BT_OPT_FILE=airsim-f50-bt-opt-1.0.3-k6.18.60.tar.gz
 BT_OPT_KVER=6.18.60
 BT_OPT_DIR=/tmp/airsim-btopt
 BT_OPT_RUN=/usr/libexec/airsim-btopt-install
@@ -64,6 +64,11 @@ bt_state() {
 	# 显示名：手机蓝牙列表里看到的就是它（attach 脚本算的 F50-<地址后6位>）
 	# hciconfig 不带 -a 不打印名字，必须 -a；手机端看到的是这个名字
 	nm=$(hciconfig -a hci0 2>/dev/null | sed -n "s/.*Name: *'\(.*\)'.*/\1/p" | head -n 1)
+	# hciconfig 读本地名偶尔会 HCI 超时（尤其刚重启 bluetoothd 之后），
+	# 这时退回 bluetoothctl：它读的是 bluetoothd 的 alias，也正是手机端看到的名字。
+	if [ -z "$nm" ] && command -v bluetoothctl >/dev/null 2>&1; then
+		nm=$(bluetoothctl show 2>/dev/null | sed -n 's/^[[:space:]]*Name:[[:space:]]*//p' | head -n 1)
+	fi
 	[ -n "$nm" ] && json_add_string name "$nm"
 
 	# 可见性：PSCAN=可被发现，ISCAN=可被连接。默认开机就打开，见 airsim-bt-boot。
@@ -236,14 +241,94 @@ btopt_install() {
 	json_dump
 }
 
+# ---- 删除已配对设备 ----------------------------------------------------------
+# BlueZ 把每台配对设备装成 /var/lib/bluetooth/<控制器>/<mac>/info。
+# 正规做法是走 bluetoothctl remove（bluetoothd 会同步内存里的设备表）；
+# bluetoothctl 不灵或没装时，退回删目录 + 重启 bluetoothd，再把可见性复位 ——
+# 不然删完 PSCAN/ISCAN 会掉，手机就搜不到了。
+bt_ctrl_addr() {
+	_a=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
+	if [ -z "$_a" ] && command -v hciconfig >/dev/null 2>&1; then
+		_a=$(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: *\([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)
+	fi
+	printf '%s' "$_a" | tr 'a-f' 'A-F'
+}
+
+bt_rescan() {
+	[ -d "$HCI" ] || return 0
+	if command -v hciconfig >/dev/null 2>&1; then hciconfig hci0 piscan >/dev/null 2>&1; fi
+	if command -v bluetoothctl >/dev/null 2>&1; then
+		printf 'pairable on\ndiscoverable on\nquit\n' | bluetoothctl >/dev/null 2>&1
+	fi
+}
+
+bt_unpair() {
+	IFS= read -r request
+	a=
+	if json_load "$request" 2>/dev/null; then
+		json_get_var a address 2>/dev/null
+	fi
+	a=$(printf '%s' "$a" | tr 'a-f' 'A-F')
+
+	if ! printf '%s' "$a" | grep -qE '^([0-9A-F]{2}:){5}[0-9A-F]{2}$'; then
+		json_init
+		json_add_boolean ok 0
+		json_add_string error '地址格式不对'
+		json_dump
+		return 0
+	fi
+
+	ctrl=$(bt_ctrl_addr)
+	[ -n "$ctrl" ] || ctrl=$(ls /var/lib/bluetooth 2>/dev/null | head -n 1)
+
+	# 已连接的要先断开，不然 remove 会留个半截
+	if command -v hcitool >/dev/null 2>&1 && hcitool con 2>/dev/null | grep -qi "$a"; then
+		if command -v bluetoothctl >/dev/null 2>&1; then
+			printf 'disconnect %s\nquit\n' "$a" | bluetoothctl >/dev/null 2>&1
+		else
+			hcitool cmd 0x01 0x0406 >/dev/null 2>&1
+		fi
+		sleep 1
+	fi
+
+	gone=0
+	if command -v bluetoothctl >/dev/null 2>&1; then
+		out=$(printf 'remove %s\nquit\n' "$a" | bluetoothctl 2>&1)
+		printf '%s' "$out" | grep -qiE 'Device has been removed|removed|not available' && gone=1
+	fi
+
+	# 兜底：直接删存储目录（bluetoothctl 不在或没删掉时）
+	if [ -n "$ctrl" ] && [ -d "/var/lib/bluetooth/$ctrl/$a" ]; then
+		rm -rf "/var/lib/bluetooth/$ctrl/$a" && gone=1
+		[ -x /etc/init.d/bluetoothd ] && /etc/init.d/bluetoothd restart >/dev/null 2>&1
+		sleep 2
+	fi
+	bt_rescan
+
+	json_init
+	if [ "$gone" = 1 ]; then
+		json_add_boolean ok 1
+		json_add_boolean removed 1
+		json_add_string address "$a"
+		json_add_string message '已删除，对方下次连接需要重新配对'
+	else
+		json_add_boolean ok 0
+		json_add_boolean removed 0
+		json_add_string address "$a"
+		json_add_string error '没删掉：设备记录不在，或蓝牙服务没响应'
+	fi
+	json_dump
+}
+
 case "$1" in
 	list)
-		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"},"bt_opt_probe":{},"bt_opt_install":{}}'
+		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"},"bt_unpair":{"address":"String"},"bt_opt_probe":{},"bt_opt_install":{}}'
 		;;
 	call)
 		case "$2" in
 		bt_get) bt_state ;;
 		bt_set) bt_set ;;
+		bt_unpair) bt_unpair ;;
 		bt_opt_probe) btopt_probe ;;
 		bt_opt_install) btopt_install ;;
 		*) exit 1 ;;

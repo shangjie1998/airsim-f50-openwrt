@@ -8,8 +8,8 @@
 # 页面轮询 bt_opt_probe 读这两个文件。
 set -u
 
-TAG=bt-opt-v1.0.2
-FILE=airsim-f50-bt-opt-1.0.2-k6.18.60.tar.gz
+TAG=bt-opt-v1.0.3
+FILE=airsim-f50-bt-opt-1.0.3-k6.18.60.tar.gz
 REPO=shangjie1998/airsim-f50-openwrt
 BASE=https://github.com/$REPO/releases/download
 API=https://api.github.com/repos/$REPO
