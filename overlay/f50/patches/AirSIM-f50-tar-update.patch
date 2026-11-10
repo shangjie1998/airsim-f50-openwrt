@@ -1,0 +1,176 @@
+--- a/plugin/cmd/airsim-mu300d/updates.go
++++ b/plugin/cmd/airsim-mu300d/updates.go
+@@ -249,7 +249,7 @@
+ 		return false
+ 	}
+ 	switch u.Hostname() {
+-	case "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com":
++	case "github.com", "api.github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com":
+ 		return true
+ 	}
+ 	return false
+@@ -264,7 +264,10 @@
+ 		}
+ 		return nil
+ 	}}
++	// 设备上 github.com 不可达、api.github.com 通，所以走 asset API 下二进制。
+ 	req, _ := http.NewRequestWithContext(ctx, "GET", raw, nil)
++	req.Header.Set("Accept", "application/octet-stream")
++	req.Header.Set("User-Agent", "AirSIM-F50-update")
+ 	resp, e := client.Do(req)
+ 	if e != nil {
+ 		return errors.New("下载失败，请检查网络后重试")
+@@ -284,6 +287,39 @@
+ 	}
+ 	return f.Sync()
+ }
++// 用 api.github.com 取某个 tag 的附件地址（API 地址带 /assets/<id>，
++// 配 Accept: application/octet-stream 能直接下二进制；github.com 上的
++// browser_download_url 在这台设备上访问不到）。
++func releaseAssetURLs(ctx context.Context, tag string) (map[string]string, error) {
++	api := "https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/" + tag
++	req, _ := http.NewRequestWithContext(ctx, "GET", api, nil)
++	req.Header.Set("Accept", "application/vnd.github+json")
++	req.Header.Set("User-Agent", "AirSIM-F50-update")
++	client := &http.Client{Timeout: 15 * time.Second}
++	resp, e := client.Do(req)
++	if e != nil {
++		return nil, errors.New("读取 Release 信息失败，请检查网络后重试")
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != 200 {
++		return nil, errors.New("Release 不存在或尚未发布完整")
++	}
++	var rel struct {
++		Assets []struct {
++			Name string `json:"name"`
++			URL  string `json:"url"`
++		} `json:"assets"`
++	}
++	if e = json.NewDecoder(resp.Body).Decode(&rel); e != nil {
++		return nil, errors.New("Release 信息解析失败")
++	}
++	out := map[string]string{}
++	for _, a := range rel.Assets {
++		out[a.Name] = a.URL
++	}
++	return out, nil
++}
++
+ func checksumFor(manifest []byte, name string) (string, error) {
+ 	found := ""
+ 	for _, line := range strings.Split(string(manifest), "\n") {
+@@ -338,25 +374,48 @@
+ 	return nil
+ }
+ 
++// F50 的主包是 tar.gz 覆盖包（airsim-f50-<ver>-r<n>-<kver>.tar.gz），不是 apk：
++// 校验和取自同 Release 的 .sha256 附件，解包后在包内跑 install.sh 覆盖安装。
+ func applyUpdatePackage(ctx context.Context, run func(context.Context, string, ...string) ([]byte, error), preflight func() error, report func(string, string), keys, pkg, tag string) error {
+-	report("verifying", "正在验证包签名、版本和设备状态")
+-	if _, e := run(ctx, "apk", "--keys-dir", keys, "verify", pkg); e != nil {
+-		return errors.New("APK 签名验证失败，未安装")
++	report("verifying", "正在核对整包校验和与设备状态")
++	manifest, e := os.ReadFile(pkg + ".sha256")
++	if e != nil {
++		return errors.New("Release 缺少安装包校验和")
+ 	}
+-	meta, e := run(ctx, "apk", "adbdump", pkg)
++	want, e := checksumFor(manifest, filepath.Base(pkg))
+ 	if e != nil {
+-		return errors.New("无法读取已签名安装包信息")
++		return e
+ 	}
+-	if e = validatePackageMetadata(string(meta), tag); e != nil {
++	got, e := fileSHA(pkg)
++	if e != nil {
+ 		return e
+ 	}
++	if want != got {
++		return errors.New("安装包 SHA-256 校验失败，拒绝升级")
++	}
+ 	if e = preflight(); e != nil {
+ 		return e
+ 	}
+-	report("installing", "正在安装已验证的新版本，请勿断电或关闭设备")
+-	if _, e = run(ctx, "apk", "--keys-dir", keys, "--no-network", "add", "--upgrade", pkg); e != nil {
+-		return errors.New("包管理器升级失败；请检查插件状态，未自动重试")
++	dir, e := os.MkdirTemp("/tmp", "airsim-pkg-")
++	if e != nil {
++		return e
+ 	}
++	defer os.RemoveAll(dir)
++	report("installing", "正在解包并覆盖安装，请勿断电或关闭设备")
++	if _, e = run(ctx, "tar", "-xzf", pkg, "-C", dir); e != nil {
++		return errors.New("安装包解压失败，未安装")
++	}
++	entries, e := os.ReadDir(dir)
++	if e != nil || len(entries) != 1 || entries[0].IsDir() == false {
++		return errors.New("安装包结构异常，未安装")
++	}
++	root := filepath.Join(dir, entries[0].Name())
++	if _, e = os.Stat(filepath.Join(root, "install.sh")); e != nil {
++		return errors.New("安装包里没有 install.sh，未安装")
++	}
++	if _, e = run(ctx, "sh", "-c", "cd '"+root+"' && sh ./install.sh"); e != nil {
++		return errors.New("安装脚本执行失败；请检查设备状态，未自动回滚")
++	}
+ 	installed, e := run(ctx, "/usr/lib/airsim/airsim-mu300d", "--manage", "get")
+ 	var v struct {
+ 		Version string `json:"version"`
+@@ -468,43 +527,24 @@
+ 			return errors.New("Release 或更新频道已变化，请重新检查更新")
+ 		}
+ 		set("downloading", "正在下载安装包；电话服务保持关闭")
+-		name := "luci-app-airsim-" + strings.TrimPrefix(tag, "v") + ".apk"
+-		base := releasePage + "/download/v" + strings.TrimPrefix(tag, "v") + "/"
++		name := "airsim-f50-" + strings.TrimPrefix(tag, "v") + ".tar.gz"
++		assets, e := releaseAssetURLs(ctx, tag)
++		if e != nil {
++			return e
++		}
+ 		for _, f := range []struct {
+ 			name  string
+ 			limit int64
+-		}{{"SHA256SUMS", 65536}, {"airsim-dev.pem", 16384}, {name, 64 << 20}} {
+-			if e = downloadUpdate(ctx, base+f.name, filepath.Join(work, f.name), f.limit); e != nil {
++		}{{name, 64 << 20}, {name + ".sha256", 65536}} {
++			u, ok := assets[f.name]
++			if !ok {
++				return errors.New("Release 缺少 " + f.name)
++			}
++			if e = downloadUpdate(ctx, u, filepath.Join(work, f.name), f.limit); e != nil {
+ 				return e
+ 			}
+ 		}
+-		keyHash, e := fileSHA(filepath.Join(work, "airsim-dev.pem"))
+-		if e != nil || keyHash != updateKeySHA {
+-			return errors.New("签名公钥与内置指纹不符，拒绝安装")
+-		}
+-		manifest, e := os.ReadFile(filepath.Join(work, "SHA256SUMS"))
+-		if e != nil {
+-			return e
+-		}
+-		want, e := checksumFor(manifest, name)
+-		if e != nil {
+-			return e
+-		}
+-		got, e := fileSHA(filepath.Join(work, name))
+-		if e != nil || want != got {
+-			return errors.New("安装包 SHA-256 校验失败")
+-		}
+-		keys := filepath.Join(work, "keys")
+-		if e = os.Mkdir(keys, 0700); e != nil {
+-			return e
+-		}
+-		key, e := os.ReadFile(filepath.Join(work, "airsim-dev.pem"))
+-		if e != nil {
+-			return e
+-		}
+-		if e = os.WriteFile(filepath.Join(keys, "airsim-dev.pem"), key, 0600); e != nil {
+-			return e
+-		}
++		keys := filepath.Join(work, "keys") // 仅占位：整包流程不校签名，校验和已在上一步核过
+ 		pkg := filepath.Join(work, name)
+ 		guard, e := managementLock(data, true)
+ 		if e != nil {

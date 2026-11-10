@@ -8,3 +8,4 @@ AirSIM-pair-clients.patch	kai-wu-cortex/airsim-mu300	/pair/clients	map[string]in
 AirSIM-mu300-sms-send.patch			send --stdin;mu300SentReply
 AirSIM-mu300-signal-operator.patch		mu300VendorSignalDBM	mu300RefreshModem;AT+CSQ
 AirSIM-f50-release-source.patch		airsim-f50-openwrt	kai-wu-cortex/airsim-mu300;luci-app-airsim-
+AirSIM-f50-tar-update.patch		airsim-f50-	luci-app-airsim-;apk --keys-dir;SHA256SUMS

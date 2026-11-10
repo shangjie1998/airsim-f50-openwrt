@@ -185,11 +185,11 @@ return view.extend({
 
   function showRelease(result) {
    var valid = /^v\d+\.\d+\.\d+\.\d+-r\d+-6\.18$/.test(result.latest || '');
-   // F50 的主包是 tar.gz 覆盖包，不是 apk；网页这段只做“检查 + 给下载地址”，
-   // 不把安装入口亮出来（后端那是 apk 校验流程，在这台机上跑不通）。
-   latest = '';
+   // F50 的主包是 tar.gz 覆盖包：后端已改成「下载 → 核 sha256 → 解包 → 跑 install.sh」，
+   // 所以这里可以放心把在线安装亮出来。
+   latest = result.status === 'available' && valid ? result.latest : '';
    var messages = {
-    available: '发现新版本，请从「打开项目 Release」下载整包手动装', current: '当前已是此频道最新版本', ahead: '当前构建领先于公开 Release',
+    available: '发现新版本', current: '当前已是此频道最新版本', ahead: '当前构建领先于公开 Release',
     unknown_version: '当前开发版本无法自动比较',
     no_release: 'F50 是自编整包，网页不做在线安装；请从「打开项目 Release」下载后手动装'
    };
