@@ -12,8 +12,8 @@
 
 . /usr/share/libubox/jshn.sh
 
-TAG=audio-opt-v1.0.1
-FILE=airsim-f50-audio-opt-1.0.1-k6.18.60.tar.gz
+TAG=audio-opt-v1.0.2
+FILE=airsim-f50-audio-opt-1.0.2-k6.18.60.tar.gz
 OPT_KERNELS=6.18.60
 EXT=/mnt/mu300-disk/extra/airsim-audio
 DIR=/tmp/airsim-audioopt
