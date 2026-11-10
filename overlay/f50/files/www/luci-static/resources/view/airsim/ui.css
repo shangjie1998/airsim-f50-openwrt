@@ -305,10 +305,16 @@ body.as-menu-on > header .nav{display:none!important}
 .as-root .as-check-label input[type="checkbox"]{width:17px;height:17px;margin:1px 0 0;accent-color:var(--as-blue);flex-shrink:0}
 .as-root hr{border:0;border-top:1px solid var(--as-line);margin:22px 0}
 .as-root .as-history{max-height:320px;overflow:auto;margin-top:12px}
-.as-root .as-history-row{display:grid;grid-template-columns:minmax(8rem,1fr) minmax(6rem,1fr) auto;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--as-line);font-size:var(--as-fs-note);overflow-wrap:anywhere}
+/* 投递记录：时间/事件/结果胶囊一行，具体结果（含 HTTP 码）另起一行，不挤 */
+.as-root .as-history-row{padding:10px 0;border-bottom:1px solid var(--as-line);font-size:var(--as-fs-note);overflow-wrap:anywhere}
 .as-root .as-history-row:last-child{border-bottom:0}
+.as-root .as-history-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.as-root .as-history-when{color:var(--as-muted)}
+.as-root .as-history-kind{color:var(--as-ink);font-weight:600}
+.as-root .as-history-head .as-tag{margin-left:auto}
+.as-root .as-history-detail{margin:4px 0 0;color:var(--as-muted);font-size:var(--as-fs-note);line-height:1.6}
 .as-root .as-relay-line{font-size:var(--as-fs-note);color:var(--as-muted);overflow-wrap:anywhere;margin-top:8px}
-@media(max-width:480px){.as-root .as-history-row{grid-template-columns:1fr 1fr}.as-root .as-history-row>:last-child{grid-column:1/-1}}
+
 
 /* ---------- 轻提示 ---------- */
 .as-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:10002;max-width:min(92vw,420px);background:var(--as-surface-strong,#fff);color:var(--as-ink,#1d1d1f);border:1px solid var(--as-line-strong,rgba(0,0,0,.12));border-radius:14px;padding:12px 18px;font:500 14px/1.5 var(--font);box-shadow:0 18px 44px rgba(0,0,0,.18);backdrop-filter:blur(var(--as-blur,22px));-webkit-backdrop-filter:blur(var(--as-blur,22px));text-align:center}
