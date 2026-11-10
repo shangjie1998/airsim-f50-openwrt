@@ -1,0 +1,93 @@
+#!/bin/sh
+# 蓝牙可选件安装执行器（由 rpcd airsim-bt 的 bt_opt_install 在后台拉起）
+#
+# 固定 tag 拉取：地址与 sha256 写死在脚本里，不跟 latest 走 ——
+# 驱动模块跟内核必须严丝合缝，装错版本等于把蓝牙装死。
+#
+# 进度写在 /tmp/airsim-btopt/state（一行状态词）与 msg（一行说明），
+# 页面轮询 bt_opt_probe 读这两个文件。
+set -u
+
+TAG=bt-opt-v1.0.2
+FILE=airsim-f50-bt-opt-1.0.2-k6.18.60.tar.gz
+REPO=shangjie1998/airsim-f50-openwrt
+BASE=https://github.com/$REPO/releases/download
+API=https://api.github.com/repos/$REPO
+URL="$BASE/$TAG/$FILE"
+
+D=/tmp/airsim-btopt
+LOG=$D/install.log
+
+set_state() {
+	printf '%s\n' "$1" > "$D/state"
+	printf '%s\n' "$2" > "$D/msg"
+}
+
+mkdir -p "$D"
+
+set_state download "正在从 GitHub 下载可选件（约 1.7MB）"
+rm -f "$D/pkg.tar.gz" "$LOG" "$D/dl.err"
+# 两条路：国内网络里 github.com:443 经常连不上，但 api.github.com 通，
+# 所以先走 API 拿附件（Accept: application/octet-stream 会让它直接吐二进制），
+# 不行再回 github.com 的直链。都走 curl -L：附件会 302 跳 release-assets，
+# busybox 的 wget 跟不过去（卡在 Connecting）。
+dl_ok=0
+if command -v curl >/dev/null 2>&1; then
+	curl -fsSL --connect-timeout 10 --max-time 20 -o "$D/rel.json" "$API/releases/tags/$TAG" 2>>"$D/dl.err"
+	if [ -s "$D/rel.json" ]; then
+		jsonfilter -i "$D/rel.json" -e '@.assets[*].id'   > "$D/ids"   2>/dev/null
+		jsonfilter -i "$D/rel.json" -e '@.assets[*].name' > "$D/names" 2>/dev/null
+		aid=$(paste "$D/ids" "$D/names" 2>/dev/null | awk -v n="$FILE" '$2==n {print $1; exit}')
+		if [ -n "${aid:-}" ]; then
+			curl -fsSL -L --retry 2 --connect-timeout 10 --max-time 300 \
+				-H "Accept: application/octet-stream" \
+				-o "$D/pkg.tar.gz" "$API/releases/assets/$aid" 2>>"$D/dl.err" && dl_ok=1
+		fi
+	fi
+	if [ "$dl_ok" != 1 ]; then
+		curl -fsSL -L --retry 2 --connect-timeout 15 --max-time 300 -o "$D/pkg.tar.gz" "$URL" 2>>"$D/dl.err" && dl_ok=1
+	fi
+fi
+if [ "$dl_ok" != 1 ] && command -v wget >/dev/null 2>&1; then
+	wget -O "$D/pkg.tar.gz" --timeout=60 "$URL" >>"$D/dl.err" 2>&1 && dl_ok=1
+fi
+if [ "$dl_ok" != 1 ] || [ ! -s "$D/pkg.tar.gz" ]; then
+	msg=$(grep -viE 'connecting|downloading' "$D/dl.err" 2>/dev/null | tail -1)
+	set_state failed "下载失败：${msg:-连不上 github.com / api.github.com，看看本机能不能上外网，过会儿再点一次}"
+	exit 1
+fi
+sz=$(wc -c < "$D/pkg.tar.gz" | tr -d ' ')
+if [ "$sz" -lt 100000 ]; then
+	set_state failed "下载回来的包只有 ${sz} 字节，不是完整包，已中止"
+	exit 1
+fi
+
+set_state extract "下载好了，正在解压"
+
+rm -rf "$D/x"
+if ! mkdir -p "$D/x" || ! tar xzf "$D/pkg.tar.gz" -C "$D/x"; then
+	set_state failed "解压失败：包不完整（网络断过？再点一次）"
+	exit 1
+fi
+
+# 逐文件核对包内清单：比钉整个 tar 的 sha 稳（tar 每次打的 sha 会变）
+set_state verify "正在逐文件核对完整性"
+cd "$D/x/airsim-f50-bt-opt" || { set_state failed "包结构不对"; exit 1; }
+if ! sha256sum -c manifest.sha256 >"$D/manifest.log" 2>&1; then
+	bad=$(grep -v ': OK' "$D/manifest.log" | head -2 | tr '\n' ' ')
+	set_state failed "文件核对没通过：${bad:-有文件对不上}，已中止，什么都没装"
+	exit 1
+fi
+cd /
+
+set_state install "正在装驱动与 bluez（几十秒，别断电）"
+if sh "$D/x/airsim-f50-bt-opt/install-bt.sh" --force >"$LOG" 2>&1; then
+	set_state done "装好了。去「蓝牙」页把开关打开看看。"
+else
+	reason=$(grep -E '不符合要求|加载失败|失败' "$LOG" | tail -1)
+	set_state failed "${reason:-装到一半出错了}（详细输出见 $LOG）"
+	exit 1
+fi
+
+rm -f "$D/pkg.tar.gz"
+exit 0

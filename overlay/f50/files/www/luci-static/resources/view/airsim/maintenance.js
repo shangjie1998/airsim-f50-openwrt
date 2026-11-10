@@ -12,6 +12,8 @@ var updatePolicy = rpc.declare({ object: 'airsim', method: 'updates_policy', par
 var installUpdate = rpc.declare({ object: 'airsim', method: 'update_install', params: ['tag'], expect: {}, reject: true, nobatch: true });
 var backupMake = rpc.declare({ object: 'airsim-backup', method: 'make', expect: {}, reject: true, nobatch: true });
 var backupRestore = rpc.declare({ object: 'airsim-backup', method: 'restore', params: ['payload'], expect: {}, reject: true, nobatch: true });
+var btProbe = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_probe', expect: {}, reject: true });
+var btInstall = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_install', expect: {}, reject: true, nobatch: true });
 
 var releasesURL = 'https://github.com/shangjie1998/airsim-f50-openwrt/releases';
 
@@ -283,6 +285,70 @@ return view.extend({
    diagNote
   ]);
 
+  /* ---------------- 可选配件：蓝牙 ---------------- */
+  var optNote = noticeBox();
+  var optChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '检查中');
+  var optMsg = E('p', { 'class': 'as-caption' }, '正在问本机装没装。');
+  var optBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装蓝牙');
+  var optBusy = false;
+
+  function syncOpt(info) {
+   info = info || {};
+   var installed = info.installed === true, busy = info.busy === true;
+   optBusy = busy;
+   optChip.textContent = busy ? '正在装' : (installed ? '已安装' : '未安装');
+   optChip.className = 'as-pill ' + (installed || busy ? 'as-pill-green' : 'as-pill-neutral');
+   optBtn.textContent = installed ? '重新安装蓝牙' : '安装蓝牙';
+
+   if (busy) {
+    optBtn.disabled = true;
+    optMsg.textContent = info.message || '正在装，别断电。';
+    return;
+   }
+   optBtn.disabled = info.kernel_ok !== true;
+   if (info.kernel_ok !== true) {
+    optMsg.textContent = '本机内核 ' + (info.kernel || '未知') + '，可选件是给 ' + (info.want_kernel || '—') + ' 打的，对不上装不上（驱动模块必须跟内核一致）。';
+   }
+   else if (info.state === 'done') optMsg.textContent = info.message || '装好了。';
+   else if (info.state === 'failed') {
+    optMsg.textContent = info.message || '这次没成。';
+    setNotice(optNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
+   }
+   else if (installed) optMsg.textContent = '这台机器已经有蓝牙那一套了；页面出过问题可以重装一遍，不动已配对记录。';
+   else optMsg.textContent = '主包不带蓝牙驱动与 bluez。需要时从这里装回来：约 1.7MB，从项目 Release（' + (info.version || 'bt-opt') + '）拉，装前核对 sha256。';
+   if (optBtn.disabled) optBtn.title = '内核或控制器条件不满足';
+   else optBtn.title = '从 GitHub 拉可选件并安装';
+  }
+
+  optBtn.addEventListener('click', function() {
+   if (optBusy) return;
+   optBtn.disabled = true;
+   optMsg.textContent = '正在启动安装……';
+   btInstall().then(function(res) {
+    res = res || {};
+    if (res.ok !== true) {
+     optBtn.disabled = false;
+     setNotice(optNote, '没启动', res.error || '启动失败', 'error');
+     return;
+    }
+    setNotice(optNote, '开始装了', '下载 → 校验 → 解压 → 装驱动，几十秒。页面会自动刷新进度。', 'info');
+    optMsg.textContent = '正在下载……';
+   }).catch(function(e) {
+    optBtn.disabled = false;
+    setNotice(optNote, '没启动', String(e && e.message || e), 'error');
+   });
+  });
+
+  var optCard = E('section', { 'class': 'as-card' }, [
+   E('h3', {}, '可选配件'),
+   E('p', { 'class': 'as-copy' }, '蓝牙不是主包的一部分：驱动模块（sprdbt_tty）与 bluez 那套要么本机自带，要么从这里装。刷过机、升过级的机器如果蓝牙页不见了，就是这一套没了。'),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '蓝牙'), E('dd', {}, [optChip])]),
+   optMsg,
+   E('div', { 'class': 'as-buttons' }, [optBtn]),
+   optNote,
+   E('p', { 'class': 'as-caption' }, '只装可选件本身：不动开关状态（/etc/config/f50-bt），不动已配对记录。装的是固定 tag 的包，内核对不上会直接拒绝，不会装半截。')
+  ]);
+
   var versionCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '版本说明'),
    E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, '当前安装：' + (state.version || '—')),
@@ -295,7 +361,15 @@ return view.extend({
    ])
   ]);
 
-  poll.add(function() { if (pending || busyFlag) return Promise.resolve(); return Promise.all([getStatus().catch(function() { return {}; }), updateStatus().catch(function() { return {}; })]).then(function(r) { state = r[0] || state; showUpdateStatus(r[1] || {}); }); }, 5);
+  btProbe().then(syncOpt).catch(function() { optMsg.textContent = '这台机器没有安装器接口（主包版本较旧）。'; });
+
+  poll.add(function() {
+   var jobs = [btProbe().then(syncOpt).catch(function() { return null; })];
+   if (pending || busyFlag) return Promise.all(jobs);
+   jobs.push(getStatus().catch(function() { return {}; }).then(function(r) { state = r[0] || state; }));
+   jobs.push(updateStatus().catch(function() { return {}; }).then(function(r) { showUpdateStatus(r[1] || {}); }));
+   return Promise.all(jobs);
+  }, 5);
 
   return E('div', { 'class': 'as-root' }, [
    ui.stylesheet(),
@@ -303,7 +377,7 @@ return view.extend({
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 维护'), E('h2', {}, '备份、更新、诊断。'), E('p', {}, '折腾完想回退的时候，这里能救回来。')]),
     E('span', { 'class': 'as-version' }, 'v' + (state.version || '—'))
    ]),
-   E('div', { 'class': 'as-layout' }, [backupCard, updateCard, diagCard, versionCard]),
+   E('div', { 'class': 'as-layout' }, [backupCard, updateCard, optCard, diagCard, versionCard]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 维护')
   ]);
  },
