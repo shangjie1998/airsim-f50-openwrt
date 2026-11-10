@@ -1,0 +1,60 @@
+#!/bin/sh
+# AirSIM for F50 —— 6.18 音频模块可选件（audio-opt）安装器
+#
+# 固定 tag 拉包（跟主包版本解耦），全程：
+#   api.github.com 取附件地址 → 下整包 + .sha256 → 本地核哈希 → 解包 → 跑包内 install.sh
+#
+# 为什么走 api.github.com：这台设备上 github.com 不可达（curl 000 超时），
+# api.github.com 通，附件 API 配 Accept: application/octet-stream 能直接下二进制。
+set -eu
+TAG=audio-opt-v1.0.0
+FILE=airsim-f50-audio-opt-1.0.0-k6.18.60.tar.gz
+API=https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/$TAG
+DIR=/tmp/airsim-audioopt
+MSG=$DIR/msg
+KREL_WANT=6.18.60
+EXT=/mnt/mu300-disk/extra/airsim-audio
+
+mkdir -p "$DIR"
+say() { echo "$*" > "$MSG"; echo "$*" >&2; }
+die() { say "失败：$*"; exit 1; }
+
+krel=$(uname -r)
+[ "$krel" = "$KREL_WANT" ] || die "本机内核 $krel，音频可选件只给 $KREL_WANT 用"
+[ -d "$EXT" ] || die "音频扩展目录不存在：$EXT"
+command -v curl >/dev/null 2>&1 || die '本机没有 curl'
+
+say '正在读取 Release 附件'
+json=$(curl -sf -H 'Accept: application/vnd.github+json' -A 'AirSIM-F50-audioopt' "$API") || die '读取 Release 失败（网络不通或 tag 不在了）'
+
+names=$DIR/names.txt
+urls=$DIR/urls.txt
+printf '%s' "$json" | jsonfilter -e '@.assets[*].name' > "$names" 2>/dev/null || die 'Release 信息解析失败'
+printf '%s' "$json" | jsonfilter -e '@.assets[*].url'  > "$urls" 2>/dev/null || : 
+
+idx=$(grep -nx "$FILE" "$names" | head -1 | cut -d: -f1)
+[ -n "$idx" ] || die "这个 Release 里没有 $FILE"
+aurl=$(sed -n "${idx}p" "$urls")
+[ -n "$aurl" ] || die '取不到包地址'
+idx2=$(grep -nx "$FILE.sha256" "$names" | head -1 | cut -d: -f1)
+[ -n "$idx2" ] || die "这个 Release 里没有 $FILE.sha256"
+surl=$(sed -n "${idx2}p" "$urls")
+
+say '正在下载安装包（约 420KB）'
+curl -sfL -H 'Accept: application/octet-stream' -A 'AirSIM-F50-audioopt' -o "$DIR/$FILE" "$aurl" || die '下载失败'
+curl -sfL -H 'Accept: application/octet-stream' -A 'AirSIM-F50-audioopt' -o "$DIR/$FILE.sha256" "$surl" || die '下载校验和失败'
+
+want=$(awk '{print $1}' "$DIR/$FILE.sha256" | head -1)
+got=$(sha256sum "$DIR/$FILE" | awk '{print $1}')
+[ -n "$want" ] || die '校验和文件是空的'
+[ "$want" = "$got" ] || die 'SHA-256 不符，拒绝安装'
+
+say '正在解包并安装模块'
+rm -rf "$DIR/pkg" && mkdir -p "$DIR/pkg"
+tar -xzf "$DIR/$FILE" -C "$DIR/pkg" || die '解包失败'
+root=$(find "$DIR/pkg" -maxdepth 2 -name install.sh -exec dirname {} \; | head -1)
+[ -n "$root" ] || die '包里没有 install.sh'
+( cd "$root" && sh ./install.sh ) || die '安装脚本执行失败'
+
+echo "$TAG" > /etc/airsim-audio-opt 2>/dev/null || true
+say '装好了：25 个 .ko 已就位，重开机会由 prepare.local 加载'

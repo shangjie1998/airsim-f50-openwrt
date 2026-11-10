@@ -1,0 +1,141 @@
+#!/bin/sh
+# AirSIM for F50 —— 6.18 音频模块可选件（独立 rpcd 对象 airsim-audio）
+#
+# 只做两件事：
+#   audio_opt_probe  : 报本机能不能装 / 装没装 / 装到几成
+#   audio_opt_install: 交给 /usr/libexec/airsim-audioopt-install 去装（后台跑，页面轮询）
+#
+# 为什么不并进主包：这 25 个 .ko 是厂商音频扩展的一部分，只在 6.18.60 上有意义，
+# 主包带着就是浪费空间，所以做成固定 tag 的独立可选件，需要时再拉。
+
+. /usr/share/libubox/jshn.sh
+
+TAG=audio-opt-v1.0.0
+FILE=airsim-f50-audio-opt-1.0.0-k6.18.60.tar.gz
+KREL_WANT=6.18.60
+EXT=/mnt/mu300-disk/extra/airsim-audio
+DIR=/tmp/airsim-audioopt
+RUN=/usr/libexec/airsim-audioopt-install
+WANT_KO=25
+
+ko_count() {
+	ls "$EXT/modules/$(uname -r)"/*.ko 2>/dev/null | wc -l | tr -d ' '
+}
+
+aud_state() {
+	if [ -f "$DIR/state" ]; then
+		cat "$DIR/state"
+	else
+		echo idle
+	fi
+}
+
+aud_msg() {
+	if [ -f "$DIR/msg" ]; then
+		cat "$DIR/msg"
+	else
+		echo ''
+	fi
+}
+
+status_field() {
+	[ -f /tmp/airsim-audio-status ] || return 0
+	sed -n "s/^$1=//p" /tmp/airsim-audio-status | head -1
+}
+
+aud_probe() {
+	kver=$(uname -r)
+	n=$(ko_count)
+	optver=$(status_field version)
+	[ -n "$optver" ] || optver=$(cat "$EXT/audio-opt-version" 2>/dev/null || true)
+	installed=0
+	[ "$n" -ge "$WANT_KO" ] && installed=1
+
+	busy=0
+	case "$(aud_state)" in
+		download|verify|install) busy=1 ;;
+	esac
+
+	json_init
+	json_add_string action probe
+	json_add_boolean installed "$installed"
+	json_add_boolean busy "$busy"
+	json_add_string state "$(aud_state)"
+	json_add_string message "$(aud_msg)"
+	json_add_string kernel "$kver"
+	json_add_string want_kernel "$KREL_WANT"
+	json_add_boolean kernel_ok "$([ "$kver" = "$KREL_WANT" ] && echo 1 || echo 0)"
+	json_add_boolean ext_present "$([ -d "$EXT" ] && echo 1 || echo 0)"
+	json_add_int ko_count "$n"
+	json_add_int want_ko "$WANT_KO"
+	json_add_boolean modules_ok "$([ "$n" -ge "$WANT_KO" ] && echo 1 || echo 0)"
+	json_add_int ko_missing "$([ "$n" -ge "$WANT_KO" ] && echo 0 || echo $((WANT_KO - n)))"
+	json_add_string opt_version "$optver"
+	json_add_boolean dsp_present "$([ -x "$EXT/bin/mu300-audio-dsp" ] && echo 1 || echo 0)"
+	json_add_string version "$TAG"
+	json_add_string file "$FILE"
+	json_add_string url "https://github.com/shangjie1998/airsim-f50-openwrt/releases/download/$TAG/$FILE"
+	json_add_string label '音频模块（可选配件）'
+	json_dump
+}
+
+aud_install() {
+	case "$(aud_state)" in
+		download|verify|install)
+			json_init
+			json_add_boolean ok 0
+			json_add_string error '正在装，等这次的就好'
+			json_dump
+			return 0
+			;;
+	esac
+	if [ ! -x "$RUN" ]; then
+		json_init
+		json_add_boolean ok 0
+		json_add_string error '本机没有安装器（主包版本太旧）'
+		json_dump
+		return 0
+	fi
+	kver=$(uname -r)
+	if [ "$kver" != "$KREL_WANT" ]; then
+		json_init
+		json_add_boolean ok 0
+		json_add_string error "本机内核 $kver，这个包只对 $KREL_WANT 有效"
+		json_dump
+		return 0
+	fi
+	if [ ! -d "$EXT" ]; then
+		json_init
+		json_add_boolean ok 0
+		json_add_string error "音频扩展目录不在：$EXT"
+		json_dump
+		return 0
+	fi
+
+	mkdir -p "$DIR"
+	echo download > "$DIR/state"
+	echo '正在下载安装包' > "$DIR/msg"
+	(
+		sh "$RUN" > "$DIR/log" 2>&1 && echo idle > "$DIR/state" || echo failed > "$DIR/state"
+	) &
+
+	json_init
+	json_add_boolean ok 1
+	json_add_string state download
+	json_add_string message '正在下载安装包'
+	json_dump
+}
+
+case "$1" in
+	list)
+		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{}}'
+		;;
+	call)
+		case "$2" in
+			audio_opt_probe) aud_probe ;;
+			audio_opt_install) aud_install ;;
+		esac
+		;;
+	*)
+		;;
+esac
