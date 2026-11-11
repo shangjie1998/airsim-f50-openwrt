@@ -10,8 +10,8 @@
 |---|---|
 | 本适配仓库 | <https://github.com/shangjie1998/airsim-f50-openwrt> |
 | 上游项目 | <https://github.com/kai-wu-cortex/airsim-mu300>（本仓库源码钉在 `v0.1.0-r23`） |
-| 已验收版本 | **`0.1.0.21-r23-any`**（2026-11-11 真机：6.18.60 与 5.4.254 双内核都跑通，含联网切换） |
-| 插件安装包 | [Release `v0.1.0.21-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.21-r23-any) · 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
+| 已验收版本 | **`0.1.0.26-r23-any`**（2026-11-11 真机：玻璃元件库 + 真滑块开关 + 十页统一；6.18.60 / 7.3.1 双内核跑通） |
+| 插件安装包 | [Release `v0.1.0.26-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.26-r23-any) · 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
 | 音频模块包 | `audio-opt 1.0.3`（带 `6.18.60` 与 `7.3.1` 两套）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
 | 接手说明 | [docs/接手说明.md](docs/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
 | 蓝牙（选装） | [docs/蓝牙.md](docs/蓝牙.md) —— WCN 蓝牙启用脚本 + 总开关口子，**不影响通话** |
@@ -102,7 +102,7 @@ ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --verify'
 ### 3-2 装插件包（覆盖式更新，先备份再换）
 
 ```sh
-scp dist/airsim-f50-0.1.0.21-r23-any.tar.gz root@192.168.77.1:/tmp/p.pkg.tar.gz
+scp dist/airsim-f50-0.1.0.26-r23-any.tar.gz root@192.168.77.1:/tmp/p.pkg.tar.gz
 ssh root@192.168.77.1 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh *\/install.sh'
 ```
 
