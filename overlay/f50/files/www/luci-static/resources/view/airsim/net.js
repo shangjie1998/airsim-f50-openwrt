@@ -20,6 +20,8 @@ var netScan      = rpc.declare({ object: 'airsim-net', method: 'wifi_scan', expe
 var netSaved     = rpc.declare({ object: 'airsim-net', method: 'wifi_saved', expect: {} });
 var netConnect   = rpc.declare({ object: 'airsim-net', method: 'wifi_connect', params: ['ssid', 'key', 'encryption'], expect: {}, reject: true, nobatch: true });
 var netForget    = rpc.declare({ object: 'airsim-net', method: 'wifi_forget', expect: {}, reject: true, nobatch: true });
+var netAdminSt   = rpc.declare({ object: 'airsim-net', method: 'admin_status', expect: {} });
+var netAdminSet  = rpc.declare({ object: 'airsim-net', method: 'admin_set', params: ['enable'], expect: {}, reject: true, nobatch: true });
 
 var MODES = [
  { value: 'cell', label: '手机流量' },
@@ -58,7 +60,8 @@ return view.extend({
   return Promise.all([
    L.resolveDefault(netProbe(), {}),
    L.resolveDefault(netStatus(), {}),
-   L.resolveDefault(netSaved(), {})
+   L.resolveDefault(netSaved(), {}),
+   L.resolveDefault(netAdminSt(), {})
   ]);
  },
 
@@ -214,6 +217,36 @@ return view.extend({
    savedBox = E('p', { 'class': 'as-caption' }, '还没有保存的 Wi-Fi。连上一次就会记住，下次开机自动连。');
   }
 
+  /* ---- 卡 4：管理页面访问（安全开关）----
+   * 这一页权限等同 root，能不能从 Wi-Fi 那边打开它是个安全决定，所以单列一张卡，
+   * 默认关、说清楚代价。规则由后端绑在 wlan0 上：蜂窝口永远不放。 */
+  var adm = (data && data[3]) || {};
+  var admOn = adm.enabled === true;
+  var admLive = adm.live === true;
+  var admFeed = E('p', { 'class': 'as-feedback' }, '');
+  var admBtn = E('button', { 'class': 'as-btn', 'type': 'button' }, admOn ? '关掉这个入口' : '允许从 Wi-Fi 进管理页');
+  admBtn.addEventListener('click', function() {
+   var next = admOn ? 0 : 1;
+   admBtn.disabled = true;
+   admFeed.className = 'as-feedback as-feedback-pending';
+   admFeed.textContent = next ? '正在打开…' : '正在关掉…';
+   netAdminSet(next).then(function(res) {
+    if (res && res.ok) {
+     admFeed.className = 'as-feedback as-feedback-success';
+     admFeed.textContent = (res.message || '') || (next ? '已允许。' : '已禁止。');
+     window.setTimeout(function() { window.location.reload(); }, 1500);
+    } else {
+     admBtn.disabled = false;
+     admFeed.className = 'as-feedback as-feedback-error';
+     admFeed.textContent = '没设成：' + ((res && (res.error || res.message)) || '设备没有返回原因');
+    }
+   }).catch(function(err) {
+    admBtn.disabled = false;
+    admFeed.className = 'as-feedback as-feedback-error';
+    admFeed.textContent = '请求失败：' + err;
+   });
+  });
+
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('net') : ''),
    ui.stylesheet(),
@@ -256,6 +289,21 @@ return view.extend({
     E('section', { 'class': 'as-card' }, [
      E('h3', {}, '已保存的 Wi-Fi'),
      savedBox
+    ]),
+
+    E('section', { 'class': 'as-card' }, [
+     E('h3', {}, '管理页面访问'),
+     E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
+      E('div', {}, [
+       E('strong', {}, admOn ? 'Wi-Fi 那边可以打开管理页' : '只允许 USB 口打开管理页'),
+       E('div', { 'class': 'as-caption' }, '只放行 80/443 · 绑定 ' + (adm.device || 'wlan0') + ' 无线口')
+      ]),
+      admOn ? pill(admLive ? '已生效' : '没生效', admLive ? 'red' : 'neutral') : pill('已关', 'green')
+     ]),
+     admFeed,
+     E('div', { 'class': 'as-actions' }, [admBtn]),
+     E('div', { 'class': 'as-notice', style: 'color:#c0392b' }, '这一页权限等同 root：能改联网、能装包、能看短信。打开后，同一个上游 Wi-Fi（比如 PDCN）里的任何设备都能看到登录框并一直试密码；80 端口是明文，共享网络里有人抓包就看得见登录动作。只在自己家的 Wi-Fi 下打开，用完关掉。'),
+     E('p', { 'class': 'as-caption' }, '规则只绑无线口 wlan0，切到「手机流量」后蜂窝公网进不来 —— 就算忘了关，也不会把管理页暴露在运营商网络上。USB 口的管理入口不受这个开关影响。')
     ]),
 
     E('section', { 'class': 'as-card' }, [

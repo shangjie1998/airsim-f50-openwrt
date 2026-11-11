@@ -242,6 +242,103 @@ net_probe() {
 	printf '{"ok":true,"probe":%s}\n' "$_out"
 }
 
+# ---- 管理页面访问：从 Wi-Fi 那边能不能打开 LuCI（80/443）----
+#
+# 为什么必须绑网卡：不绑 iifname 的话，fw4 渲染出来就是一条
+#   tcp dport { 80, 443 } accept
+# 对所有入口生效。切到「手机流量」模式时 wan 是通公网的，管理页就等于
+# 挂在运营商网络上 —— 只要有人扫到这个地址，就能一直试密码。
+# 绑 wlan0 之后只认无线口，蜂窝口永远进不来，忘了关也漏不到公网。
+RULE_NAME=Allow-LuCI-wwan
+ADMIN_DEV=wlan0
+ADMIN_PORTS='80 443'
+FW_INIT=/etc/init.d/firewall
+
+admin_sections() {
+	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='$RULE_NAME'\$/\1/p"
+}
+
+admin_enabled() {
+	_s=$(admin_sections | head -1)
+	[ -n "$_s" ] || return 1
+	[ "$(uci -q get firewall.$_s.target)" = ACCEPT ] || return 1
+	return 0
+}
+
+# uci 里有不等于表里有：reload 没渲染成功时规则根本不生效，必须看 nft
+admin_live() {
+	nft list ruleset 2>/dev/null | grep -q "Allow-LuCI-wwan"
+}
+
+admin_json() {
+	json_init
+	json_add_boolean ok 1
+	json_add_boolean enabled "$([ "$1" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean live "$([ "$2" = 1 ] && echo 1 || echo 0)"
+	json_add_string device "$ADMIN_DEV"
+	json_add_string ports "$ADMIN_PORTS"
+	json_add_string message "$3"
+	json_dump
+}
+
+admin_status() {
+	if admin_enabled; then _e=1; else _e=0; fi
+	if admin_live; then _l=1; else _l=0; fi
+	admin_json "$_e" "$_l" ''
+}
+
+admin_set() {
+	json_load "$1" 2>/dev/null
+	json_get_var enable enable
+	case "$enable" in
+	1|true|on) enable=1 ;;
+	0|false|off) enable=0 ;;
+	*) jerr 'enable 只接受 1 / 0'; return 0 ;;
+	esac
+
+	# 历史上可能留了不止一条同名规则（手工 uci 加过那种），先全清再按当前开关写一条
+	for _s in $(admin_sections); do
+		uci -q delete "firewall.$_s"
+	done
+
+	if [ "$enable" = 1 ]; then
+		uci -q add firewall rule >/dev/null || { jerr '写不进 firewall 配置'; return 0; }
+		uci -q set "firewall.@rule[-1].name=$RULE_NAME"
+		uci -q set "firewall.@rule[-1].proto=tcp"
+		uci -q set "firewall.@rule[-1].dest_port=$ADMIN_PORTS"
+		uci -q set "firewall.@rule[-1].target=ACCEPT"
+		uci -q set "firewall.@rule[-1].device=$ADMIN_DEV"
+		uci -q set "firewall.@rule[-1].enabled=1"
+	fi
+	uci -q commit firewall || { jerr '提交 firewall 配置失败'; return 0; }
+
+	# reload 优先：restart 的返回码会被 fw4 的渲染检查误导，成败以 nft 里有没有这条为准
+	_out=$("$FW_INIT" reload 2>&1); _rc=$?
+	_i=0
+	while [ "$_i" -lt 6 ]; do
+		if [ "$enable" = 1 ]; then
+			admin_live && break
+		else
+			admin_live || break
+		fi
+		sleep 1
+		_i=$((_i + 1))
+	done
+
+	if admin_enabled; then _e=1; else _e=0; fi
+	if admin_live; then _l=1; else _l=0; fi
+	if [ "$enable" = 1 ] && [ "$_l" = 1 ]; then
+		_msg='已允许：从 Wi-Fi 口能打开管理页（只放行 80/443）'
+	elif [ "$enable" = 1 ]; then
+		_msg="规则已写进配置，但没进防火墙表，现在仍进不来：$_out"
+	elif [ "$_l" = 0 ]; then
+		_msg='已禁止：从 Wi-Fi 口进不了管理页（USB 口照旧可用）'
+	else
+		_msg="配置已删，但表里还留着这条，建议重启一次防火墙：$_out"
+	fi
+	admin_json "$_e" "$_l" "$_msg"
+}
+
 FLOWFIX=/usr/libexec/airsim-flowfix
 
 # 5.4 热点客户端"无互联网"体检 / 修复。check 只读；fix 会改 firewall.flow_offloading 并重启防火墙。
@@ -261,13 +358,15 @@ flowfix() {
 
 case "$1" in
 list)
-	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""},"flowfix_check":{},"flowfix_fix":{}}'
+	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""},"flowfix_check":{},"flowfix_fix":{},"admin_status":{},"admin_set":{"enable":""}}'
 	;;
 call)
 	need_probe
 	case "$2" in
 	flowfix_check) flowfix check ;;
 	flowfix_fix)   flowfix fix ;;
+	admin_status)  admin_status ;;
+	admin_set)     admin_set "$3" ;;
 	probe)        net_probe ;;
 	status)       need_mode; net_status ;;
 	mode_set)     need_mode; net_mode_set "$3" ;;
