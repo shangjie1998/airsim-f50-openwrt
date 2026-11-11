@@ -7,11 +7,12 @@
 
 | 文件 | 干什么 | 用法 |
 |---|---|---|
-| `make-package.sh` | 合成 `overlay/f50/files` + `src/plugin/packaging/openwrt/root` + `out/f50` 二进制，打成主包 | `sh build/make-package.sh`（用现成二进制）<br>`sh build/make-package.sh --build`（先重编） |
+| `make-package.sh` | 合成（**出包前自动跑 `check-consistency.py`**） `overlay/f50/files` + `src/plugin/packaging/openwrt/root` + `out/f50` 二进制，打成主包 | `sh build/make-package.sh`（用现成二进制）<br>`sh build/make-package.sh --build`（先重编） |
 | `bump-version.sh` | 版本号两处同步（`VERSION`（唯一真值）/ `AGENT-VERSION`），适用范围**只认 `any`** | `sh build/bump-version.sh <N> r<NN> [any]` |
 | `pkg/install.sh` | **包内**安装脚本（装到设备上跑，不是本机跑）：备份 → 铺 overlay → 起服务 → 提示内核与语音 | 由 `make-package.sh` 打进包里 |
 | `pkg/uninstall.sh` | 包内卸载 | 同上 |
 | `pkg/airsim-audio-retry.init` | 开机多轮抢占 DSP 保留页（`START=11`），**随主包发**，装到 `/etc/init.d/airsim-audio-retry` | 由 `make-package.sh` 打进 `audio/` |
+| `tools/check-consistency.py` | **打包前的闸**：`VERSION` 格式与适用范围、`AGENT-VERSION` 是否派生、音频配件包版本（`AUDIO-OPT-VERSION` vs rpcd 里 `TAG/FILE`）是否一致、内核口径文档在不在。不一致直接退 1，`make-package.sh` 会拒绝出包 | `python3 build/tools/check-consistency.py` |
 | `tools/check-patches.py` | 逐个补丁 `patch --dry-run`，并比对上游是否已合并（命中就提示删补丁） | `python3 build/tools/check-patches.py` |
 | `tools/sync-m8.py` | F50 与 M8 两仓库只读比对，按 `shared/rewrite/device` 三档分类 | `python3 build/tools/sync-m8.py --only shared` |
 

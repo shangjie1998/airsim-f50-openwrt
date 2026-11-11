@@ -19,6 +19,13 @@ NAME=airsim-f50-$VER
 STAGE=$HERE/dist/stage/$NAME
 OUT=$HERE/dist/$NAME.tar.gz
 
+# 打包前先过一致性闸（版本号 / 配件包版本 / 内核口径文档），不一致就不许出包
+if command -v python3 >/dev/null 2>&1; then
+	python3 "$HERE/build/tools/check-consistency.py" || { echo "一致性检查没过，拒绝打包" >&2; exit 1; }
+else
+	echo "  没装 python3，跳过一致性检查（建议装上）" >&2
+fi
+
 if [ "${1:-}" = "--build" ]; then
 	: "${GOROOT:=$HOME/Documents/doubaokaifagongju/go/go-sdk/go}"
 	export GOROOT PATH="$GOROOT/bin:$PATH"
@@ -58,7 +65,7 @@ chmod 755 "$STAGE/install.sh" "$STAGE/uninstall.sh"
 	printf 'kind=overlay\n'
 	printf 'target=F50 (MU300 / UMS9620, OpenWrt 25.12.5 aarch64_generic)\n'
 	printf 'built=%s\n' "$(date +%Y-%m-%d)"
-	printf 'built_by=本机交叉编 darwin/arm64 -> linux/arm64（未用云主机）\n'
+	printf 'built_by=交叉编 %s -> linux/arm64\n' "$(uname -sm)"
 	printf 'upstream=kai-wu-cortex/airsim-mu300 @ v0.1.0-r23 (pre-release)\n'
 	printf 'agent_version=%s\n' "$AGENT"
 	printf 'rebrand=只改显示文案(AirSIM F50)；agent_kind 仍是 mu300\n'
