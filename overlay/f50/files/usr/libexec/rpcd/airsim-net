@@ -1,0 +1,265 @@
+#!/bin/sh
+# AirSIM for F50 —— 联网（上网通道 + Wi-Fi 管理）后端，独立 rpcd 对象 airsim-net
+#
+# 为什么另起文件：/usr/libexec/rpcd/airsim 是上游整份覆盖文件，往里加动作等于
+# 把上游文件长期占住。这里只新增，ubus 上多一个 airsim-net 对象，与上游并存。
+#
+# 一句话分工：
+#   门（模式切换、能力判断、自检、回滚）全在 /usr/bin/airsim-netmode 里，
+#   这里只做「参数校验 + 调它 + 把结果转成页面能吃的 JSON」。
+#
+# 授权见 /usr/share/rpcd/acl.d/luci-app-airsim-net.json
+. /usr/share/libubox/jshn.sh
+
+# 允许用环境变量指到别处的副本（调试期跑 /tmp 里的版本用，正式安装走系统路径）
+NETMODE=${AIR_SIM_MODE:-/usr/bin/airsim-netmode}
+PROBE=${AIR_SIM_PROBE:-/usr/libexec/airsim-net-probe}
+WIFISSID=PDCN   # 仅作提示用，不参与判断
+
+jerr() { json_init; json_add_boolean ok 0; json_add_string error "$1"; json_dump; }
+
+need_probe() { [ -x "$PROBE" ] || { jerr '缺少能力探测脚本 airsim-net-probe'; exit 0; }; }
+need_mode()  { [ -x "$NETMODE" ] || { jerr '缺少切换脚本 airsim-netmode'; exit 0; }; }
+
+cfg_sta()  { "$PROBE" -k sta_section 2>/dev/null; }
+cfg_ap()   { "$PROBE" -k ap_section 2>/dev/null; }
+live_if()  { "$PROBE" -k live_if 2>/dev/null; }
+band()     { "$PROBE" -k band_label 2>/dev/null; }
+channels() { "$PROBE" -k channels 2>/dev/null; }
+
+# 只保留机器本来就在用的信道上的 AP：band=5g + channels=36 40 44 48 时，
+# 2.4G 与其它信道即使被驱动扫出来也不列 —— 连不上，列了就是骗人。
+allowed_chan() {
+	_channels=$(channels)
+	[ -n "$_channels" ] || return 0
+	for _c in $_channels; do
+		[ "$1" = "$_c" ] && return 0
+	done
+	return 1
+}
+
+# ---- 扫描：返回可连的 AP 列表 ----
+# 单射频设备在 AP 模式下 STA 接口是被禁用的，这时 iwinfo 没有接口可用，
+# 临时建一个 managed 接口扫完再删，不留痕迹。
+wifi_scan() {
+	local ifc tmp=0 out bssid ssid ch bandl sig enc cnt=0 skipped=0 first=1
+	ifc=$(live_if)
+	if [ -z "$ifc" ]; then
+		ifc=scan0
+		if ! iw phy phy0 interface add scan0 type managed >/dev/null 2>&1; then
+			jerr '扫不了：无线接口没有起来，且临时接口建不出来'
+			return 0
+		fi
+		tmp=1
+		ip link set scan0 up >/dev/null 2>&1
+		sleep 1
+	fi
+	out=$(iwinfo "$ifc" scan 2>/dev/null)
+	if [ -z "$out" ]; then
+		[ "$tmp" = 1 ] && { ip link set scan0 down >/dev/null 2>&1; iw dev scan0 del >/dev/null 2>&1; }
+		jerr '扫描没有返回结果（可能是热点刚切换、驱动还在忙，过 10 秒再试）'
+		return 0
+	fi
+	[ "$tmp" = 1 ] && { ip link set scan0 down >/dev/null 2>&1; iw dev scan0 del >/dev/null 2>&1; }
+
+	json_init
+	json_add_boolean ok 1
+	json_add_string band_label "$(band)"
+	json_add_string channels "$(channels)"
+	json_add_array aps
+	while IFS='|' read -r bssid ssid ch bandl sig enc; do
+		[ -n "$ssid" ] || continue           # 隐藏 SSID 的单独由页面引导手输
+		if ! allowed_chan "$ch"; then skipped=$((skipped + 1)); continue; fi
+		cnt=$((cnt + 1))
+		json_add_object
+		json_add_string bssid "$bssid"
+		json_add_string ssid "$ssid"
+		json_add_string channel "$ch"
+		json_add_string band "$bandl"
+		json_add_string signal "$sig"
+		json_add_string encryption "$enc"
+		# 能不能连：开放网或 WPA2/WPA3（CCMP）算可连；只有 TKIP 的按不支持标出来
+		case "$enc" in
+			NONE) sup=1 ;;
+			*TKIP*) case "$enc" in *CCMP*) sup=1 ;; *) sup=0 ;; esac ;;
+			*) sup=1 ;;
+		esac
+		json_add_boolean supported "$sup"
+		json_close_object
+	done <<EOF
+$(printf '%s\n' "$out" | awk '
+/^Cell /                 { addr = $5 }
+/^[[:space:]]*ESSID: /   {
+	ssid = $0
+	sub(/^[[:space:]]*ESSID: /, "", ssid)
+	gsub(/^"|"$/, "", ssid)                          # iwinfo 会带一层引号
+	gsub(/["\\]/, "", ssid)
+	if (ssid == "unknown" || ssid == "") ssid = ""   # 隐藏网络不列，页面单独引导手输
+}
+/^[[:space:]]*Mode: /    {
+	for (i = 1; i <= NF; i++) {
+		if ($i == "Frequency:") freq = $(i+1)
+		if ($i == "Band:")      bnd  = $(i+1) " " $(i+2)
+		if ($i == "Channel:")   chn  = $(i+1)
+	}
+}
+/^[[:space:]]*Signal: /  { sig = $2 " " $3 }
+/^[[:space:]]*Encryption: / {
+	enc = $0
+	sub(/^[[:space:]]*Encryption: /, "", enc)
+	gsub(/"/, "", enc)
+}
+/^Cell / {
+	if (addr_prev != "" && ssid_prev != "") print addr_prev "|" ssid_prev "|" chn_prev "|" bnd_prev "|" sig_prev "|" enc_prev
+	addr_prev = addr; ssid_prev = ""; chn_prev = ""; bnd_prev = ""; sig_prev = ""; enc_prev = ""
+	addr = $5
+}
+{
+	if (ssid != "") { ssid_prev = ssid; chn_prev = chn; bnd_prev = bnd; sig_prev = sig; enc_prev = enc; ssid = "" }
+}
+END {
+	if (ssid_prev != "") print addr_prev "|" ssid_prev "|" chn_prev "|" bnd_prev "|" sig_prev "|" enc_prev
+}
+')
+EOF
+	json_close_array
+	json_add_int count "$cnt"
+	json_add_int filtered "$skipped"
+	json_dump
+}
+
+# ---- 已保存的 Wi-Fi（永远不返回密码）----
+wifi_saved() {
+	local sta ssid enc
+	sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0
+	ssid=$(uci -q get "wireless.$sta.ssid" 2>/dev/null)
+	enc=$(uci -q get "wireless.$sta.encryption" 2>/dev/null)
+	json_init
+	json_add_boolean ok 1
+	json_add_string ssid "${ssid:-}"
+	json_add_string encryption "${enc:-}"
+	json_add_boolean has_key "$([ -n "$(uci -q get wireless.$sta.key 2>/dev/null)" ] && echo 1 || echo 0)"
+	json_dump
+}
+
+# ---- 连接：校验 → 写 uci → 交给 airsim-netmode wifi 做真正的切换与自检 ----
+wifi_connect() {
+	local ssid key enc sta radio out rc
+	json_load "$1" 2>/dev/null
+	json_get_var ssid ssid
+	json_get_var key key
+	json_get_var enc encryption
+	[ -n "$ssid" ] || { jerr '缺少 Wi-Fi 名称'; return 0; }
+	enc=${enc:-psk2}
+	case "$enc" in
+		psk2|sae|none) ;;
+		*) jerr '加密方式不支持（只支持 WPA2 / WPA3 / 开放）'; return 0 ;;
+	esac
+	if [ "$enc" != none ]; then
+		[ -n "$key" ] || { jerr '缺少密码'; return 0; }
+		if [ "${#key}" -lt 8 ] || [ "${#key}" -gt 63 ]; then
+			jerr '密码长度不对（WPA2/WPA3 要 8~63 个字符）'
+			return 0
+		fi
+	fi
+	sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0
+	# 关掉其它 wifi-iface 的 SSID 冲突：不碰，只写 STA 自己的段
+	uci -q set "wireless.$sta.ssid=$ssid"
+	uci -q set "wireless.$sta.encryption=$enc"
+	if [ "$enc" = none ]; then
+		uci -q delete "wireless.$sta.key" 2>/dev/null || true
+	else
+		uci -q set "wireless.$sta.key=$key"
+	fi
+	uci -q set "wireless.$sta.disabled=0"
+	uci -q commit wireless || { jerr '写配置失败'; return 0; }
+
+	# 已经在 Wi-Fi 模式：只要 reload 重连即可，不必再走整套切换
+	if "$NETMODE" status --json 2>/dev/null | grep -q '"mode":"wifi"'; then
+		/etc/init.d/network reload >/dev/null 2>&1 || true
+		ifup wwan >/dev/null 2>&1 || true
+		out=$("$NETMODE" wifi 2>&1); rc=$?
+	else
+		out=$("$NETMODE" wifi 2>&1); rc=$?
+	fi
+	json_init
+	json_add_boolean ok "$([ "$rc" = 0 ] && echo 1 || echo 0)"
+	json_add_int code "$rc"
+	json_add_string message "$out"
+	json_dump
+}
+
+# ---- 删除：正在用的话先要求切回流量，避免删完没网 ----
+wifi_forget() {
+	local sta ssid
+	sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0
+	ssid=$(uci -q get "wireless.$sta.ssid" 2>/dev/null)
+	if "$NETMODE" status --json 2>/dev/null | grep -q '"mode":"wifi"'; then
+		jerr '当前正在用这个 Wi-Fi 上网，删掉会直接断网。请先切回「流量」模式再删。'
+		return 0
+	fi
+	uci -q delete "wireless.$sta.ssid" 2>/dev/null
+	uci -q delete "wireless.$sta.key" 2>/dev/null
+	uci -q set "wireless.$sta.disabled=1"
+	uci -q commit wireless || { jerr '写配置失败'; return 0; }
+	json_init
+	json_add_boolean ok 1
+	json_add_string message "已删除保存的 Wi-Fi（${ssid:-未命名}）"
+	json_dump
+}
+
+# ---- 状态 / 模式切换 ----
+# 这两处直接拼 JSON：jshn 的老版本没有 raw 拼接，硬塞字符串会把内层双引号转义掉，
+# 页面拿到的就是一段转义后的文本，不是对象。
+net_status() {
+	_out=$("$NETMODE" status --json 2>/dev/null)
+	[ -n "$_out" ] || { jerr '取不到状态'; return 0; }
+	printf '{"ok":true,"status":%s}\n' "$_out"
+}
+
+net_mode_set() {
+	local mode out rc
+	json_load "$1" 2>/dev/null
+	json_get_var mode mode
+	case "$mode" in
+		cell|wifi|ap) ;;
+		*) jerr '未知模式（只支持 cell / wifi / ap）'; return 0 ;;
+	esac
+	out=$("$NETMODE" "$mode" 2>&1); rc=$?
+	json_init
+	json_add_boolean ok "$([ "$rc" = 0 ] && echo 1 || echo 0)"
+	json_add_int code "$rc"
+	json_add_string mode "$mode"
+	json_add_string message "$out"
+	json_dump
+}
+
+net_probe() {
+	need_probe
+	_out=$("$PROBE" 2>/dev/null)
+	[ -n "$_out" ] || { jerr '取不到能力信息'; return 0; }
+	printf '{"ok":true,"probe":%s}\n' "$_out"
+}
+
+case "$1" in
+list)
+	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{}}'
+	;;
+call)
+	need_probe
+	case "$2" in
+	probe)        net_probe ;;
+	status)       need_mode; net_status ;;
+	mode_set)     need_mode; net_mode_set "$3" ;;
+	wifi_scan)    wifi_scan ;;
+	wifi_saved)   wifi_saved ;;
+	wifi_connect) need_mode; wifi_connect "$3" ;;
+	wifi_forget)  need_mode; wifi_forget ;;
+	*)            jerr "未知方法：$2" ;;
+	esac
+	;;
+*)
+	printf '%s\n' '{"error":"用法: airsim-net {list|call}"}'
+	exit 1
+	;;
+esac

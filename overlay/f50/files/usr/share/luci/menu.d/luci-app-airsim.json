@@ -15,6 +15,11 @@
   "action": {"type": "view", "path": "airsim/connect"},
   "depends": {"acl": ["luci-app-airsim"]}
  },
+ "admin/services/airsim/net": {
+  "title": "联网", "order": 17,
+  "action": {"type": "view", "path": "airsim/net"},
+  "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-net"]}
+ },
  "admin/services/airsim/call": {
   "title": "来电转发", "order": 25,
   "action": {"type": "view", "path": "airsim/call"},
