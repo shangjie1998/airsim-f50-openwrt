@@ -104,8 +104,11 @@ NFT_HIT=$(nft list ruleset 2>/dev/null | grep -c "$AP_IF")
 # ---- 6. 管理口（只校验，不改）----
 LAN_IP=$(u network.lan.ipaddr)
 BR_PORTS=$(uci -q get network.@device[0].ports)
+# 只校验"结构还在"：lan 有地址 + br-lan 端口就是 usb0。
+# 不比对具体 IP —— 管理地址是配置值（network.lan.ipaddr），不是常量；
+# 哪天改成别的网段，硬比 192.168.77.1 会把正常配置判成"管理口丢了"而拒绝切换。
 LAN_OK=0
-if [ "$LAN_IP" = 192.168.77.1 ]; then
+if [ -n "$LAN_IP" ]; then
 	case "$BR_PORTS" in
 		usb0) LAN_OK=1 ;;
 	esac

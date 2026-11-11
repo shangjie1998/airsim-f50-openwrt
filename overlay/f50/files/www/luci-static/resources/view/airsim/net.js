@@ -221,7 +221,7 @@ return view.extend({
     E('div', {}, [
      E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 联网'),
      E('h2', {}, '上网走哪条路。'),
-     E('p', {}, '手机流量、外部 Wi-Fi、热点三选一。切过去以后，USB 管理地址 192.168.77.1 从头到尾不变。')
+     E('p', {}, '手机流量、外部 Wi-Fi、热点三选一。切过去以后，USB 管理地址从头到尾不变。')
     ]),
     E('span', { 'class': 'as-version' }, probe.band_label ? 'Wi-Fi ' + probe.band_label : '')
    ]),

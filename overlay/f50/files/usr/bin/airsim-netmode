@@ -17,7 +17,7 @@
 #         4 还没配过 Wi-Fi / 5 自检没过已回滚 / 6 用法错误
 #
 # 硬约束：只动 wireless 的 ap0、wwan0 与 network 的 wan、wwan；
-#         绝不动 lan / br-lan / usb0 —— 管理口 192.168.77.1 永远在。
+#         绝不动 lan / br-lan / usb0 —— USB 管理口永远在（具体地址是配置值，不是常量）。
 set -u
 
 PROBE=${AIR_SIM_PROBE:-/usr/libexec/airsim-net-probe}
@@ -57,7 +57,7 @@ cur_mode() {
 guard() {
 	if [ "$(p lan_ok)" != 1 ]; then
 		err "拒绝执行：管理口结构与预期不符（lan 地址 $(p lan_ip)，br-lan 端口 $(p br_ports)）"
-		err '预期是 lan=192.168.77.1、br-lan 只含 usb0。请先人工核对，避免切换后 USB 管理口失联。'
+		err '预期是 br-lan 只含 usb0、lan 有地址（当前管理口见上面那行）。请先人工核对，避免切换后 USB 管理口失联。'
 		exit 3
 	fi
 	[ "$(p single_radio)" = 1 ] || err '提示：本机不是单射频，热点与 Wi-Fi 可以同时存在，本脚本仍按互斥处理'
