@@ -34,7 +34,7 @@
 | 通话播放 | `FE_ST_VOICE_PCM_P` = `hw:1,53`（8 kHz 直通，不做上采样） |
 | 音频扩展目录 | `/mnt/mu300-disk/extra/airsim-audio/`（`bin/ ctlset etc/ integration/ modules/<KREL>/`） |
 | 地址 / 账号 | `192.168.77.1`，root |
-| SIM | 实测 `861*****5721`，`已注册`，`phone_number_status=available` |
+| SIM | 实测可用（号码已打码不写进仓库），`已注册`，`phone_number_status=available` |
 
 **安全边界（硬约束）**：**A 卡槽的 Android 系统一个字节不动**（不刷机、不碰 boot / bootloader / 分区表 / modem NV）；
 只动 B 卡槽 TF 卡上的 OpenWrt；设备重启是高危动作，**由使用者本人按**，任何自动化都不代劳。

@@ -525,7 +525,7 @@ test)
 	load_config
 	refresh_info
 	SEND_SELF=${INFO_SELF:-}
-	_NOQUEUE=1 send_event test "+8613800000000" ringing incoming 0
+	_NOQUEUE=1 send_event test "+8613800000000" ringing incoming 0   # 示例号，占位用
 	;;
 *)
 	echo "usage: call-forward {run|test}" >&2
