@@ -26,13 +26,40 @@ PROBE=${AIR_SIM_PROBE:-/usr/libexec/airsim-net-probe}
 say() { printf '%s\n' "$*"; }
 err() { printf '%s\n' "$*" >&2; }
 
-p() { "$PROBE" -k "$1" 2>/dev/null; }
+# 探测脚本只读，但每跑一次要几十毫秒（十来次 uci 加系统读）；而在这颗 SoC 上
+# 每次 $( ) 取值再 fork 一遍 awk 也要 60 毫秒上下。原来每个键各取一次：启动 5 个键
+# 就要 0.35 秒，status 里还要再取一次 single_radio，于是「联网」页比别的页慢好几倍
+# （2026-11-11 实测 status 2.98 秒，别的页 0.3 秒）。
+# 改成：探测脚本整份取回一次（它本就有 -p 一次给全部键），启动的 5 个键用一次 awk 全取，
+# 后面零星单键才走 p()。启动从 0.35 秒降到 0.1 秒出头。
+_PCACHE=
+_pc_load() {
+	[ -n "$_PCACHE" ] && return 0
+	_PCACHE=$(mktemp /tmp/.airsim-probe.XXXXXX 2>/dev/null) || _PCACHE=/tmp/.airsim-probe.$$
+	"$PROBE" -p >"$_PCACHE" 2>/dev/null || : >"$_PCACHE"
+}
+p() {
+	_pc_load
+	sed -n "s/^$1=//p" "$_PCACHE" 2>/dev/null | head -1
+}
+# 一次取多个键：按 list 里的顺序每行一个值，取不到的给空行
+p_many() {
+	_pc_load
+	awk -v list="$1" -F= '
+		BEGIN { n = split(list, a, ","); for (i = 1; i <= n; i++) v[i] = "" }
+		{ for (i = 1; i <= n; i++) if ($1 == a[i]) { sub(/^[^=]*=/, ""); v[i] = $0 } }
+		END { for (i = 1; i <= n; i++) print v[i] }' "$_PCACHE" 2>/dev/null
+}
+trap '[ -n "$_PCACHE" ] && rm -f "$_PCACHE"' EXIT INT TERM HUP
 
-RADIO=$(p radio);        [ -n "$RADIO" ] || RADIO=radio0
-STA=$(p sta_section);    [ -n "$STA" ] || STA=wwan0
-AP=$(p ap_section);      [ -n "$AP" ] || AP=ap0
-AP_IF=$(p ap_if);        [ -n "$AP_IF" ] || AP_IF=wlan0
-CELL_IF=$(p cell_if);    [ -n "$CELL_IF" ] || CELL_IF=sipa_eth0
+{ IFS= read -r RADIO; IFS= read -r STA; IFS= read -r AP; IFS= read -r AP_IF; IFS= read -r CELL_IF; } <<EOF
+$(p_many 'radio,sta_section,ap_section,ap_if,cell_if')
+EOF
+[ -n "${RADIO:-}" ] || RADIO=radio0
+[ -n "${STA:-}" ] || STA=wwan0
+[ -n "${AP:-}" ] || AP=ap0
+[ -n "${AP_IF:-}" ] || AP_IF=wlan0
+[ -n "${CELL_IF:-}" ] || CELL_IF=sipa_eth0
 
 wan_dis()  { uci -q get network.wan.disabled 2>/dev/null; }
 ap_dis()   { uci -q get wireless.$AP.disabled 2>/dev/null; }

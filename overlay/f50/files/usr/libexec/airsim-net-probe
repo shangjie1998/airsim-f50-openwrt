@@ -63,8 +63,12 @@ else
 fi
 
 # phy 里真实的接口名（AP 关着时可能根本没有这个 netdev）
-LIVE_IF=$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2; exit }')
-[ -n "$LIVE_IF" ] || LIVE_IF=''
+# 原来用 `iw dev`，实测这一条就占 0.41 秒（整个探测 0.5 秒基本都花在这）。
+# 改成看 sysfs：哪个 netdev 底下挂着 phy80211 就是无线口，几毫秒出结果。
+LIVE_IF=''
+for _n in $(ls /sys/class/net 2>/dev/null); do
+	if [ -e "/sys/class/net/$_n/phy80211" ]; then LIVE_IF=$_n; break; fi
+done
 
 # ---- 3. 频段能力：机器说什么就是什么 ----
 case "$BAND" in
