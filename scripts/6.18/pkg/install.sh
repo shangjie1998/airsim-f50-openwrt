@@ -18,18 +18,21 @@ AUD=/mnt/mu300-disk/extra/airsim-audio/modules/$(uname -r)
 echo "== AirSIM for F50 $VER =="
 
 # --- 内核识别（不再拦人，只交代清楚）---
-# 已知三档：5.4.254（历史线，没开 CONFIG_SOUND，语音编不出来）、6.18.60、7.3.1。
+# 已知三档：5.4.254（历史线，语音靠厂商镜像自带的驱动，实测可用）、6.18.60、7.3.1。
 # 别的内核：照装，只是提醒「没在真机验过」，出问题看自检与日志。
 K=$(uname -r)
+AUD_VENDOR=0
 case "$(uname -m)" in
 aarch64) : ;;
 *) echo "  当前架构 $(uname -m)，本包只对 aarch64 有效。" >&2; exit 3 ;;
 esac
 case "$K" in
 5.4.*)
-	echo "  内核 ${K}：主体可用（历史线），语音不可用 —— 那个内核没开 CONFIG_SOUND，"
-	echo "  按它编不出语音驱动模块，装音频配件包也救不回来。"
-	AUD_SUPPORTED=0
+	echo "  内核 ${K}：主体可用；语音用这台机器自带的厂商驱动（厂商 5.4 镜像里就是全的）。"
+	echo "  真机实测（5.4.254）：/dev/snd 在、两张声卡在、audio_reserve missing=0，不用配件包；"
+	echo "  6.18/7.3 那套配件包跟它不通用，别往上装。"
+	AUD_SUPPORTED=1
+	AUD_VENDOR=1
 	;;
 6.18.*)
 	echo "  内核 ${K}：主体可用，语音取决于音频配件包（audio-opt 1.0.3 支持 6.18.60）"
@@ -56,6 +59,9 @@ if [ ! -f /usr/lib/airsim/airsim-mu300d ]; then
 fi
 if [ -d "$AUD" ]; then
 	echo "  语音模块目录已在：$AUD"
+elif [ "$AUD_VENDOR" = 1 ]; then
+	echo "  提示：$AUD 不在 —— 5.4 这套语音驱动是厂商镜像自带的，配件包不覆盖它，" >&2
+	echo "  要语音得从厂商 5.4 镜像里把 modules 目录补回来（或者切回 6.18/7.3 用配件包）。" >&2
 elif [ "$AUD_SUPPORTED" = 1 ]; then
 	echo "  提示：$AUD 不存在 —— 语音现在不可用，去维护页「可选配件」装音频配件包（按当前内核出包）" >&2
 else

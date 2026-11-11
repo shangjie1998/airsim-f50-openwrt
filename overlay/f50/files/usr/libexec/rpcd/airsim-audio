@@ -14,7 +14,7 @@
 
 TAG=audio-opt-v1.0.3
 FILE=airsim-f50-audio-opt-1.0.3-k6.18.60+7.3.1.tar.gz
-OPT_KERNELS=6.18.60 7.3.1
+OPT_KERNELS="6.18.60 7.3.1"
 EXT=/mnt/mu300-disk/extra/airsim-audio
 DIR=/tmp/airsim-audioopt
 RUN=/usr/libexec/airsim-audioopt-install
@@ -72,16 +72,33 @@ aud_probe() {
 	n=$(ko_count "$kver")
 	optver=$(status_field version)
 	[ -n "$optver" ] || optver=$(cat "$EXT/audio-opt-version" 2>/dev/null || true)
-	installed=0
-	[ -n "$md" ] && [ "$n" -ge "$WANT_KO" ] && installed=1
+	in_opt=0
+	case " $OPT_KERNELS " in *" $kver "*) in_opt=1 ;; esac
+
+	# 两种内核要分开判：
+	#   配件包内核（6.18.60 / 7.3.1）—— 按清单件数判，25 件齐了才算装好；
+	#   厂商内核（比如 5.4.254）—— 人家镜像自带整套驱动，名字和件数跟清单对不上，
+	#   件数一判就误报「缺 1 个」。这时候只信内核自己的口径：audio_reserve 的 missing 参数。
+	vendor=0
+	[ "$in_opt" = 1 ] || vendor=1
+	missing=''
+	[ "$vendor" = 1 ] && missing=$(cat /sys/module/audio_reserve/parameters/missing 2>/dev/null | tr -d ' \n')
+	ok=0
+	if [ "$in_opt" = 1 ]; then
+		[ -n "$md" ] && [ "$n" -ge "$WANT_KO" ] && ok=1
+	else
+		case "$missing" in
+			''|*[!0-9]*) ok=0 ;;
+			0) [ -n "$md" ] && ok=1 ;;
+			*) ok=0 ;;
+		esac
+	fi
+	installed=$ok
 
 	busy=0
 	case "$(aud_state)" in
 		download|verify|install) busy=1 ;;
 	esac
-
-	in_opt=0
-	case " $OPT_KERNELS " in *" $kver "*) in_opt=1 ;; esac
 
 	json_init
 	json_add_string action probe
@@ -92,15 +109,17 @@ aud_probe() {
 	json_add_string kernel "$kver"
 	json_add_string want_kernel "$kver"
 	json_add_boolean kernel_ok "$in_opt"
+	json_add_boolean vendor_kernel "$vendor"
+	json_add_string audio_missing "$missing"
 	json_add_string opt_kernels "$OPT_KERNELS"
 	json_add_string available "$(avail_krels)"
 	json_add_boolean matched "$([ -n "$md" ] && echo 1 || echo 0)"
 	json_add_string match_dir "$md"
 	json_add_boolean ext_present "$([ -d "$EXT" ] && echo 1 || echo 0)"
 	json_add_int ko_count "$n"
-	json_add_int want_ko "$WANT_KO"
-	json_add_boolean modules_ok "$([ "$n" -ge "$WANT_KO" ] && echo 1 || echo 0)"
-	json_add_int ko_missing "$([ "$n" -ge "$WANT_KO" ] && echo 0 || echo $((WANT_KO - n)))"
+	json_add_int want_ko "$([ "$vendor" = 1 ] && echo 0 || echo "$WANT_KO")"
+	json_add_boolean modules_ok "$ok"
+	json_add_int ko_missing "$([ "$ok" = 1 ] && echo 0 || echo $((WANT_KO > n ? WANT_KO - n : 0)))"
 	json_add_string opt_version "$optver"
 	json_add_boolean dsp_present "$([ -x "$EXT/bin/mu300-audio-dsp" ] && echo 1 || echo 0)"
 	json_add_string version "$TAG"
