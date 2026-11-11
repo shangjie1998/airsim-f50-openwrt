@@ -385,3 +385,18 @@ body.as-menu-on > header .nav{display:none!important}
 /* 短信页操作行（全部已读 / 清空短信）与提示条 */
 .as-root .as-sms-ops{margin-top:10px}
 .as-root .as-sms-ops .as-button{flex:0 0 auto}
+
+/* 滑动开关（管理页面访问那种"开/关"用这个，不要用按钮+数字） */
+.as-switch-row{display:flex;align-items:center;gap:12px;margin:14px 0 6px;cursor:pointer;user-select:none}
+.as-switch{appearance:none !important;-webkit-appearance:none !important;display:inline-block;
+ flex:0 0 auto;width:52px !important;min-width:52px !important;max-width:none !important;height:30px !important;
+ margin:0 !important;padding:0 !important;border:0 !important;border-radius:999px !important;
+ background:rgba(120,120,128,.28) !important;position:relative;cursor:pointer;transition:background .22s ease}
+.as-switch::after{content:'';position:absolute;top:2px;left:2px;width:26px;height:26px;border-radius:50%;
+ background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.22);transition:left .22s ease}
+.as-switch:checked{background:var(--as-blue,#0071e3) !important}
+.as-switch:checked::after{left:24px}
+.as-switch:disabled{opacity:.55;cursor:default}
+
+/* 消息条没有内容时不要留空框（.as-feedback 平时是空的） */
+.as-feedback:empty{display:none !important}

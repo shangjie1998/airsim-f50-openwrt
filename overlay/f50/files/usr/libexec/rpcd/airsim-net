@@ -254,12 +254,33 @@ net_probe() {
 # 所以关掉开关只是「Wi-Fi 那边进不去」，插 USB 线的管理入口一直可用（2026-11-11 实测：
 # 开关关掉时 192.168.77.1 仍返 403 登录跳转，SSH 不断）。
 RULE_NAME=Allow-LuCI-wwan
+ZONE_NAME=wlanadmin
 ADMIN_DEV=wlan0
 ADMIN_PORTS='80 443'
 FW_INIT=/etc/init.d/firewall
 
 admin_sections() {
 	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='$RULE_NAME'\$/\1/p"
+}
+
+# wlan0 原先不属于任何 firewall 区。没有区的时候，fw4 会把"只有 device、没有 src"的规则
+# 当成出口规则渲染进 output 链 —— 表里看得到一条，input 那边照样 policy drop，
+# 从 Wi-Fi 打进来直接丢包（2026-11-11 真机踩到：开关显示已生效，192.168.50.230 打不开）。
+# 所以给无线口建一个"只收不放"的区，规则挂进这个区，fw4 才会渲染到 input 侧。
+admin_zone_sections() {
+	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='$ZONE_NAME'\$/\1/p"
+}
+
+admin_zone_ensure() {
+	_s=$(admin_zone_sections | head -1)
+	[ -n "$_s" ] && return 0
+	uci -q add firewall zone >/dev/null || return 1
+	uci -q set "firewall.@zone[-1].name=$ZONE_NAME"
+	uci -q set "firewall.@zone[-1].device=$ADMIN_DEV"
+	uci -q set "firewall.@zone[-1].input=REJECT"
+	uci -q set "firewall.@zone[-1].output=ACCEPT"
+	uci -q set "firewall.@zone[-1].forward=REJECT"
+	return 0
 }
 
 admin_enabled() {
@@ -271,7 +292,11 @@ admin_enabled() {
 
 # uci 里有不等于表里有：reload 没渲染成功时规则根本不生效，必须看 nft
 admin_live() {
-	nft list ruleset 2>/dev/null | grep -q "Allow-LuCI-wwan"
+	# 光"表里有这个 comment"不算数：早先它落在 output 链里，看着开了其实没开。
+	# 必须 input 链真的跳到无线口的区链，且区链里真的放行 80/443。
+	nft list chain inet fw4 input 2>/dev/null | grep -q "iifname \"$ADMIN_DEV\" jump input_$ZONE_NAME" || return 1
+	nft list chain inet fw4 input_$ZONE_NAME 2>/dev/null | grep -q 'dport { 80, 443 }' || return 1
+	return 0
 }
 
 admin_json() {
@@ -292,12 +317,14 @@ admin_status() {
 }
 
 admin_set() {
-	json_load "$1" 2>/dev/null
-	json_get_var enable enable
-	case "$enable" in
-	1|true|on) enable=1 ;;
-	0|false|off) enable=0 ;;
-	*) jerr 'enable 只接受 1 / 0'; return 0 ;;
+	# 参数可能是字符串 "1"、数字 1、布尔 true/false；ubus 传进来的 JSON 还带空格
+	# （{ "enable": 1 }），所以先抹掉空白再按原文判断，不走 jshn（它只认字符串，
+	# 数字型会让 json_get_var 拿到空值，点开关就被这条校验直接打回）。
+	_raw=$(printf '%s' "$1" | tr -d ' \t\n')
+	case "$_raw" in
+	*'"enable":"1"'*|*'"enable":1'*|*'"enable":true'*|*'"enable":"true"'*|*'"enable":"on"'*) enable=1 ;;
+	*'"enable":"0"'*|*'"enable":0'*|*'"enable":false'*|*'"enable":"false"'*|*'"enable":"off"'*) enable=0 ;;
+	*) jerr '开关只接受 开 / 关'; return 0 ;;
 	esac
 
 	# 历史上可能留了不止一条同名规则（手工 uci 加过那种），先全清再按当前开关写一条
@@ -306,13 +333,21 @@ admin_set() {
 	done
 
 	if [ "$enable" = 1 ]; then
+		admin_zone_ensure || { jerr '写不进 firewall 区配置'; return 0; }
 		uci -q add firewall rule >/dev/null || { jerr '写不进 firewall 配置'; return 0; }
 		uci -q set "firewall.@rule[-1].name=$RULE_NAME"
+		uci -q set "firewall.@rule[-1].src=$ZONE_NAME"
 		uci -q set "firewall.@rule[-1].proto=tcp"
 		uci -q set "firewall.@rule[-1].dest_port=$ADMIN_PORTS"
 		uci -q set "firewall.@rule[-1].target=ACCEPT"
-		uci -q set "firewall.@rule[-1].device=$ADMIN_DEV"
 		uci -q set "firewall.@rule[-1].enabled=1"
+	else
+		# 关掉时把它专用的区一并收走，回到出厂状态（区里还有别的规则就不动）
+		_s=$(admin_zone_sections | head -1)
+		if [ -n "$_s" ]; then
+			_n=$(uci show firewall 2>/dev/null | grep -c "\.src='$ZONE_NAME'\$")
+			[ "$_n" -eq 0 ] && uci -q delete "firewall.$_s"
+		fi
 	fi
 	uci -q commit firewall || { jerr '提交 firewall 配置失败'; return 0; }
 
@@ -365,18 +400,27 @@ list)
 	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""},"flowfix_check":{},"flowfix_fix":{},"admin_status":{},"admin_set":{"enable":""}}'
 	;;
 call)
+	# rpcd 走 exec 插件时，调用参数是从 stdin 灌进来的，argv 里只有 call 和 方法名
+	# （2026-11-11 抓包确认：$1=call $2=admin_set $3 空，stdin={"enable":1}）。
+	# 以前这里读 "$3"，等于所有带参数的方法都拿不到值 —— 开关点了就报"只接受 1/0"
+	# 就是这么来的。手动 `sh 脚本 call 方法 '{"..."}'` 调试时参数在 $3，两条路都留。
+_args=${3:-}
+if [ ! -t 0 ]; then
+	_stdin=$(cat 2>/dev/null)
+	[ -n "$_stdin" ] && _args=$_stdin
+fi
 	need_probe
 	case "$2" in
 	flowfix_check) flowfix check ;;
 	flowfix_fix)   flowfix fix ;;
 	admin_status)  admin_status ;;
-	admin_set)     admin_set "$3" ;;
+	admin_set)     admin_set "$_args" ;;
 	probe)        net_probe ;;
 	status)       need_mode; net_status ;;
-	mode_set)     need_mode; net_mode_set "$3" ;;
+	mode_set)     need_mode; net_mode_set "$_args" ;;
 	wifi_scan)    wifi_scan ;;
 	wifi_saved)   wifi_saved ;;
-	wifi_connect) need_mode; wifi_connect "$3" ;;
+	wifi_connect) need_mode; wifi_connect "$_args" ;;
 	wifi_forget)  need_mode; wifi_forget ;;
 	*)            jerr "未知方法：$2" ;;
 	esac
