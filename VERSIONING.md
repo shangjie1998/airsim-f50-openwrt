@@ -57,13 +57,15 @@ airsim-f50-0.1.0.<N>-r<NN>-<适用范围>
 
 ## 版本号不许手工改
 
-打包计数只从一个地方推：`sh build/bump-version.sh`。它一次写三处：
+打包计数只从一个地方推：`sh build/bump-version.sh`。它一次写两处，别的一样都不写：
 
-1. 仓库根 `VERSION`
-2. `PACKAGING-VERSION`
-3. `AGENT-VERSION`（`0.4.7-mu300.<版本号>`）
+1. 仓库根 `VERSION` —— **唯一真值**，包名、`MANIFEST`、`build.sh` 都从它读
+2. `AGENT-VERSION`（`0.4.7-mu300.<版本号>`）—— 只能由它派生，不许手工调
 
-（`pkg/` 里那套覆盖包属于 5.4 线，已冻结，脚本不碰 —— 它的 `VERSION`/`MANIFEST` 永远停在
+> 曾经还有个 `PACKAGING-VERSION` 跟 `VERSION` 内容一模一样，`git grep` 全库**没有任何程序读它**，
+> 纯属第二份真值，已删除。
+
+（`archive/5.4-pkg/` 里那套老覆盖包属于历史形态，脚本不碰 —— 它的 `VERSION`/`MANIFEST` 永远停在
 `0.1.0.3-r22-f50`。）
 
 另外记住：**包内 `/usr/lib/airsim/VERSION` 是上游的 `0.1.0-r22`**，被 `audio-preflight`

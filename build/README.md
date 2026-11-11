@@ -8,7 +8,7 @@
 | 文件 | 干什么 | 用法 |
 |---|---|---|
 | `make-package.sh` | 合成 `overlay/f50/files` + `src/plugin/packaging/openwrt/root` + `out/f50` 二进制，打成主包 | `sh build/make-package.sh`（用现成二进制）<br>`sh build/make-package.sh --build`（先重编） |
-| `bump-version.sh` | 版本号三处同步（`VERSION` / `PACKAGING-VERSION` / `AGENT-VERSION`），适用范围只认 `any` / `6.18` | `sh build/bump-version.sh <N> r<NN> [any\|6.18]` |
+| `bump-version.sh` | 版本号两处同步（`VERSION`（唯一真值）/ `AGENT-VERSION`），适用范围**只认 `any`** | `sh build/bump-version.sh <N> r<NN> [any]` |
 | `pkg/install.sh` | **包内**安装脚本（装到设备上跑，不是本机跑）：备份 → 铺 overlay → 起服务 → 提示内核与语音 | 由 `make-package.sh` 打进包里 |
 | `pkg/uninstall.sh` | 包内卸载 | 同上 |
 | `pkg/airsim-audio-retry.init` | 开机多轮抢占 DSP 保留页（`START=11`），**随主包发**，装到 `/etc/init.d/airsim-audio-retry` | 由 `make-package.sh` 打进 `audio/` |
