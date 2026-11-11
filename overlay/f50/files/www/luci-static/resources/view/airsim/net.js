@@ -224,24 +224,33 @@ return view.extend({
   var admOn = adm.enabled === true;
   var admLive = adm.live === true;
   var admFeed = E('p', { 'class': 'as-feedback' }, '');
-  var admBtn = E('button', { 'class': 'as-btn', 'type': 'button' }, admOn ? '关掉这个入口' : '允许从 Wi-Fi 进管理页');
-  admBtn.addEventListener('click', function() {
-   var next = admOn ? 0 : 1;
-   admBtn.disabled = true;
+  admFeed.style.display = 'none';   // 没有话说的时候不要留一个空框
+  var admSwitch = E('input', { 'type': 'checkbox', 'class': 'as-switch', 'id': 'as-admin-switch' });
+  admSwitch.checked = admOn;
+  admSwitch.addEventListener('change', function() {
+   var next = admSwitch.checked ? 1 : 0;
+   admSwitch.disabled = true;
+   admFeed.style.display = '';
    admFeed.className = 'as-feedback as-feedback-pending';
    admFeed.textContent = next ? '正在打开…' : '正在关掉…';
-   netAdminSet(next).then(function(res) {
+   netAdminSet(next ? '1' : '0').then(function(res) {
     if (res && res.ok) {
+     admFeed.style.display = '';
      admFeed.className = 'as-feedback as-feedback-success';
      admFeed.textContent = (res.message || '') || (next ? '已允许。' : '已禁止。');
      window.setTimeout(function() { window.location.reload(); }, 1500);
     } else {
-     admBtn.disabled = false;
-     admFeed.className = 'as-feedback as-feedback-error';
+     admSwitch.disabled = false;
+     admSwitch.checked = !admSwitch.checked;
+     admFeed.style.display = '';
+     admFeed.style.display = '';
+    admFeed.className = 'as-feedback as-feedback-error';
      admFeed.textContent = '没设成：' + ((res && (res.error || res.message)) || '设备没有返回原因');
     }
    }).catch(function(err) {
-    admBtn.disabled = false;
+    admSwitch.disabled = false;
+    admSwitch.checked = !admSwitch.checked;
+    admFeed.style.display = '';
     admFeed.className = 'as-feedback as-feedback-error';
     admFeed.textContent = '请求失败：' + err;
    });
@@ -300,8 +309,11 @@ return view.extend({
       ]),
       admOn ? pill(admLive ? '已生效' : '没生效', admLive ? 'red' : 'neutral') : pill('已关', 'green')
      ]),
+     E('label', { 'class': 'as-switch-row', 'for': 'as-admin-switch' }, [
+      admSwitch,
+      E('span', {}, admOn ? '允许（从 Wi-Fi 打开）' : '禁止（只走 USB 口）')
+     ]),
      admFeed,
-     E('div', { 'class': 'as-actions' }, [admBtn]),
      E('div', { 'class': 'as-notice', style: 'color:#c0392b' }, '这一页权限等同 root：能改联网、能装包、能看短信。打开后，同一个上游 Wi-Fi（比如 PDCN）里的任何设备都能看到登录框并一直试密码；80 端口是明文，共享网络里有人抓包就看得见登录动作。只在自己家的 Wi-Fi 下打开，用完关掉。'),
      E('p', { 'class': 'as-caption' }, '规则只绑无线口 wlan0，切到「手机流量」后蜂窝公网进不来 —— 就算忘了关，也不会把管理页暴露在运营商网络上。USB 口的管理入口不受这个开关影响。')
     ]),
