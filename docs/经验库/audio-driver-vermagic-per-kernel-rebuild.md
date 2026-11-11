@@ -37,14 +37,14 @@ metadata:
 - 重编完别忘了真机验证：驱动补上后应能看到模块被加载、原先自动写的"无驱动"标记被清掉。
 
 ## 可复用的产物或模板
-按 KREL 分类的目录约定与校验入口（本仓库 `audio/f50/`）：
+按 KREL 分类的目录约定与校验入口（本仓库 `parts/audio/`）：
 
 ```sh
 # 校验已有产物：清单逐个核 vermagic，不用真编
-sh audio/f50/build-krel.sh --check 6.18.60
+sh parts/audio/build-krel.sh --check 6.18.60
 
 # 自编（需同一版构建树，且 kernelrelease 必须等于 --krel）
-sh audio/f50/build-krel.sh --krel 6.18.54 --tree /path/linux-6.18.54 --tag nightly-20261109
+sh parts/audio/build-krel.sh --krel 6.18.54 --tree /path/linux-6.18.54 --tag nightly-20261109
 ```
 
 脚本内建的判据：`make -s -C <tree> kernelrelease` 必须等于 `--krel`，每个 `.ko` 的 vermagic 必须匹配，才允许产出 `KERNEL` 元数据（KEY/KREL/CONFIG=配置哈希/TAG）。

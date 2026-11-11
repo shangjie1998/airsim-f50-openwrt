@@ -29,4 +29,4 @@ metadata:
 - 另一台出现的问题（心跳/拨号超时）不能推断本机也有：链路、卡槽模型、超时预算都不同，照搬会把真问题掩盖成超时。规矩是先在本机复现，复现不了记"未复现"。
 
 ## 可复用的产物或模板
-只读比对脚本 `scripts/sync-m8.py`（`--only shared|rewrite|device`，`--m8/--f50` 指定路径），配套规矩 `docs/SYNC-M8-F50.md`，见 https://github.com/shangjie1998/airsim-f50-openwrt
+只读比对脚本 `build/tools/sync-m8.py`（`--only shared|rewrite|device`，`--m8/--f50` 指定路径），配套规矩 `docs/跨机型/同步规矩-M8-F50.md`，见 https://github.com/shangjie1998/airsim-f50-openwrt

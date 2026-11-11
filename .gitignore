@@ -3,4 +3,9 @@ src/plugin/out/
 .DS_Store
 out/
 out/
-bluetooth/f50/payload/root/
+parts/bluetooth/payload/root/
+
+# 历史产物只留本地与远端 Release，不入库（省仓库体积）
+archive/旧产物/*.tar.gz
+archive/旧产物/*.sha256
+archive/旧产物/*.zip
