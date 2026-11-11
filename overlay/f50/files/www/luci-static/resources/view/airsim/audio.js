@@ -264,5 +264,8 @@ return view.extend({
    ]),
    E('div', { 'class': 'as-layout' }, [optCard(lc), selfCheckCard(), kernelCard()])
   ]);
- }
+ },
+ handleSaveApply: null,
+ handleSave: null,
+ handleReset: null
 });

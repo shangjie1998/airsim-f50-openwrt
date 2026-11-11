@@ -416,5 +416,8 @@ return view.extend({
    ]),
    E('div', { 'class': 'as-layout' }, cards)
   ]);
- }
+ },
+ handleSaveApply: null,
+ handleSave: null,
+ handleReset: null
 });
