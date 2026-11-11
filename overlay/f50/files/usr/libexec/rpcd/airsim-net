@@ -242,13 +242,32 @@ net_probe() {
 	printf '{"ok":true,"probe":%s}\n' "$_out"
 }
 
+FLOWFIX=/usr/libexec/airsim-flowfix
+
+# 5.4 热点客户端"无互联网"体检 / 修复。check 只读；fix 会改 firewall.flow_offloading 并重启防火墙。
+flowfix() {
+	_mode=$1
+	_out=$(sh "$FLOWFIX" --"$_mode" 2>&1)
+	_rc=$?
+	_res=$(printf '%s\n' "$_out" | sed -n 's/^RESULT=//p' | tail -1)
+	json_init
+	json_add_boolean ok $([ "$_rc" = 0 ] && echo 1 || echo 0)
+	json_add_string mode "$_mode"
+	json_add_string result "${_res:-error}"
+	json_add_string kernel "$(uname -r)"
+	json_add_string output "$_out"
+	json_dump
+}
+
 case "$1" in
 list)
-	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""}}'
+	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""},"flowfix_check":{},"flowfix_fix":{}}'
 	;;
 call)
 	need_probe
 	case "$2" in
+	flowfix_check) flowfix check ;;
+	flowfix_fix)   flowfix fix ;;
 	probe)        net_probe ;;
 	status)       need_mode; net_status ;;
 	mode_set)     need_mode; net_mode_set "$3" ;;
