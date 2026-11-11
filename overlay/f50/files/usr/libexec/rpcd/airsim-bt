@@ -215,6 +215,25 @@ btopt_probe() {
 	json_dump
 }
 
+# 读"检查更新"留下的缓存，把查到的最新 tag/ver/file 带出来（本身不联网）
+# 输出到 OPT_NEW_TAG / OPT_NEW_VER / OPT_NEW_FILE，缓存不存在或不可用时三者全空
+opt_override() {
+	OPT_NEW_TAG=; OPT_NEW_VER=; OPT_NEW_FILE=
+	_c=/usr/lib/airsim/opt-latest-$1
+	[ -f "$_c" ] || return 0
+	_val=$(
+		. "$_c" 2>/dev/null
+		[ "${ok:-0}" = 1 ] || exit 0
+		[ -n "${tag:-}" ] || exit 0
+		printf '%s|%s|%s' "${tag}" "${ver:-}" "${file:-}"
+	)
+	[ -n "$_val" ] || return 0
+	OPT_NEW_TAG=${_val%%|*}
+	_val=${_val#*|}
+	OPT_NEW_VER=${_val%%|*}
+	OPT_NEW_FILE=${_val#*|}
+}
+
 btopt_install() {
 	if [ ! -x "$BT_OPT_RUN" ]; then
 		json_init
@@ -232,9 +251,18 @@ btopt_install() {
 			return 0
 			;;
 	esac
+	# 检查更新查到了更新的配件包，就让这次安装直接去拉新版（缓存里没有就用本机写死的 tag）
+	opt_override bt-opt
+	BT_LATEST_TAG=$BT_OPT_TAG
+	BT_LATEST_FILE=$BT_OPT_FILE
+	if [ -n "$OPT_NEW_TAG" ] && ver_gt "$OPT_NEW_VER" "${BT_OPT_TAG#bt-opt-v}"; then
+		BT_LATEST_TAG=$OPT_NEW_TAG
+		BT_LATEST_FILE=$OPT_NEW_FILE
+	fi
 	mkdir -p "$BT_OPT_DIR"
 	rm -f "$BT_OPT_DIR/state" "$BT_OPT_DIR/msg"
-	nohup sh "$BT_OPT_RUN" >/dev/null 2>&1 &
+	AIRSIM_OPT_TAG=$BT_LATEST_TAG AIRSIM_OPT_FILE=$BT_LATEST_FILE \
+		nohup sh "$BT_OPT_RUN" >/dev/null 2>&1 &
 	json_init
 	json_add_boolean ok 1
 	json_add_string state 'download'
@@ -532,9 +560,47 @@ bt_pair_reply() {
 	json_dump
 }
 
+ver_gt() {
+	awk -v a="$1" -v b="$2" 'BEGIN{
+		split(a, x, "."); split(b, y, ".")
+		for (i = 1; i <= 3; i++) {
+			if (x[i] + 0 > y[i] + 0) exit 0
+			if (x[i] + 0 < y[i] + 0) exit 1
+		}
+		exit 1
+	}'
+}
+
+# 蓝牙配件包"检查更新"：与音频共用 /usr/libexec/airsim-opt-latest，前缀换 bt-opt
+bt_opt_latest() {
+	_cur=${BT_OPT_TAG#bt-opt-v}
+	
+	# rpcd 的入参走环境变量（force=1 时忽略缓存强制联网）
+	_f=''
+	case "${force:-}" in 1|true|True|yes) _f=force ;; esac
+	eval "$(sh /usr/libexec/airsim-opt-latest bt-opt $_f 2>/dev/null)" 2>/dev/null || :
+	ok=${ok:-0}; tag=${tag:-}; ver=${ver:-}; file=${file:-}; checked_at=${checked_at:-0}
+	cooldown=${cooldown:-0}; err=${err:-}; stale=${stale:-0}; cached=${cached:-0}
+	_up=0
+	[ -n "$ver" ] && ver_gt "$ver" "$_cur" && _up=1
+	json_init
+	json_add_boolean ok "$([ "$ok" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean has_update "$_up"
+	json_add_string current_ver "$_cur"
+	json_add_string latest_tag "$tag"
+	json_add_string latest_ver "$ver"
+	json_add_string latest_file "$file"
+	json_add_string checked_at "$checked_at"
+	json_add_boolean cooldown "$([ "$cooldown" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean stale "$([ "$stale" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean cached "$([ "$cached" = 1 ] && echo 1 || echo 0)"
+	json_add_string error "$err"
+	json_dump
+}
+
 case "$1" in
 	list)
-		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"},"bt_unpair":{"address":"String"},"bt_nearby":{},"bt_scan":{"on":"String"},"bt_pair":{"address":"String"},"bt_connect":{"address":"String"},"bt_action_result":{},"bt_pair_pending":{},"bt_pair_reply":{"decision":"String"},"bt_opt_probe":{},"bt_opt_install":{}}'
+		printf '%s\n' '{"bt_get":{},"bt_set":{"enable":"Boolean"},"bt_unpair":{"address":"String"},"bt_nearby":{},"bt_scan":{"on":"String"},"bt_pair":{"address":"String"},"bt_connect":{"address":"String"},"bt_action_result":{},"bt_pair_pending":{},"bt_pair_reply":{"decision":"String"},"bt_opt_probe":{},"bt_opt_install":{},"bt_opt_latest":{}}'
 		;;
 	call)
 		case "$2" in
@@ -550,6 +616,7 @@ case "$1" in
 		bt_pair_reply) bt_pair_reply ;;
 		bt_opt_probe) btopt_probe ;;
 		bt_opt_install) btopt_install ;;
+		bt_opt_latest) bt_opt_latest ;;
 		*) exit 1 ;;
 		esac
 		;;

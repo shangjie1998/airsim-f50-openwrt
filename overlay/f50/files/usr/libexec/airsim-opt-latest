@@ -1,0 +1,104 @@
+#!/bin/sh
+# AirSIM for F50 —— 配件包"检查更新"的唯一实现（音频、蓝牙共用）
+#
+# 用法：airsim-opt-latest <前缀> [force]
+#   <前缀>  audio-opt | bt-opt
+#   force   忽略 6 小时缓存，强制联网查一次
+# 输出（KEY=value，一行一个，方便 rpcd 用 jshn 转 JSON，也方便人直接看）：
+#   ok=1|0   tag=…  ver=1.0.4  file=…  checked_at=<epoch>  cooldown=0|1  err=…
+#
+# 为什么不用 api.github.com：
+#   匿名配额的算法是「每公网 IP 每小时 60 次」，蜂窝 CGNAT 下同一 IP 后面有成百上千台设备，
+#   配额被别人用光，本机就只能拿 403，而且用户完全查不出原因。改走 GitHub 的 CDN 端点，没有配额。
+#
+# 打磨过的两个细节：
+#   1) releases.atom 只给最近 10 条。主包发版频繁时配件包 tag 会被挤出首屏 -> 必须能翻页，
+#      还翻不到才退到「按前缀搜」，否则会把"查不到"误判成"已是最新"。
+#   2) 失败要留冷即时间（15 分钟），不然用户连点会把流量点光。
+
+PREFIX=${1:-}
+ACTION=${2:-}
+REPO=shangjie1998/airsim-f50-openwrt
+BASE=${AIRSIM_OPT_BASE:-https://github.com/$REPO}
+CACHE=/usr/lib/airsim/opt-latest-$PREFIX
+CACHE_TTL=21600
+COOL=900
+now=$(date +%s)
+
+out() { printf '%s\n' "$@"; }
+mkdir -p /usr/lib/airsim 2>/dev/null || :
+
+if [ -z "$PREFIX" ]; then
+	out 'ok=0' 'err=no-prefix'; exit 0
+fi
+
+# ---- 读缓存（写成 KEY=value，source 进来最省事）----
+ok=0; tag=; ver=; file=; checked_at=0; fail_at=0; err=
+if [ -f "$CACHE" ]; then
+	# shellcheck disable=SC1090
+	. "$CACHE" 2>/dev/null || :
+fi
+
+usable=0
+[ "$ok" = 1 ] && [ $((now - ${checked_at:-0})) -lt $CACHE_TTL ] && usable=1
+cooling=0
+[ "$ok" != 1 ] && [ $((now - ${fail_at:-0})) -lt $COOL ] && cooling=1
+
+if [ "$usable" = 1 ] && [ "$ACTION" != force ]; then
+	out "ok=1" "tag=${tag}" "ver=${ver}" "file=${file}" "checked_at=${checked_at}" 'cooldown=0' "cached=1" "err=${err}"
+	exit 0
+fi
+if [ "$cooling" = 1 ] && [ "$ACTION" != force ]; then
+	# 冷却期内不联网，把上次成功查到的值给出去，并标 stale
+	out "ok=1" "tag=${tag}" "ver=${ver}" "file=${file}" "checked_at=${checked_at}" 'cooldown=1' 'cached=1' "stale=1" "err=${err}"
+	exit 0
+fi
+
+# ---- 联网：优先 CDN，不用 API ----
+fetch() { curl -fsSL --connect-timeout 8 --max-time 20 "$1" 2>/dev/null; }
+
+tags=''
+for page in '' '?page=2'; do
+	body=$(fetch "$BASE/releases.atom$page") || continue
+	hit=$(printf '%s\n' "$body" | grep -o "releases/tag/$PREFIX-v[0-9][0-9.]*" | sed 's|releases/tag/||')
+	[ -n "$hit" ] || continue
+	tags="$tags$hit
+"
+	break        # 第一页有命中就是最新（atom 是倒序），不用翻第二页
+done
+
+if [ -z "$tags" ]; then
+	# 兜底：按前缀搜全部相关 release（体积大，正常很少走到）
+	body=$(fetch "$BASE/releases?q=$PREFIX&expanded=true") && \
+		tags=$(printf '%s\n' "$body" | grep -o "releases/tag/$PREFIX-v[0-9][0-9.]*" | sed 's|releases/tag/||')
+fi
+
+if [ -z "$tags" ]; then
+	fail_at=$now
+	printf 'ok=0\ntag=\nver=\nfile=\nchecked_at=0\nfail_at=%s\nerr=查不到（脱网 / 被 CDN 拒 / 版本太多翻不到）\n' "$now" > "$CACHE" 2>/dev/null || :
+	out 'ok=0' 'tag=' 'ver=' 'file=' 'checked_at=0' 'cooldown=0' 'stale=1' 'err=查不到（脱网 / 被 CDN 拒 / 版本太多翻不到）'
+	exit 0
+fi
+
+# ---- 取版本号最大的那个 ----
+top=$(printf '%s\n' "$tags" | awk -v p="$PREFIX-v" '
+	NF {
+		v = $0; sub("^.*" p, "", v)
+		split(v, a, ".")
+		printf "%03d%03d%03d\t%s\t%s\n", a[1], a[2], a[3], $0, v
+	}' | sort -r | head -n 1)
+tag=$(printf '%s\n' "$top" | cut -f2)
+ver=$(printf '%s\n' "$top" | cut -f3)
+
+# ---- 取确切资产文件名（不猜命名规则）----
+file=''
+asset_err=''
+body=$(fetch "$BASE/releases/expanded_assets/$tag") && \
+	file=$(printf '%s\n' "$body" | grep -o "airsim-f50-$PREFIX-[0-9][0-9.]*-[A-Za-z0-9.+]*\.tar\.gz" | head -n 1)
+[ -n "$file" ] || asset_err='新版查到了，但没取到资产文件名'
+
+mkdir -p "$(dirname "$CACHE")" 2>/dev/null
+printf 'ok=1\ntag=%s\nver=%s\nfile=%s\nchecked_at=%s\nfail_at=0\nerr=%s\n' \
+	"$tag" "$ver" "$file" "$now" "$asset_err" > "$CACHE" 2>/dev/null || :
+
+out 'ok=1' "tag=$tag" "ver=$ver" "file=$file" "checked_at=$now" 'cooldown=0' 'cached=0' "err=$asset_err"

@@ -20,6 +20,47 @@ DIR=/tmp/airsim-audioopt
 RUN=/usr/libexec/airsim-audioopt-install
 WANT_KO=25
 
+# 版本比较：a 比 b 新返回 0（awk 退出码），否则 1
+ver_gt() {
+	awk -v a="$1" -v b="$2" 'BEGIN{
+		split(a, x, "."); split(b, y, ".")
+		for (i = 1; i <= 3; i++) {
+			if (x[i] + 0 > y[i] + 0) exit 0
+			if (x[i] + 0 < y[i] + 0) exit 1
+		}
+		exit 1
+	}'
+}
+
+# 配件包"检查更新"：查最新 release tag 与资产名。逻辑全在 /usr/libexec/airsim-opt-latest，
+# 这里只负责把它吐的 KEY=value 转成 JSON，并把"比本机这个新不新"判出来。
+audio_opt_latest() {
+	_cur=${TAG#audio-opt-v}
+	_ok=0; _tag=; _ver=; _file=; _at=0; _cool=0; _err='查不到（脱网或被拒）'; _stale=0; _cached=0
+	
+	# rpcd 的入参走环境变量（force=1 时忽略缓存强制联网）
+	_f=''
+	case "${force:-}" in 1|true|True|yes) _f=force ;; esac
+	eval "$(sh /usr/libexec/airsim-opt-latest audio-opt $_f 2>/dev/null)" 2>/dev/null || :
+	ok=${ok:-0}; tag=${tag:-}; ver=${ver:-}; file=${file:-}; checked_at=${checked_at:-0}
+	cooldown=${cooldown:-0}; err=${err:-}; stale=${stale:-0}; cached=${cached:-0}
+	_up=0
+	[ -n "$ver" ] && ver_gt "$ver" "$_cur" && _up=1
+	json_init
+	json_add_boolean ok "$([ "$ok" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean has_update "$_up"
+	json_add_string current_ver "$_cur"
+	json_add_string latest_tag "$tag"
+	json_add_string latest_ver "$ver"
+	json_add_string latest_file "$file"
+	json_add_string checked_at "$checked_at"
+	json_add_boolean cooldown "$([ "$cooldown" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean stale "$([ "$stale" = 1 ] && echo 1 || echo 0)"
+	json_add_boolean cached "$([ "$cached" = 1 ] && echo 1 || echo 0)"
+	json_add_string error "$err"
+	json_dump
+}
+
 vermagic_of() { grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 | cut -d= -f2; }
 
 # 当前内核是否有对得上的驱动目录：目录名 == <krel> 或 <krel>+*，且 audio_reserve.ko 的
@@ -129,6 +170,25 @@ aud_probe() {
 	json_dump
 }
 
+# 读"检查更新"留下的缓存，把查到的最新 tag/ver/file 带出来（本身不联网）
+# 输出到 OPT_NEW_TAG / OPT_NEW_VER / OPT_NEW_FILE，缓存不存在或不可用时三者全空
+opt_override() {
+	OPT_NEW_TAG=; OPT_NEW_VER=; OPT_NEW_FILE=
+	_c=/usr/lib/airsim/opt-latest-$1
+	[ -f "$_c" ] || return 0
+	_val=$(
+		. "$_c" 2>/dev/null
+		[ "${ok:-0}" = 1 ] || exit 0
+		[ -n "${tag:-}" ] || exit 0
+		printf '%s|%s|%s' "${tag}" "${ver:-}" "${file:-}"
+	)
+	[ -n "$_val" ] || return 0
+	OPT_NEW_TAG=${_val%%|*}
+	_val=${_val#*|}
+	OPT_NEW_VER=${_val%%|*}
+	OPT_NEW_FILE=${_val#*|}
+}
+
 aud_install() {
 	case "$(aud_state)" in
 		download|verify|install)
@@ -169,7 +229,8 @@ aud_install() {
 	echo download > "$DIR/state"
 	echo '正在下载安装包' > "$DIR/msg"
 	(
-		sh "$RUN" > "$DIR/log" 2>&1 && echo idle > "$DIR/state" || echo failed > "$DIR/state"
+		AIRSIM_OPT_TAG=$OPT_LATEST_TAG AIRSIM_OPT_FILE=$OPT_LATEST_FILE \
+			sh "$RUN" > "$DIR/log" 2>&1 && echo idle > "$DIR/state" || echo failed > "$DIR/state"
 	) &
 
 	json_init
@@ -192,12 +253,13 @@ _out=$(sh /usr/libexec/airsim-postflash-check $_flags 2>/dev/null) || _out='{"ok
 
 case "$1" in
 	list)
-		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{},"selfcheck_run":{},"selfcheck_fix":{}}'
+		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{},"audio_opt_latest":{},"selfcheck_run":{},"selfcheck_fix":{}}'
 		;;
 	call)
 		case "$2" in
 			audio_opt_probe) aud_probe ;;
 			audio_opt_install) aud_install ;;
+			audio_opt_latest) audio_opt_latest ;;
 			selfcheck_run) sc_run ;;
 			selfcheck_fix) sc_run fix ;;
 		esac

@@ -1,7 +1,30 @@
 {
 	"luci-app-airsim-bt": {
 		"description": "Grant access to F50 bluetooth switch",
-		"read": { "ubus": { "airsim-bt": [ "bt_get", "bt_opt_probe", "bt_nearby", "bt_action_result", "bt_pair_pending" ] } },
-		"write": { "ubus": { "airsim-bt": [ "bt_set", "bt_opt_install", "bt_unpair", "bt_scan", "bt_pair", "bt_connect", "bt_pair_reply" ] } }
+		"read": {
+			"ubus": {
+				"airsim-bt": [
+					"bt_get",
+					"bt_opt_probe",
+					"bt_nearby",
+					"bt_action_result",
+					"bt_pair_pending",
+					"bt_opt_latest"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"airsim-bt": [
+					"bt_set",
+					"bt_opt_install",
+					"bt_unpair",
+					"bt_scan",
+					"bt_pair",
+					"bt_connect",
+					"bt_pair_reply"
+				]
+			}
+		}
 	}
 }
