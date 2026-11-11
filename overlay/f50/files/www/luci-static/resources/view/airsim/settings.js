@@ -73,12 +73,14 @@ return view.extend({
     ]),
     E('section', { 'class': 'as-card' }, [
      E('h3', {}, '关于'),
-     E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, 'AirSIM for F50 是装在中兴 UMS9620（展锐 marlin3，aarch64）这台随身 Wi-Fi 上的自编译插件。它把这台机器本来散在系统各处的东西收到一处：电话网关与客户端配对、上网通道切换、音频、蓝牙、短信，再加一个刷机后自检。'),
+     E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, 'AirSIM for F50 是装在中兴 UMS9620（展锐 marlin3，aarch64）这台随身 Wi-Fi 上的自编译插件。它把这台机器本来散在系统各处的东西收到一处：电话网关与客户端配对、上网通道切换、音频、蓝牙、短信，再加一个刷机后自检。界面层是一套统一的元件库，深浅两套玻璃材质跟着系统走。'),
      E('dl', { 'style': 'margin-top:10px' }, [
       E('div', { 'class': 'as-row' }, [E('dt', {}, '插件版本'), E('dd', {}, version)]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '产品'), E('dd', {}, 'AirSIM for F50')]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '机型'), E('dd', {}, '中兴 UMS9620 · 展锐 marlin3')]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '运行内核'), E('dd', {}, '主包不绑内核；5.4 / 6.18.60 / 7.3.1 都能跑，实际版本看「维护」页自检')]),
+      E('div', { 'class': 'as-row' }, [E('dt', {}, '上网页'), E('dd', {}, 'Wi-Fi 上行时用 wlan0 地址打开；手机流量模式下请走 USB 口，管理页不挂公网')]),
+      E('div', { 'class': 'as-row' }, [E('dt', {}, '界面'), E('dd', {}, '统一元件库 glass.js：卡片、开关、按钮、分段、列表、提示一套到底')]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '设备标识'), E('dd', {}, deviceId)]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '外观设置'), E('dd', {}, '仅保存在当前浏览器')])
      ]),
