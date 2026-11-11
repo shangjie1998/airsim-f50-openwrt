@@ -71,13 +71,18 @@ return view.extend({
     ]),
     E('section', { 'class': 'as-card' }, [
      E('h3', {}, '关于'),
+     E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, 'AirSIM for F50 是装在中兴 UMS9620（展锐 marlin3，aarch64）这台随身 Wi-Fi 上的自编译插件。它把这台机器本来散在系统各处的东西收到一处：电话网关与客户端配对、上网通道切换、音频、蓝牙、短信，再加一个刷机后自检。'),
      E('dl', { 'style': 'margin-top:10px' }, [
       E('div', { 'class': 'as-row' }, [E('dt', {}, '插件版本'), E('dd', {}, version)]),
-      E('div', { 'class': 'as-row' }, [E('dt', {}, '设备标识'), E('dd', {}, deviceId)]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '产品'), E('dd', {}, 'AirSIM for F50')]),
+      E('div', { 'class': 'as-row' }, [E('dt', {}, '机型'), E('dd', {}, '中兴 UMS9620 · 展锐 marlin3')]),
+      E('div', { 'class': 'as-row' }, [E('dt', {}, '运行内核'), E('dd', {}, '主包不绑内核；5.4 / 6.18.60 / 7.3.1 都能跑，实际版本看「维护」页自检')]),
+      E('div', { 'class': 'as-row' }, [E('dt', {}, '设备标识'), E('dd', {}, deviceId)]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '外观设置'), E('dd', {}, '仅保存在当前浏览器')])
      ]),
-     E('p', { 'class': 'as-caption', style: 'margin-top:12px' }, '换电脑或换浏览器，外观需要重新选一次；设备本身的状态不受影响。')
+     E('p', { 'class': 'as-caption', style: 'margin-top:12px' }, '换电脑或换浏览器，外观要重新选一次；设备本身的状态不受影响。'),
+     E('p', { 'class': 'as-caption' }, '这是第三方自编译系统上的插件，与厂商无关。改内核、刷机都有风险；每台机器都留了回退路径，具体命令写在仓库文档里。'),
+     E('p', { 'class': 'as-caption' }, '源码与发布：github.com/shangjie1998/airsim-f50-openwrt')
     ])
    ]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 设置')
