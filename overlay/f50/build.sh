@@ -1,6 +1,6 @@
 #!/bin/sh
 # 合成 src/ + overlay/f50/ 并交叉编出两个 arm64 二进制。
-# 版本号取仓库根的 VERSION（0.1.0.N-r23-6.18），不再用上游 src/plugin/VERSION，
+# 版本号取仓库根的 VERSION（0.1.0.N-r23-any），不再用上游 src/plugin/VERSION，
 # 页面「当前安装」与 Release tag 才对得上。
 # 用法: sh overlay/f50/build.sh [输出目录，默认 ./out/f50]
 set -eu

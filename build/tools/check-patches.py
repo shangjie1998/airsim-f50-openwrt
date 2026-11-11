@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """补丁体检：本地能不能干净打上 + 上游是不是已经自己做了。
 
-用法： python3 scripts/check-patches.py [-v]
+用法： python3 build/tools/check-patches.py [-v]
 读 overlay/f50/patches/manifest.tsv。退出码 1 表示有补丁打不上或上游已合并（构建前就该看）。
 """
 import subprocess
@@ -11,7 +11,7 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 PATCH_DIR = ROOT / "overlay/f50/patches"
 MANIFEST = PATCH_DIR / "manifest.tsv"
 RAW = "https://raw.githubusercontent.com/{repo}/main/{path}"
