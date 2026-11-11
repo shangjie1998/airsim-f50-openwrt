@@ -84,7 +84,7 @@ function install() {
 
 /* 页面统一用这个挂样式表，路径只写一次。
  * ui.css 改了要跟着改样式版本号，否则浏览器会一直吃旧缓存（这坑踩过两次）。 */
-var CSSVERSION = '20261113';
+var CSSVERSION = '20261113b';
 function stylesheet(name) {
  return E('link', { 'rel': 'stylesheet', 'href': L.resource('view/airsim/' + (name || 'ui.css')) + '?v=' + CSSVERSION });
 }

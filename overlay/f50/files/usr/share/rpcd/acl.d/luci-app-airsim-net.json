@@ -5,6 +5,7 @@
 			"ubus": {
 				"airsim-net": [
 					"probe",
+					"screen",
 					"status",
 					"wifi_scan",
 					"wifi_saved",

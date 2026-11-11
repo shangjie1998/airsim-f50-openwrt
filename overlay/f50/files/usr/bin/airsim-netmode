@@ -33,9 +33,17 @@ err() { printf '%s\n' "$*" >&2; }
 # 改成：探测脚本整份取回一次（它本就有 -p 一次给全部键），启动的 5 个键用一次 awk 全取，
 # 后面零星单键才走 p()。启动从 0.35 秒降到 0.1 秒出头。
 _PCACHE=
+_PCACHE_MINE=
 _pc_load() {
 	[ -n "$_PCACHE" ] && return 0
+	# 调用方（比如 airsim-net 的 screen 方法）已经有探测结果时直接用，别为了几个键再 fork 一次
+	if [ -n "${AIR_SIM_PROBE_CACHE:-}" ] && [ -s "$AIR_SIM_PROBE_CACHE" ]; then
+		_PCACHE=$AIR_SIM_PROBE_CACHE
+		_PCACHE_MINE=0
+		return 0
+	fi
 	_PCACHE=$(mktemp /tmp/.airsim-probe.XXXXXX 2>/dev/null) || _PCACHE=/tmp/.airsim-probe.$$
+	_PCACHE_MINE=1
 	"$PROBE" -p >"$_PCACHE" 2>/dev/null || : >"$_PCACHE"
 }
 p() {
@@ -50,7 +58,7 @@ p_many() {
 		{ for (i = 1; i <= n; i++) if ($1 == a[i]) { sub(/^[^=]*=/, ""); v[i] = $0 } }
 		END { for (i = 1; i <= n; i++) print v[i] }' "$_PCACHE" 2>/dev/null
 }
-trap '[ -n "$_PCACHE" ] && rm -f "$_PCACHE"' EXIT INT TERM HUP
+trap '[ -n "$_PCACHE_MINE" ] && [ "$_PCACHE_MINE" = 1 ] && rm -f "$_PCACHE"' EXIT INT TERM HUP
 
 { IFS= read -r RADIO; IFS= read -r STA; IFS= read -r AP; IFS= read -r AP_IF; IFS= read -r CELL_IF; } <<EOF
 $(p_many 'radio,sta_section,ap_section,ap_if,cell_if')
@@ -140,14 +148,22 @@ sta_ssid() {
 # ---- 自检：Wi-Fi 模式要求「有 IP + 默认路由在 STA 口」 ----
 # 实测：reload 之后关联 8~15 秒，DHCP 再要几秒，16 秒窗口太紧（第一次就是
 # 卡在这儿误判失败），这里放到 30 秒，并且一旦「关联上且有 IP」就继续等路由。
+# 某张网卡上有没有默认路由（可能同时存在两条：切 Wi-Fi 的那段时间蜂窝还没断）
+has_default_on() {
+	ip route 2>/dev/null | awk -v d="$1" '
+		$1 == "default" { for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == d) found = 1 }
+		END { exit found ? 0 : 1 }'
+}
+
 check_wifi() {
-	local i ip dev ssid
+	local i ip ssid
 	i=0
 	while [ "$i" -lt 30 ]; do
 		ip=$(if_ip "$AP_IF")
-		dev=$(route_dev)
 		ssid=$(sta_ssid)
-		if [ -n "$ip" ] && [ "$dev" = "$AP_IF" ]; then return 0; fi
+		# 判「Wi-Fi 有默认路由」时不能看全局第一条 default —— 切换过程中蜂窝那条还在，
+		# 2026-11-11 真机就栽在这：Wi-Fi 明明连上并拿到 192.168.50.230，自检却判失败回滚。
+		if [ -n "$ip" ] && has_default_on "$AP_IF"; then return 0; fi
 		# 关联已建立但还没拿到地址/路由，再等，别急着判死
 		if [ -n "$ssid" ] && [ "$i" -lt 25 ]; then sleep 1; i=$((i + 1)); continue; fi
 		sleep 1; i=$((i + 1))
@@ -157,11 +173,10 @@ check_wifi() {
 
 # ---- 自检：蜂窝模式要求默认路由落在蜂窝网卡 ----
 check_cell() {
-	local i dev
+	local i
 	i=0
 	while [ "$i" -lt 10 ]; do
-		dev=$(route_dev)
-		if [ "$dev" = "$CELL_IF" ]; then return 0; fi
+		has_default_on "$CELL_IF" && return 0
 		sleep 1; i=$((i + 1))
 	done
 	return 1
@@ -245,6 +260,12 @@ do_wifi() {
 		/opt/mu300/bin/mobile-data down >/dev/null 2>&1 || true
 		ip -4 route del default dev "$CELL_IF" >/dev/null 2>&1 || true
 		if ! data_bearer_off; then rollback; fi
+	fi
+	# 光把 wan 置 disabled 不一定会立刻摘掉那条默认路由（2026-11-11 真机就是两条同时存在，
+	# 蜂窝那条 metric 更小、一直抢着出口）。这里把残留在蜂窝口的默认路由清掉，再确认出口唯一。
+	if has_default_on "$CELL_IF"; then
+		ip -4 route del default dev "$CELL_IF" >/dev/null 2>&1 || true
+		[ "$(ip route 2>/dev/null | grep -c '^default')" = 1 ] || err '提示：除了 Wi-Fi 还有一条默认路由，稍后可能又走回蜂窝'
 	fi
 	say 'Wi-Fi 模式已就绪（出口走 Wi-Fi，蜂窝数据已断，电话短信不受影响）'
 	return 0

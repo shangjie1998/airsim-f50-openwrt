@@ -3,6 +3,7 @@
 'require rpc';
 'require poll';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 var getStatus = rpc.declare({ object: 'airsim', method: 'status', expect: {} });
 var callAction = rpc.declare({ object: 'airsim', method: 'call_action', params: ['action', 'number', 'call_id', 'operation_id', 'card'], expect: {}, reject: true, nobatch: true });
@@ -375,6 +376,7 @@ return view.extend({
   var batteryRow = row('设备电量', 'battery');
   root = E('div', { 'class': 'as-root' }, [
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    (ui.menu ? ui.menu('overview') : ''),
    E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · F50 控制台'), E('h2', {}, '这台 F50，先在这一页看清楚。'), E('p', {}, '运行状态、起停电话网关、配对新客户端都在这一页。换上网通道去「联网」，音频、蓝牙、短信、维护各自一页。哪项看着不对劲，先去「维护」跑一遍自检 —— 它会告诉你是真坏了还是只是没开。')]), text('version', 'span', 'as-version')]),
    E('div', { 'class': 'as-layout' }, [

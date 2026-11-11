@@ -2,6 +2,7 @@
 'require view';
 'require rpc';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 /* 蓝牙独立页：从「外观与设置」里拎出来的，放在它后面。
  * 这一页只跟 airsim-bt 打交道，机型差异全在设备上的 /etc/config/f50-bt。
@@ -405,6 +406,7 @@ return view.extend({
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('bluetooth') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [
      E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 蓝牙'),
