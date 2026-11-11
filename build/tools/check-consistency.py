@@ -7,12 +7,15 @@
   2. AGENT-VERSION 必须由 VERSION 派生（0.4.7-mu300.<VERSION>）
   3. 音频配件包版本：parts/audio/AUDIO-OPT-VERSION  ==  rpcd 里 TAG/FILE 的版本
   4. 内核口径文档存在（docs/内核矩阵.md），避免有人把它删了还照旧引用
+  5. out/f50 里两个二进制内嵌的版本串 == VERSION / AGENT-VERSION
+     （这一项防的是「VERSION 升了、二进制没重编就打包」，包发出去标签和内容对不上）
 
 用法：python3 build/tools/check-consistency.py
 退出码：0 一致；1 有冲突（make-package.sh 会据此拒绝打包）
 """
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
@@ -86,6 +89,35 @@ else:
 # 4) 内核口径单一来源必须在
 if not os.path.exists(os.path.join(ROOT, 'docs', '内核矩阵.md')):
     problems.append('docs/内核矩阵.md 不见了 —— 它是内核支持的唯一口径，删了别处引用就全散')
+
+
+# 5) 二进制内嵌版本：防「VERSION 升了但 out/f50 还是旧产物就打包」
+#    版本串是 build.sh 用 -ldflags -X main.version=<VERSION> 注进去的，
+#    所以包里的二进制必然要含当前 VERSION，否则就是拿旧产物糊了张新标签。
+BINS = [('out/f50/airsim-mu300d', ver), ('out/f50/airsim-agent', agent)]
+
+
+def strings_of(path):
+    """取二进制的可打印串：优先 strings（mac/linux 都有），没有就裸解 latin-1 兜底。"""
+    try:
+        r = subprocess.run(['strings', path], capture_output=True, check=True)
+        return r.stdout
+    except Exception:
+        with open(path, 'rb') as f:
+            return f.read()
+
+
+for rel, want in BINS:
+    path = os.path.join(ROOT, rel)
+    name = os.path.basename(rel)
+    if not os.path.exists(path):
+        problems.append(f'{rel} 不存在 —— 先跑 sh overlay/f50/build.sh out/f50 再打包')
+        continue
+    if not want:
+        continue
+    if want.encode() not in strings_of(path):
+        got = sorted({m.decode() for m in re.findall(rb'0\.(?:1\.0\.|4\.7-mu300\.)[0-9]+-r\d\d-[a-z0-9.]+', strings_of(path))})
+        problems.append(f'{name} 内嵌版本不含「{want}」{("，里面是：" + "、".join(got)) if got else ""} —— VERSION 升了但二进制没重编，先跑 overlay/f50/build.sh')
 
 if problems:
     print('!! 一致性检查没过：', file=sys.stderr)
