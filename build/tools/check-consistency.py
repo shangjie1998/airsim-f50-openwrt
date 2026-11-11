@@ -56,6 +56,33 @@ else:
     if fle.group(1) != aopt:
         problems.append(f'配件包版本打架：AUDIO-OPT-VERSION={aopt}，但 rpcd FILE 指向 {fle.group(1)}')
 
+# 3b) 蓝牙配件包版本：同一个套路，仓库真值 vs 设备侧 rpcd
+btopt = read('parts/bluetooth/BT-OPT-VERSION') or ''
+btrpcd = read('overlay/f50/files/usr/libexec/rpcd/airsim-bt') or ''
+btag = re.search(r'^BT_OPT_TAG=bt-opt-v(\d+\.\d+\.\d+)', btrpcd, re.M)
+bfle = re.search(r'^BT_OPT_FILE=airsim-f50-bt-opt-(\d+\.\d+\.\d+)-', btrpcd, re.M)
+if not btopt:
+    problems.append('parts/bluetooth/BT-OPT-VERSION 不存在或为空')
+if not btag or not bfle:
+    problems.append('rpcd/airsim-bt 里没找到 BT_OPT_TAG=bt-opt-vX.Y.Z 或 BT_OPT_FILE=...-X.Y.Z-...')
+else:
+    if btag.group(1) != btopt:
+        problems.append(f'蓝牙配件包版本打架：BT-OPT-VERSION={btopt}，但 rpcd TAG 指向 {btag.group(1)}')
+    if bfle.group(1) != btopt:
+        problems.append(f'蓝牙配件包版本打架：BT-OPT-VERSION={btopt}，但 rpcd FILE 指向 {bfle.group(1)}')
+
+# 3c) 音频件数：设备侧 WANT_KO 必须等于 module-list.txt 里的 .ko 行数
+modlist = read('parts/audio/module-list.txt') or ''
+want = re.search(r'^WANT_KO=(\d+)', rpcd, re.M)
+if not modlist:
+    problems.append('parts/audio/module-list.txt 不存在')
+elif not want:
+    problems.append('rpcd/airsim-audio 里没找到 WANT_KO=NN')
+else:
+    real = sum(1 for ln in modlist.splitlines() if ln.strip().endswith('.ko'))
+    if int(want.group(1)) != real:
+        problems.append(f'音频件数打架：rpcd WANT_KO={want.group(1)}，但 module-list.txt 有 {real} 个 .ko')
+
 # 4) 内核口径单一来源必须在
 if not os.path.exists(os.path.join(ROOT, 'docs', '内核矩阵.md')):
     problems.append('docs/内核矩阵.md 不见了 —— 它是内核支持的唯一口径，删了别处引用就全散')
