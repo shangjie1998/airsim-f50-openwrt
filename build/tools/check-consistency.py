@@ -7,7 +7,8 @@
   2. AGENT-VERSION 必须由 VERSION 派生（0.4.7-mu300.<VERSION>）
   3. 音频配件包版本：parts/audio/AUDIO-OPT-VERSION  ==  rpcd 里 TAG/FILE 的版本
   4. 内核口径文档存在（docs/内核矩阵.md），避免有人把它删了还照旧引用
-  5. out/f50 里两个二进制内嵌的版本串 == VERSION / AGENT-VERSION
+  5. 音频配件包的内核档位三处一致：下载器 OPT_KERNELS == rpcd OPT_KERNELS == parts/audio/payload 目录
+  6. out/f50 里两个二进制内嵌的版本串 == VERSION / AGENT-VERSION
      （这一项防的是「VERSION 升了、二进制没重编就打包」，包发出去标签和内容对不上）
 
 用法：python3 build/tools/check-consistency.py
@@ -118,6 +119,25 @@ for rel, want in BINS:
     if want.encode() not in strings_of(path):
         got = sorted({m.decode() for m in re.findall(rb'0\.(?:1\.0\.|4\.7-mu300\.)[0-9]+-r\d\d-[a-z0-9.]+', strings_of(path))})
         problems.append(f'{name} 内嵌版本不含「{want}」{("，里面是：" + "、".join(got)) if got else ""} —— VERSION 升了但二进制没重编，先跑 overlay/f50/build.sh')
+
+
+# 5b) 音频配件包内核档位：下载器白名单 / rpcd 探测口径 / 实际打包好的 payload 目录，三处必须同一份
+downloader = read('overlay/f50/files/usr/libexec/airsim-audioopt-install') or ''
+dl_ok = re.search(r'AIRSIM_OPT_KERNELS:-"([^"]+)"', downloader)
+rpcd_ok = re.search(r'^OPT_KERNELS="([^"]*)"', rpcd, re.M)
+payload_dir = os.path.join(ROOT, 'parts', 'audio', 'payload')
+payloads = sorted(d for d in os.listdir(payload_dir) if os.path.isdir(os.path.join(payload_dir, d))) if os.path.isdir(payload_dir) else []
+if not dl_ok:
+    problems.append('airsim-audioopt-install 里没找到 OPT_KERNELS 白名单（AIRSIM_OPT_KERNELS:-"..."）')
+elif not rpcd_ok:
+    problems.append('rpcd/airsim-audio 里没找到 OPT_KERNELS="..."')
+else:
+    dl = sorted(dl_ok.group(1).split())
+    rc = sorted(rpcd_ok.group(1).split())
+    if dl != rc:
+        problems.append(f'音频档位打架：下载器给 {" ".join(dl)}，rpcd 探测口径给 {" ".join(rc)}')
+    if payloads and sorted(payloads) != dl:
+        problems.append(f'音频档位打架：白名单 {" ".join(dl)}，但 parts/audio/payload 里只有 {" ".join(payloads)}')
 
 if problems:
     print('!! 一致性检查没过：', file=sys.stderr)
