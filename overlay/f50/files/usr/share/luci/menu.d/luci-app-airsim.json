@@ -2,47 +2,136 @@
  "admin/services/airsim": {
   "title": "AirSIM",
   "order": 55,
-  "action": {"type": "firstchild"},
-  "depends": {"acl": ["luci-app-airsim"]}
+  "action": {
+   "type": "firstchild"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim"
+   ]
+  }
  },
  "admin/services/airsim/overview": {
-  "title": "设备概览", "order": 10,
-  "action": {"type": "view", "path": "airsim/overview"},
-  "depends": {"acl": ["luci-app-airsim"]}
+  "title": "设备概览",
+  "order": 10,
+  "action": {
+   "type": "view",
+   "path": "airsim/overview"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim"
+   ]
+  }
  },
  "admin/services/airsim/connect": {
-  "title": "连接", "order": 15,
-  "action": {"type": "view", "path": "airsim/connect"},
-  "depends": {"acl": ["luci-app-airsim"]}
+  "title": "连接",
+  "order": 15,
+  "action": {
+   "type": "view",
+   "path": "airsim/connect"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim"
+   ]
+  }
  },
  "admin/services/airsim/net": {
-  "title": "联网", "order": 17,
-  "action": {"type": "view", "path": "airsim/net"},
-  "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-net"]}
+  "title": "联网",
+  "order": 17,
+  "action": {
+   "type": "view",
+   "path": "airsim/net"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim",
+    "luci-app-airsim-net"
+   ]
+  }
  },
  "admin/services/airsim/call": {
-  "title": "来电转发", "order": 25,
-  "action": {"type": "view", "path": "airsim/call"},
-  "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-call"]}
+  "title": "来电转发",
+  "order": 25,
+  "action": {
+   "type": "view",
+   "path": "airsim/call"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim",
+    "luci-app-airsim-call"
+   ]
+  }
  },
  "admin/services/airsim/sms": {
-  "title": "短信", "order": 35,
-  "action": {"type": "view", "path": "airsim/sms"},
-  "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-sms"]}
+  "title": "短信",
+  "order": 35,
+  "action": {
+   "type": "view",
+   "path": "airsim/sms"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim",
+    "luci-app-airsim-sms"
+   ]
+  }
  },
  "admin/services/airsim/maintenance": {
-  "title": "维护", "order": 40,
-  "action": {"type": "view", "path": "airsim/maintenance"},
-  "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-backup"]}
+  "title": "维护",
+  "order": 40,
+  "action": {
+   "type": "view",
+   "path": "airsim/maintenance"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim",
+    "luci-app-airsim-backup"
+   ]
+  }
  },
  "admin/services/airsim/settings": {
-  "title": "外观与设置", "order": 50,
-  "action": {"type": "view", "path": "airsim/settings"},
-  "depends": {"acl": ["luci-app-airsim"]}
+  "title": "外观与设置",
+  "order": 50,
+  "action": {
+   "type": "view",
+   "path": "airsim/settings"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim"
+   ]
+  }
  },
  "admin/services/airsim/bluetooth": {
-  "title": "蓝牙", "order": 55,
-  "action": {"type": "view", "path": "airsim/bluetooth"},
-  "depends": {"acl": ["luci-app-airsim", "luci-app-airsim-bt"]}
+  "title": "蓝牙",
+  "order": 55,
+  "action": {
+   "type": "view",
+   "path": "airsim/bluetooth"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim",
+    "luci-app-airsim-bt"
+   ]
+  }
+ },
+ "admin/services/airsim/audio": {
+  "title": "音频",
+  "order": 56,
+  "action": {
+   "type": "view",
+   "path": "airsim/audio"
+  },
+  "depends": {
+   "acl": [
+    "luci-app-airsim",
+    "luci-app-airsim-audio"
+   ]
+  }
  }
 }
