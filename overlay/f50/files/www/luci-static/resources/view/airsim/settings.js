@@ -2,6 +2,7 @@
 'require view';
 'require rpc';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 var getStatus = rpc.declare({ object: 'airsim', method: 'status', expect: {} });
 
@@ -49,6 +50,7 @@ return view.extend({
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('settings') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 设置'), E('h2', {}, '按你的习惯来。'), E('p', {}, '外观与显示偏好，只影响这台设备的网页界面。')]),
     E('span', { 'class': 'as-version' }, version)

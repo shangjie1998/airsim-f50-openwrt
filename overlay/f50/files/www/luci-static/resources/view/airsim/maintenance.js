@@ -3,6 +3,7 @@
 'require poll';
 'require rpc';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 var getStatus = rpc.declare({ object: 'airsim', method: 'status', expect: {}, reject: true });
 var getDiagnostics = rpc.declare({ object: 'airsim', method: 'diagnostics', expect: {}, reject: true });
@@ -518,6 +519,7 @@ return view.extend({
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('maintenance') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 维护'), E('h2', {}, '备份、更新、诊断。'), E('p', {}, '折腾完想回退的时候，这里能救回来。')]),
     E('span', { 'class': 'as-version' }, 'v' + (state.version || '—'))

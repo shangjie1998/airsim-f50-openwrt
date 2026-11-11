@@ -3,6 +3,7 @@
 'require poll';
 'require rpc';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 var getSettings = rpc.declare({ object: 'airsim', method: 'settings_get', expect: {}, reject: true });
 var getStatus = rpc.declare({ object: 'airsim', method: 'status', expect: {}, reject: true });
@@ -152,6 +153,7 @@ return view.extend({
   var rootEl = E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('connect') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 连接'), E('h2', {}, '连接方式，自己定。'), E('p', {}, '只管 F50 这一侧，不动 AirSIM 客户端。')]),
     E('span', { 'class': 'as-version' }, 'v' + config.version)

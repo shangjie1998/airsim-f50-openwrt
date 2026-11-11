@@ -3,6 +3,7 @@
 'require rpc';
 'require poll';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 // Use the firmware's two-SIM inbox and its per-card submit path, never the Agent's
 // text-mode SMS API: the Agent relays AT through mmcli and only ever sees the
@@ -297,6 +298,7 @@ return view.extend({
   var rootEl = E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('sms') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 短信'), E('h2', {}, multiSim ? '短信，两张卡一页管。' : '短信，一页管好。'), E('p', {}, multiSim ? '查看、标记已读、清空与发送 F50 两张 SIM 卡的短信。' : '查看、标记已读、清空与发送本机 SIM 卡的短信。')]),
     E('span', { 'class': 'as-version' }, state && state.version ? 'v' + state.version : '')

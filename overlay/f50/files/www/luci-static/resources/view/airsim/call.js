@@ -3,6 +3,7 @@
 'require poll';
 'require rpc';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 /* 来电通知：跟短信转发共用一条投递渠道，不碰 modem。
  * 页面自己渲染，不再依赖设备上的 vendor 共享模块（mu300.common）。 */
@@ -110,6 +111,7 @@ return view.extend({
   var root = E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('call') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 来电通知'), E('h2', {}, '来电话，第一时间知道。'), E('p', {}, '来电、接通、挂断、漏接，按你选的渠道推出去。')]),
     statePill

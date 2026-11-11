@@ -2,6 +2,7 @@
 'require view';
 'require rpc';
 'require view.airsim.ui as ui';
+'require view.airsim.glass as glass';
 
 /* 音频独立页：配件包 + 刷机后自检 + 切换内核三件事放一起。
  * 只跟 airsim-audio 打交道；没装音频接口的机器上这一页直接说清楚为什么是空的。
@@ -252,6 +253,7 @@ return view.extend({
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('audio') : ''),
    ui.stylesheet(),
+   E('style', {}, glass.css()),
    E('header', { 'class': 'as-header' }, [
     E('div', {}, [
      E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 音频'),
