@@ -97,6 +97,7 @@ function stylesheet(name) {
 var PAGES = [
  { id: 'overview',    title: '设备概览' },
  { id: 'connect',     title: '连接' },
+ { id: 'net',         title: '联网' },
  { id: 'call',        title: '来电转发' },
  { id: 'sms',         title: '短信' },
  { id: 'maintenance', title: '维护' },
