@@ -62,8 +62,9 @@ chmod 755 "$STAGE/install.sh" "$STAGE/uninstall.sh"
 	printf 'upstream=kai-wu-cortex/airsim-mu300 @ v0.1.0-r23 (pre-release)\n'
 	printf 'agent_version=%s\n' "$AGENT"
 	printf 'rebrand=只改显示文案(AirSIM F50)；agent_kind 仍是 mu300\n'
-	printf 'kernel_required=6.18.60（5.4 线已冻结，本包不适用）\n'
-	printf 'audio_modules=/mnt/mu300-disk/extra/airsim-audio/modules/6.18.60/\n'
+	printf 'kernel=any (aarch64)；主体不绑内核，Go 静态件 + 纯脚本页面\n'
+	printf 'kernel_known=5.4.254（主体可跑、语音不可用）/ 6.18.60（语音看配件包）/ 7.3.1（语音看配件包）\n'
+	printf 'audio_modules=/mnt/mu300-disk/extra/airsim-audio/modules/<uname -r>/（由音频配件包按内核落地，主包不带模块）\n'
 	printf 'scope=脚本+页面+二进制，不改内核、不改启动镜像\n'
 	printf 'dual_sim=双卡逻辑全留，按 sms_sims 数组长度>1 自动显示；F50 单卡自动隐藏\n'
 	printf 'install_note=覆盖 /usr/lib/airsim、/usr/libexec/rpcd、/www/luci-static/resources/view/airsim、/etc，装前备份到 /usr/lib/airsim/backup-<VER>\n'

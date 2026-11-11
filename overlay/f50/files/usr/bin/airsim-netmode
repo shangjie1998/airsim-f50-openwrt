@@ -1,0 +1,285 @@
+#!/usr/bin/env sh
+# AirSIM 上网通道切换（接口版，可被页面 / ubus / 命令行/ 定时任务调用）
+#
+# 模式指纹（判断当前模式的唯一依据，跟作者那份 netmode 完全一致）：
+#   cell = (wan 0, ap 1, sta 1)   走蜂窝，Wi-Fi 全关
+#   wifi = (wan 1, ap 1, sta 0)   连外部 Wi-Fi 上网，热点与蜂窝都关
+#   ap   = (wan 0, ap 0, sta 1)   自带热点，蜂窝供网
+#
+# 用法：
+#   airsim-netmode status            人读的一行摘要
+#   airsim-netmode status --json     机器读（页面用）
+#   airsim-netmode cell|wifi|ap      切模式（会自检，失败自动回滚）
+#   airsim-netmode restore           按切走前记下的基线恢复
+#   airsim-netmode --check           只做能力探测（等同 airsim-net-probe -p）
+#
+# 退出码：0 成功 / 1 参数或环境错误 / 3 管理口结构不符预期（拒绝执行）
+#         4 还没配过 Wi-Fi / 5 自检没过已回滚 / 6 用法错误
+#
+# 硬约束：只动 wireless 的 ap0、wwan0 与 network 的 wan、wwan；
+#         绝不动 lan / br-lan / usb0 —— 管理口 192.168.77.1 永远在。
+set -u
+
+PROBE=${AIR_SIM_PROBE:-/usr/libexec/airsim-net-probe}
+[ -x "$PROBE" ] || PROBE=$(dirname "$0")/airsim-net-probe
+
+say() { printf '%s\n' "$*"; }
+err() { printf '%s\n' "$*" >&2; }
+
+p() { "$PROBE" -k "$1" 2>/dev/null; }
+
+RADIO=$(p radio);        [ -n "$RADIO" ] || RADIO=radio0
+STA=$(p sta_section);    [ -n "$STA" ] || STA=wwan0
+AP=$(p ap_section);      [ -n "$AP" ] || AP=ap0
+AP_IF=$(p ap_if);        [ -n "$AP_IF" ] || AP_IF=wlan0
+CELL_IF=$(p cell_if);    [ -n "$CELL_IF" ] || CELL_IF=sipa_eth0
+
+wan_dis()  { uci -q get network.wan.disabled 2>/dev/null; }
+ap_dis()   { uci -q get wireless.$AP.disabled 2>/dev/null; }
+sta_dis()  { uci -q get wireless.$STA.disabled 2>/dev/null; }
+
+norm() { [ "${1:-0}" = 0 ] && echo 0 || echo 1; }
+
+# 当前模式：严格按三个值判，判不出来就是 unknown
+cur_mode() {
+	local w a s
+	w=$(norm "$(wan_dis)"); a=$(norm "$(ap_dis)"); s=$(norm "$(sta_dis)")
+	case "$w$a$s" in
+		011) echo cell ;;
+		110) echo wifi ;;
+		001) echo ap ;;
+		011 | 110) echo wifi ;;
+		*) echo unknown ;;
+	esac
+}
+
+# 管理口结构守门：不符合就不许切，防止把管理地址搞丢
+guard() {
+	if [ "$(p lan_ok)" != 1 ]; then
+		err "拒绝执行：管理口结构与预期不符（lan 地址 $(p lan_ip)，br-lan 端口 $(p br_ports)）"
+		err '预期是 lan=192.168.77.1、br-lan 只含 usb0。请先人工核对，避免切换后 USB 管理口失联。'
+		exit 3
+	fi
+	[ "$(p single_radio)" = 1 ] || err '提示：本机不是单射频，热点与 Wi-Fi 可以同时存在，本脚本仍按互斥处理'
+}
+
+# ---- 基线：切走前记下原始状态，用于 restore / 失败回滚 ----
+save_base() {
+	uci -q set airsim.netmode=netmode >/dev/null 2>&1 || true
+	uci -q set airsim.netmode.prev_wan="$(norm "$(wan_dis)")" >/dev/null 2>&1
+	uci -q set airsim.netmode.prev_ap="$(norm "$(ap_dis)")" >/dev/null 2>&1
+	uci -q set airsim.netmode.prev_sta="$(norm "$(sta_dis)")" >/dev/null 2>&1
+	uci -q set airsim.netmode.from_mode="$(cur_mode)" >/dev/null 2>&1
+	uci -q set airsim.netmode.saved_at="$(date +%s 2>/dev/null || echo 0)" >/dev/null 2>&1
+	uci -q commit airsim >/dev/null 2>&1 || true
+}
+
+base_get() { uci -q get airsim.netmode.$1 2>/dev/null; }
+
+# ---- 底层动作：只碰这四个开关 ----
+set_wan() {
+	uci -q set network.wan.disabled="$1"
+	uci -q commit network
+	if [ "$1" = 0 ]; then ifup wan >/dev/null 2>&1 || true; else ifdown wan >/dev/null 2>&1 || true; fi
+}
+
+set_ap() {
+	uci -q set wireless.$AP.disabled="$1"
+	uci -q commit wireless
+}
+
+set_sta() {
+	uci -q set wireless.$STA.disabled="$1"
+	uci -q commit wireless
+}
+
+wifi_reload() { wifi reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true; }
+
+# 默认路由落在哪个网卡上（空 = 没有默认路由）
+route_dev() {
+	ip route 2>/dev/null | awk '$1 == "default" { for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+
+# 某个接口的 IPv4 地址（不带前缀）
+if_ip() {
+	ip -4 addr show "$1" 2>/dev/null | awk '/^[[:space:]]*inet /{ sub(/\/.*/, "", $2); print $2; exit }'
+}
+
+# STA 当前关联的 SSID（可能含空格，按到行尾取）
+sta_ssid() {
+	iw dev "$AP_IF" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | head -1
+}
+
+# ---- 自检：Wi-Fi 模式要求「有 IP + 默认路由在 STA 口」 ----
+# 实测：reload 之后关联 8~15 秒，DHCP 再要几秒，16 秒窗口太紧（第一次就是
+# 卡在这儿误判失败），这里放到 30 秒，并且一旦「关联上且有 IP」就继续等路由。
+check_wifi() {
+	local i ip dev ssid
+	i=0
+	while [ "$i" -lt 30 ]; do
+		ip=$(if_ip "$AP_IF")
+		dev=$(route_dev)
+		ssid=$(sta_ssid)
+		if [ -n "$ip" ] && [ "$dev" = "$AP_IF" ]; then return 0; fi
+		# 关联已建立但还没拿到地址/路由，再等，别急着判死
+		if [ -n "$ssid" ] && [ "$i" -lt 25 ]; then sleep 1; i=$((i + 1)); continue; fi
+		sleep 1; i=$((i + 1))
+	done
+	return 1
+}
+
+# ---- 自检：蜂窝模式要求默认路由落在蜂窝网卡 ----
+check_cell() {
+	local i dev
+	i=0
+	while [ "$i" -lt 10 ]; do
+		dev=$(route_dev)
+		if [ "$dev" = "$CELL_IF" ]; then return 0; fi
+		sleep 1; i=$((i + 1))
+	done
+	return 1
+}
+
+# ---- 专项：蜂窝用户数据承载必须为 0（cid1）；IMS 等专用 cid 保留是正常的 ----
+data_bearer_off() {
+	command -v mu300-at >/dev/null 2>&1 || return 0
+	local out
+	out=$(mu300-at 'AT+CGACT?' 2>/dev/null | tr -d '\r')
+	case "$out" in
+		*+CGACT:1,1*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+rollback() {
+	local pw pa ps ok
+	pw=$(base_get prev_wan); pa=$(base_get prev_ap); ps=$(base_get prev_sta)
+	[ -n "$pw" ] || pw=0
+	[ -n "$pa" ] || pa=1
+	[ -n "$ps" ] || ps=1
+	err "自检没过，正在回滚到切换前（wan=$pw ap=$pa sta=$ps）"
+	set_ap "$pa"; set_sta "$ps"; wifi_reload
+	[ "$ps" = 0 ] && ifup wwan >/dev/null 2>&1
+	set_wan "$pw"
+	# 回滚本身也要等，别刚发完 ifup 就退出，留下「没有默认路由」的空档
+	ok=0
+	if [ "$pw" = 0 ]; then check_cell && ok=1; fi
+	if [ "$ps" = 0 ]; then check_wifi && ok=1; fi
+	if [ "$ok" = 1 ]; then
+		err '已回滚到切换前状态'
+	else
+		err '回滚后仍没恢复默认路由：USB 管理口不受影响，但可能暂时上不了网。请进页面手动选一次模式。'
+	fi
+	exit 5
+}
+
+do_cell() {
+	guard
+	case "$(cur_mode)" in cell) say '已经是蜂窝模式，无需切换'; return 0 ;; esac
+	save_base
+	say '正在切到蜂窝：先关热点与外部 Wi-Fi，再拨号'
+	set_ap 1
+	set_sta 1
+	wifi_reload
+	set_wan 0
+	if check_cell; then
+		say '蜂窝模式已就绪（默认路由在蜂窝网卡）'
+		return 0
+	fi
+	# 网卡没起来时给一次更宽松的判定：接口 up 且拿到地址就算
+	if [ "$(p wan_proto)" = mu300cell ] && ip -4 addr show "$CELL_IF" 2>/dev/null | grep -q 'inet '; then
+		say '蜂窝已拨上（默认路由暂未落到蜂窝，通常是刚拨完还没稳定，稍等再看）'
+		return 0
+	fi
+	rollback
+}
+
+do_wifi() {
+	guard
+	case "$(cur_mode)" in wifi) say '已经是 Wi-Fi 模式，无需切换'; return 0 ;; esac
+	[ -n "$(uci -q get wireless.$STA.ssid 2>/dev/null)" ] || { err '还没配置过 Wi-Fi：请先在「联网」页选一个网络并输入密码'; exit 4; }
+	save_base
+	say '正在切到 Wi-Fi：先把外部 Wi-Fi 连起来，连上之后再断蜂窝（反着来会先丢网）'
+	# 注：radio0 的 noscan 只管热点（hostapd 不做信道外扫描），实测对 STA 扫描与
+	# 关联毫无影响，所以这里一个字都不动它 —— 保持机器原始配置。
+	set_sta 0
+	set_ap 1
+	wifi_reload
+	ifup wwan >/dev/null 2>&1 || true   # 催一下 DHCP，别干等
+	if ! check_wifi; then
+		err '外部 Wi-Fi 没连上（无 IP 或默认路由没落到无线口）'
+		rollback
+	fi
+	say 'Wi-Fi 已连上，现在断开蜂窝数据'
+	set_wan 1
+	if ! data_bearer_off; then
+		err '蜂窝用户数据承载（cid1）还在，没断干净'
+		# 补一脚厂商的 down，再确认一次
+		/opt/mu300/bin/mobile-data down >/dev/null 2>&1 || true
+		ip -4 route del default dev "$CELL_IF" >/dev/null 2>&1 || true
+		if ! data_bearer_off; then rollback; fi
+	fi
+	say 'Wi-Fi 模式已就绪（出口走 Wi-Fi，蜂窝数据已断，电话短信不受影响）'
+	return 0
+}
+
+do_ap() {
+	guard
+	case "$(cur_mode)" in ap) say '已经是热点模式，无需切换'; return 0 ;; esac
+	save_base
+	say '正在切到热点：先恢复蜂窝供网，再开热点'
+	set_sta 1
+	wifi_reload
+	set_wan 0
+	check_cell >/dev/null 2>&1 || err '提示：蜂窝还没完全就绪，热点开起来后可能暂时上不了网'
+	set_ap 0
+	wifi_reload
+	say '热点模式已就绪'
+	return 0
+}
+
+do_restore() {
+	guard
+	local pw pa ps
+	pw=$(base_get prev_wan); pa=$(base_get prev_ap); ps=$(base_get prev_sta)
+	if [ -z "$pw$pa$ps" ]; then err '没有可恢复的基线（还没切过模式）'; exit 1; fi
+	say "按基线恢复：wan=$pw ap=$pa sta=$ps"
+	set_sta "$ps"; set_ap "$pa"; wifi_reload
+	set_wan "$pw"
+	if [ "$pw" = 0 ]; then
+		say '已恢复蜂窝供网'
+	else
+		say '已恢复为流量关闭状态'
+	fi
+	return 0
+}
+
+do_status() {
+	local w a s m dev ssid ip
+	w=$(norm "$(wan_dis)"); a=$(norm "$(ap_dis)"); s=$(norm "$(sta_dis)")
+	m=$(cur_mode)
+	dev=$(route_dev)
+	ssid=$(sta_ssid)
+	ip=$(if_ip "$AP_IF")
+	if [ "${1:-}" = '--json' ]; then
+		_J() { [ "$1" = 1 ] && printf true || printf false; }
+		printf '{"mode":"%s","wan_disabled":"%s","ap_disabled":"%s","sta_disabled":"%s","route_dev":"%s","sta_ssid":"%s","sta_ip":"%s","has_base":%s,"single_radio":%s}\n' \
+			"$m" "$w" "$a" "$s" "$dev" "$ssid" "$ip" \
+			"$([ -n "$(base_get prev_wan)" ] && echo 1 || echo 0)" "$(p single_radio)"
+		return 0
+	fi
+	say "模式：$m （wan=$w ap=$a sta=$s）"
+	say "默认路由：${dev:-无}"
+	[ -n "$ssid" ] && say "外部 Wi-Fi：$ssid ${ip:+($ip)}"
+	return 0
+}
+
+case "${1:-status}" in
+	status) shift 2>/dev/null; do_status "${1:-}" ;;
+	cell) do_cell ;;
+	wifi) do_wifi ;;
+	ap) do_ap ;;
+	restore) do_restore ;;
+	--check) "$PROBE" -p ;;
+	*) err '用法：airsim-netmode status [--json] | cell | wifi | ap | restore | --check'; exit 6 ;;
+esac

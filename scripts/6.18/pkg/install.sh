@@ -1,8 +1,14 @@
 #!/bin/sh
-# AirSIM for F50 —— 6.18 线覆盖式更新包安装脚本
+# AirSIM for F50 —— 覆盖式更新包安装脚本
 #
 # 本包只做覆盖更新：先备份当前二进制与页面，再铺 overlay/f50 那棵树。
 # 不写内核、不改 boot、不动分区。
+#
+# 内核策略（2026-11 起）：主包不绑内核。
+#   两个二进制是 Go 交叉编出来的静态件，与内核版本无关；页面、rpcd、init.d 也都是
+#   纯 shell/lua，换内核不影响。唯一跟内核有关的是语音驱动模块，那玩意儿已经拆成
+#   独立配件包（按内核分别出），装不装、装哪个版本，由配件包自己判断。
+#   所以这里不再拒绝非 6.18 内核，改成「认一认、说清楚、继续装」。
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 VER=$(cat "$HERE/VERSION")
@@ -11,17 +17,32 @@ AUD=/mnt/mu300-disk/extra/airsim-audio/modules/$(uname -r)
 
 echo "== AirSIM for F50 $VER =="
 
+# --- 内核识别（不再拦人，只交代清楚）---
+# 已知三档：5.4.254（历史线，没开 CONFIG_SOUND，语音编不出来）、6.18.60、7.3.1。
+# 别的内核：照装，只是提醒「没在真机验过」，出问题看自检与日志。
 K=$(uname -r)
+case "$(uname -m)" in
+aarch64) : ;;
+*) echo "  当前架构 $(uname -m)，本包只对 aarch64 有效。" >&2; exit 3 ;;
+esac
 case "$K" in
-6.18.*) : ;;
+5.4.*)
+	echo "  内核 ${K}：主体可用（历史线），语音不可用 —— 那个内核没开 CONFIG_SOUND，"
+	echo "  按它编不出语音驱动模块，装音频配件包也救不回来。"
+	AUD_SUPPORTED=0
+	;;
+6.18.*)
+	echo "  内核 ${K}：主体可用，语音取决于音频配件包（audio-opt 1.0.3 支持 6.18.60）"
+	AUD_SUPPORTED=1
+	;;
+7.3.*)
+	echo "  内核 ${K}：主体可用，语音取决于音频配件包（audio-opt 1.0.3 支持 7.3.1）"
+	AUD_SUPPORTED=1
+	;;
 *)
-	if [ "${F50_ALLOW_OTHER_KERNEL:-}" = 1 ]; then
-		echo "  警告：当前内核 $K，本包按 6.18 线编的（已强制继续）" >&2
-	else
-		echo "  当前内核 $K，本包只对 6.18 线有效。" >&2
-		echo "  确要强装：F50_ALLOW_OTHER_KERNEL=1 sh install.sh" >&2
-		exit 3
-	fi
+	echo "  内核 ${K}：不认识这一版，按通用规则照装（主体与内核无关）。" >&2
+	echo "  没在真机验过，装完请跑一遍自检；语音要另外确认有没有对应内核的配件包。" >&2
+	AUD_SUPPORTED=1
 	;;
 esac
 
@@ -33,7 +54,13 @@ if [ ! -f /usr/lib/airsim/airsim-mu300d ]; then
 	mkdir -p /usr/lib/airsim
 	echo "  未检测到已装插件（刷机后？）：按首次安装处理，不备份"
 fi
-[ -d "$AUD" ] || echo "  注意：$AUD 不存在，语音会不可用（先装 6.18 音频模块）" >&2
+if [ -d "$AUD" ]; then
+	echo "  语音模块目录已在：$AUD"
+elif [ "$AUD_SUPPORTED" = 1 ]; then
+	echo "  提示：$AUD 不存在 —— 语音现在不可用，去维护页「可选配件」装音频配件包（按当前内核出包）" >&2
+else
+	: # 这个内核本来就没有语音，上面已经交代过了，不重复
+fi
 
 # --- 备份：二进制、页面、菜单/ACL、rpcd 后端、init.d 与 uci ---
 if [ "$FRESH" = 0 ]; then
@@ -119,6 +146,23 @@ if [ -f "$HERE/audio/airsim-audio-retry.init" ]; then
 	chmod 755 /etc/init.d/airsim-audio-retry
 	/etc/init.d/airsim-audio-retry enable >/dev/null 2>&1 || true
 	echo "  已装 /etc/init.d/airsim-audio-retry（S11 抢占重试，日志 /tmp/airsim-audio-claim.log）"
+fi
+
+# --- 联网（上网通道）能力落地 ---
+# 两个脚本随包铺到 /usr/bin/airsim-netmode 与 /usr/libexec/airsim-net-probe。
+# 这一段只做三件事：给权限、留一份机器现状快照、处理与作者旧脚本的命名冲突。
+# 幂等：文件不在就跳过，跑第二遍不会把东西改坏。
+chmod 755 /usr/bin/airsim-netmode /usr/libexec/airsim-net-probe 2>/dev/null || true
+mkdir -p /usr/lib/airsim
+if [ -x /usr/libexec/airsim-net-probe ]; then
+	/usr/libexec/airsim-net-probe -p > "/usr/lib/airsim/netprobe-$(date +%Y%m%d).txt" 2>/dev/null || true
+	echo "  已存一份联网能力快照：/usr/lib/airsim/netprobe-$(date +%Y%m%d).txt"
+fi
+# 作者原版 /usr/bin/netmode 与我们的 airsim-netmode 并存，会出现「谁改的 uci 说不清」。
+# 安装时只把它收起来、不删：改名成 netmode.vendor-bak，随时能改回去。
+if [ -f /usr/bin/netmode ]; then
+	mv -f /usr/bin/netmode /usr/bin/netmode.vendor-bak 2>/dev/null || true
+	echo "  已收起作者原版 /usr/bin/netmode → /usr/bin/netmode.vendor-bak（避免两套脚本争状态）"
 fi
 
 # rpcd 认新后端要重启；重启会踢掉 LuCI 会话，所以顺带重启 uhttpd

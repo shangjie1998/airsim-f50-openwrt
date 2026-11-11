@@ -159,15 +159,17 @@ sh scripts/6.18/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<�
 
 ## 5. 版本口径
 
-`airsim-f50-0.1.0.<N>-r<NN>-<内核线>`，全小写，tag 前加 `v`：
+`airsim-f50-0.1.0.<N>-r<NN>-<适用范围>`，全小写，tag 前加 `v`：
 
 - `0.1.0` 与上游一致，`r<NN>` 对齐上游 release（本版 `r23`）
-- `<N>` 是本仓库打包序号，**每出一包 +1，只给 6.18 线加**
-- `6.18` 是内核线标识；5.4 线永久冻结在 `0.1.0.3-r22-f50`
+- `<N>` 是本仓库打包序号，**每出一包 +1**
+- 适用范围新包写 `any`（主包不绑内核），老资产仍带 `6.18`；5.4 旧名 `0.1.0.3-r22-f50` 不再升号
 
 `scripts/bump-version.sh` 负责 +1 并同步 `VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`，
-遇到非 6.18 线直接拒绝。`scripts/6.18/make-package.sh` 负责把二进制、`overlay/f50/files`
+只认 `any` / `6.18`（新包用 `sh scripts/bump-version.sh <N> r<NN> any`）。
+`scripts/6.18/make-package.sh` 负责把二进制、`overlay/f50/files`
 整棵树、音频抢占脚本和安装/卸载脚本打成一个 `dist/*.tar.gz`。
+主包对内核只做识别与提示（5.4 主体能跑但没语音、6.18.60 与 7.3.1 语音看配件包、其它内核照装不拦）。
 
 ## 6. 想让 AI 帮你重写或调试
 

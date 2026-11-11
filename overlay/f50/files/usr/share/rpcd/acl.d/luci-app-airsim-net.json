@@ -1,0 +1,7 @@
+{
+	"luci-app-airsim-net": {
+		"description": "Grant access to F50 uplink mode switch and Wi-Fi management",
+		"read": { "ubus": { "airsim-net": [ "probe", "status", "wifi_scan", "wifi_saved" ] } },
+		"write": { "ubus": { "airsim-net": [ "mode_set", "wifi_connect", "wifi_forget" ] } }
+	}
+}
