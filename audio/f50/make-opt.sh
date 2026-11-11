@@ -45,7 +45,9 @@ for k in $KRELS; do
 	[ -f "$PAY/$k/KERNEL" ] || die "payload/$k 缺 KERNEL 元数据（至少写 KEY=/KREL=/CONFIG=/TAG=）"
 done
 
-NAME=airsim-f50-audio-opt-$VER-k$(printf '%s' $KRELS | tr ' ' '+')
+# 多套内核时用 + 连接：-k6.18.60+7.3.1
+# 坑：printf '%s' 后不加引号时，多个参数会被拼成一串（7.3.1 粘到 6.18.60 后面变 6.18.607.3.1）
+NAME=airsim-f50-audio-opt-$VER-k$(printf '%s\n' $KRELS | grep -v '^$' | paste -sd+ -)
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 ROOT=$STAGE/$NAME
