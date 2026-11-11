@@ -1,7 +1,12 @@
-> **两条内核线严格分开**：6.18（在研主线，`docs/6.18/`、`scripts/6.18/`）与 5.4（已冻结，
-> `docs/5.4/`、`scripts/5.4/`）。新改动只落 6.18 线，别再碰 5.4 的包和脚本。
+> **主包已不绑内核**（`0.1.0.21-r23-any` 起）：`5.4.254` / `6.18.60` / `7.3.1` 一条包都装得，
+> 只剩 `aarch64` 一道闸。内核支持与水音来源的**唯一口径**在 [`docs/内核矩阵.md`](docs/内核矩阵.md)，
+> 别在别处复述，也别再把 5.4 当"冻结不可用"。
 >
-> **先读 [`docs/6.18/接手说明.md`](docs/6.18/接手说明.md)**：里面写了这台机器现在到哪一步、
+> **仓库按职责分目录**：`build/`（造包，含包内 `pkg/install.sh`）、`parts/{audio,bluetooth}`（配件）、
+> `ops/`（设备侧一次性脚本）、`overlay+f50/src`（**CI 触发路径，不许改名**）、`docs/`（按主题）、
+> `archive/`（只留档）。新文件按职责放，别往根目录扔。
+>
+> **先读 [`docs/接手说明.md`](docs/接手说明.md)**：里面写了这台机器现在到哪一步、
 > 怎么装模块、怎么判活、哪些还是坑、下一步升上游 r23 怎么落。
 
 # 给下一个 AI 的交接说明（F50 / MU300 / UMS9620）
@@ -44,7 +49,7 @@
 
 **所以别指望在 `src/` 里找到 F50 补丁。** F50 那几处让它真能干活的关键改动，改的是设备上的运行库文件
 （`/opt/mu300/bin/sipa-dele-start`、`/opt/mu300/bin/mu300-at`、`/usr/lib/airsim/` 下的音频暂存脚本），
-仓库里以 `scripts/` 的重放脚本留档。重编一个包不会把这些改动带进去，装完必须单独打补丁。
+仓库里以 `ops/` 的重放脚本留档。重编一个包不会把这些改动带进去，装完必须单独打补丁。
 
 ## 1c. 品牌名改动范围（MU300 → F50）
 
@@ -81,13 +86,13 @@ health 接口的 `device_name`/`model`、`/status` 的 `product=AirSIM for F50`�
 `/dev/snd` 的扬声器，那边什么都没有。Android 侧那条路已判定不可行（ROM 不注册
 `android.app.role.DIALER`，绕过角色后信令通但下行 PCM 永远 `all_zero`）。
 
-## 4. 四个必须知道的坑（脚本都在 `scripts/`）
+## 4. 四个必须知道的坑（脚本都在 `ops/`）
 
 | # | 现象 | 根因 | 修法 |
 |---|---|---|---|
 | 1 | 安装报 `MU300 runtime library missing` | 新 rootfs 裁掉了 `/opt/mu300/lib/run-dir.sh` | 从 `mu300-linux` 补回（644） |
-| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 对空文件列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `scripts/5.4/音频暂存-空列表保护.sh` |
-| 3 | 来电轮询永远失败 `MU300 AT request failed (AT+CLCC)`，手动同条 AT 正常 | 设备自带旧版 `mu300-at` 不认 `-`（stdin），把连字符当命令发出去 | `scripts/mu300-at-补stdin.sh`（原件留 `.bak-20261107`） |
+| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 对空文件列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `ops/legacy/音频暂存-空列表保护.sh` |
+| 3 | 来电轮询永远失败 `MU300 AT request failed (AT+CLCC)`，手动同条 AT 正常 | 设备自带旧版 `mu300-at` 不认 `-`（stdin），把连字符当命令发出去 | `ops/call-monitor/mu300-at-补stdin.sh`（原件留 `.bak-20261107`） |
 | 4 | 数据不拨号：`sipa delegate did not become ready; refusing unsafe PDP activation` | **5.4 的 `sipa-dele.ko` 根本没有 `sipa_dele_wait` 节点**（6.18 才有），而 `delegate_ready()` 把"读不到"当硬失败 | 改 `/opt/mu300/bin/sipa-dele-start` 的 `delegate_ready()`：`/proc/modules` 里有 `sipa_dele` 就记日志放行。**6.18 上不需要这个补丁**（有 `sipa_dele_wait`/`sipa_dele_ready`，走原路径） |
 
 > 判据：`sipa_dele_wait` 在不在，直接决定这个补丁要不要打。
@@ -113,7 +118,7 @@ uci commit firewall
 关掉软件流卸载后 fw4 根本不生成 flowtable，那个事务冲突从源头消失；顺带 LuCI 里“保存防火墙”也不会再翻车。
 代价只是转发不走快路径，LTE 几十兆量级 CPU 看不出差别。
 
-**上游的钩子方案**（`scripts/5.4/19-mu300-fw4-钩子版.sh`）实测可用但未采用：它在 ifup 时先删 flowtable 再 reload。
+**上游的钩子方案**（`ops/legacy/19-mu300-fw4-钩子版.sh`）实测可用但未采用：它在 ifup 时先删 flowtable 再 reload。
 注意这台机器的 5.4 内核连 `nft delete flowtable inet fw4 ft` 都返回 `Resource busy`，必须先
 `nft delete table inet fw4`（整表）才有用；而且它覆盖不到非 ifup 的 reload，所以选了“关卸载”。
 
@@ -138,7 +143,7 @@ ping -c2 223.5.5.5                                     # 设备自身出网
 
 ## 7. 要重编安装包
 
-见 [docs/5.4/F50_BUILD_AND_ADAPT.md](docs/5.4/F50_BUILD_AND_ADAPT.md)。要点：
+见 [docs/历史/5.4-构建与适配.md](docs/历史/5.4-构建与适配.md)。要点：
 
 - 构建机需要 Git、**Go 1.24+**、Node.js、Docker（`node:22-alpine`）、curl、OpenSSL；
 - 入口 `sh scripts/package-apk.sh`（内部会 `build.sh` → `fetch-deps.sh` → `fetch-sources.sh`）；
@@ -163,11 +168,14 @@ ping -c2 223.5.5.5                                     # 设备自身出网
 README.md                    部署记录总览（结论、装机、坑、自检）
 AGENTS.md                    本文件：给下一位接手者的最短路径
 VERSIONING.md                版本编号规则（0.1.0.N-r22-f50，每打包一次 N+1）
-docs/5.4/F50-通话打通.md          通话验收与调试全过程
-docs/5.4/F50-数据联网修复.md       拨号修复（sipa）与客户端断网（flowtable）两条完整链路
-docs/5.4/F50_BUILD_AND_ADAPT.md  从源码重建安装包、换内核/换硬件的适配口径
+docs/历史/5.4-通话打通.md          通话验收与调试全过程
+docs/历史/5.4-数据联网修复.md       拨号修复（sipa）与客户端断网（flowtable）两条完整链路
+docs/历史/5.4-构建与适配.md  从源码重建安装包、换内核/换硬件的适配口径
 archive/5.4-pkg/device-patches/  5.4 时代从设备取回的三处运行库补丁（含原件与 .diff；6.18 不需要）
-scripts/                     设备侧补丁脚本（重放用）
+build/                       造包（make-package.sh / bump-version.sh / pkg/ 包内安装脚本 / tools/）
+parts/                       配件源码与 payload（audio 按内核分 payload/<KREL>/）
+ops/                         设备侧一次性脚本（install-audio / kernel / call-monitor / legacy）
+archive/                     历史包与旧整包，只留档
 src/plugin/                  上游 r22 插件源码（含 vendor、packaging、patches）
 src/AirSIM/                  AirSIM 客户端/Agent 源码（固定提交）
 src/dependencies/            重建音频扩展所需的依赖源码包
@@ -193,7 +201,7 @@ cd <上面打印的目录>/module/module-agent && CGO_ENABLED=0 GOOS=linux GOARC
 必须用 `AIRSIM_UPSTREAM_REPO` 指到真正的 AirSIM 克隆，否则报
 `Not a valid object name cc2ade3…^{commit}`。
 
-出包：`sh scripts/bump-version.sh` 拿新版本 → 放二进制与页面进 `pkg/airsim-f50-<版本>/`
+出包：`sh build/bump-version.sh` 拿新版本 → 放二进制与页面进 `pkg/airsim-f50-<版本>/`
 → `tar czf dist/airsim-f50-<版本>.tar.gz -C pkg/airsim-f50-<版本> .`。
 apk v3 签名包仍需 apk-tools 3.x（本机与云主机都没有 Docker），暂不做。
 

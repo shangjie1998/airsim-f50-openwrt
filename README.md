@@ -1,4 +1,4 @@
-# AirSIM for F50 — 把通话网关装进 OpenWrt 手机（**6.18 内核主线**）
+# AirSIM for F50 — 把通话网关装进 OpenWrt 手机（主包不绑内核）
 
 把 AirSIM 的通话网关（配对、控制面、通话音频桥、短信）装进一台跑 OpenWrt 的中兴 F50
 （`MU300` / 紫光展锐 `UMS9620`），让 iPhone 在同一局域网里用这台手机的 SIM 卡接打电话、收发短信。
@@ -10,14 +10,15 @@
 |---|---|
 | 本适配仓库 | <https://github.com/shangjie1998/airsim-f50-openwrt> |
 | 上游项目 | <https://github.com/kai-wu-cortex/airsim-mu300>（本仓库源码钉在 `v0.1.0-r23`） |
-| 已验收版本 | **`0.1.0.7-r23-6.18`**（2026-11-10 真机：页面换皮 + 来电转发 + 号码补 `+86`） |
-| 插件安装包 | [Release `v0.1.0.7-r23-6.18`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.7-r23-6.18) · 5.9 MB（仓库内另有 [`dist/`](dist/) 同款） |
-| 音频模块包 | `0.1.0.4-r22-6.18` 里的 25 个 `.ko`（内核绑死 6.18.60，见 §3） |
-| 接手说明 | [docs/6.18/接手说明.md](docs/6.18/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
-| 蓝牙（选装） | [bluetooth/](bluetooth/README.md) —— WCN 蓝牙启用脚本 + 总开关口子，**不影响通话** |
-| 编译与复现 | [docs/6.18/F50-6.18音频自编.md](docs/6.18/F50-6.18音频自编.md) —— 自造 kit、四个编译坑 |
-| 与 M8 的差异 | [docs/F50-vs-M8.md](docs/F50-vs-M8.md) |
-| 5.4 归档线 | [docs/5.4/](docs/5.4/) —— 已冻结，只在归档里留着 |
+| 已验收版本 | **`0.1.0.21-r23-any`**（2026-11-11 真机：6.18.60 与 5.4.254 双内核都跑通，含联网切换） |
+| 插件安装包 | [Release `v0.1.0.21-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.21-r23-any) · 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
+| 音频模块包 | `audio-opt 1.0.3`（带 `6.18.60` 与 `7.3.1` 两套）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
+| 接手说明 | [docs/接手说明.md](docs/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
+| 蓝牙（选装） | [docs/蓝牙.md](docs/蓝牙.md) —— WCN 蓝牙启用脚本 + 总开关口子，**不影响通话** |
+| 联网（Wi-Fi） | [docs/联网.md](docs/联网.md) —— 流量/Wi-Fi/热点三模式互斥 + Wi-Fi 搜索连接删除，**USB 口地址不变** |
+| 编译与复现 | [docs/音频/自编过程.md](docs/音频/自编过程.md) —— 自造 kit、四个编译坑 |
+| 与 M8 的差异 | [docs/跨机型/F50-vs-M8.md](docs/跨机型/F50-vs-M8.md) |
+| 5.4 归档线 | [docs/历史/](docs/历史/) —— 旧结论已就地标注修正 |
 
 ---
 
@@ -27,7 +28,7 @@
 |---|---|
 | 机型 | **中兴 F50**（`MU300`），`Spreadtrum UMS9620`（与 VIPME-M8 同 SoC） |
 | 系统 | **OpenWrt 25.12.5 `r33051-f5dae5ece4`**，target `armsr/armv8`，arch `aarch64_generic`，跑在 **TF 卡 B 卡槽** |
-| 内核 | **`6.18.60`**（mainline，`mu300-linux` 那条分支；**非**厂商 5.4） |
+| 内核 | 主包**不绑内核**：`6.18.60`（在研主线）/ `5.4.254`（厂商线）/ `7.3.1`，三档差异见 [docs/内核矩阵.md](docs/内核矩阵.md) |
 | 声卡 | `card1 = sprdphone-sc2730` |
 | 通话采集 | `FE_ST_VOICE_PCM_C` = `hw:1,16` |
 | 通话播放 | `FE_ST_VOICE_PCM_P` = `hw:1,53`（8 kHz 直通，不做上采样） |
@@ -47,12 +48,14 @@
 | `src/` | **上游 `v0.1.0-r23` 原样**，一个字未改（升级时整棵换掉即可） |
 | `overlay/f50/` | 本适配的全部个性化改动：`strings.tsv`（文案替换规则）、`files/`（LuCI 页面与 acl 整文件）、`apply.py`、`build.sh` |
 | `upstream/r23/` | 上游来源、校验锚点、r22→r23 差异文件清单 |
-| `pkg/airsim-f50-0.1.0.5-r23-6.18/` | 当前插件包（二进制 + LuCI + `install.sh` + `MANIFEST` + `VERSION`） |
+| `build/` | **造包的地方**：`make-package.sh`、`bump-version.sh`、包内 `pkg/install.sh`、`tools/` |
+| `parts/audio/`、`parts/bluetooth/` | 可选配件的源码与 payload（`audio` 按内核分 `payload/<KREL>/`） |
+| `ops/` | 设备上一次性的运维脚本（装音频、切内核、通话监控、历史遗留） |
 | `archive/5.4-pkg/` | **5.4 覆盖包归档，不删只挪**，主页与脚本都不再引用 |
-| `docs/6.18/`、`scripts/6.18/` | 6.18 线文档与设备侧脚本 |
-| `docs/5.4/`、`scripts/5.4/` | 5.4 冻结线归档 |
+| `docs/` | 按**主题**分类：`内核矩阵` / `联网` / `音频/` / `蓝牙` / `打包发布` / `设计/` / `历史/` / `经验库/` |
+| `dist/` | 只放**当前这一版**产物；历史包在 `archive/` 与远端 Release |
 | `kbuild/` | 自编内核模块用的 kit 与源码树（`.gitignore`，不入库） |
-| `bluetooth/` | **与插件无关的独立能力**：展锐 WCN 蓝牙在 6.18 上的启用脚本与文档（含开关口子，见 [`bluetooth/README.md`](bluetooth/README.md)） |
+| `archive/` | 历史包与旧整包，只留档不参与构建 |
 
 相对上游改了什么（**只改显示文案，标识一律保留**）：
 
@@ -72,8 +75,8 @@
 
 ```sh
 # 主机侧
-scp dist/airsim-f50-0.1.0.4-r22-6.18-audio-modules.tar.gz root@192.168.77.1:/tmp/airsim-audio-6.18.60-modules.tar.gz
-scp scripts/6.18/装6.18音频模块.sh root@192.168.77.1:/tmp/
+scp dist/airsim-f50-audio-opt-1.0.3-k6.18.60+7.3.1.tar.gz root@192.168.77.1:/tmp/airsim-audio-opt.tar.gz
+scp ops/install-audio/装音频模块.sh root@192.168.77.1:/tmp/
 
 # 设备侧
 ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --install'
@@ -99,8 +102,8 @@ ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --verify'
 ### 3-2 装插件包（覆盖式更新，先备份再换）
 
 ```sh
-scp dist/airsim-f50-0.1.0.7-r23-6.18.tar.gz root@192.168.77.1:/tmp/p.pkg.tar.gz
-ssh root@192.168.77.1 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh pkg/airsim-f50-0.1.0.7-r23-6.18/install.sh'
+scp dist/airsim-f50-0.1.0.21-r23-any.tar.gz root@192.168.77.1:/tmp/p.pkg.tar.gz
+ssh root@192.168.77.1 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh *\/install.sh'
 ```
 
 `install.sh` 会先检查内核（非 6.18 直接退出码 3，不写设备一个文件），把旧二进制、页面、
@@ -139,8 +142,8 @@ iPhone 端 AirSIM 添加设备时选 **`AirSIM-F50-…`**。
 ### 打新包
 
 ```sh
-sh scripts/bump-version.sh                    # 序号 +1
-sh scripts/6.18/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.tar.gz
+sh build/bump-version.sh                    # 序号 +1
+sh build/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.tar.gz
 ```
 
 ## 4. 已知限制与坑
@@ -165,36 +168,39 @@ sh scripts/6.18/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<�
 - `<N>` 是本仓库打包序号，**每出一包 +1**
 - 适用范围新包写 `any`（主包不绑内核），老资产仍带 `6.18`；5.4 旧名 `0.1.0.3-r22-f50` 不再升号
 
-`scripts/bump-version.sh` 负责 +1 并同步 `VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`，
-只认 `any` / `6.18`（新包用 `sh scripts/bump-version.sh <N> r<NN> any`）。
-`scripts/6.18/make-package.sh` 负责把二进制、`overlay/f50/files`
+`build/bump-version.sh` 负责 +1 并同步 `VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`，
+只认 `any` / `6.18`（新包用 `sh build/bump-version.sh <N> r<NN> any`）。
+`build/make-package.sh` 负责把二进制、`overlay/f50/files`
 整棵树、音频抢占脚本和安装/卸载脚本打成一个 `dist/*.tar.gz`。
-主包对内核只做识别与提示（5.4 主体能跑但没语音、6.18.60 与 7.3.1 语音看配件包、其它内核照装不拦）。
+主包对内核只做识别与提示（5.4 / 6.18.60 / 7.3.1 / 未知内核都照装不拦，语音来源各不相同，见 [docs/内核矩阵.md](docs/内核矩阵.md)）。
 
 ## 6. 想让 AI 帮你重写或调试
 
 把仓库链接交给 AI，让它按顺序读：
 
-1. [docs/6.18/接手说明.md](docs/6.18/接手说明.md) —— 现状、为什么必须自编、装机三步、判活五条、未修复问题
-2. [docs/6.18/F50-6.18音频自编.md](docs/6.18/F50-6.18音频自编.md) —— 自造 kit 的完整命令与四个编译坑
+1. [docs/接手说明.md](docs/接手说明.md) —— 现状、为什么必须自编、装机三步、判活五条、未修复问题
+2. [docs/音频/自编过程.md](docs/音频/自编过程.md) —— 自造 kit 的完整命令与四个编译坑
 3. `overlay/f50/` —— 要改文案就改 `strings.tsv`，要改页面就换 `files/`，然后 `sh overlay/f50/build.sh`
-4. `scripts/bump-version.sh` 升号 → 重打 tar → `scp` 到 `/tmp` 再装
+4. `build/bump-version.sh` 升号 → 重打 tar → `scp` 到 `/tmp` 再装
 
 不要做的六件事：不刷 A 卡槽 Android、不动分区表、不改 modem NV、不覆盖厂商同名脚本、
 不装别内核编的音频模块、不远程 `reboot`。
 
-## 7. 5.4 线（已冻结）
+## 7. 5.4 线（历史，已在当前版本上验证）
 
-2026-11-09 起封存。归档包在 [`archive/5.4-pkg/`](archive/5.4-pkg/)，文档在 [`docs/5.4/`](docs/5.4/)，
-脚本在 [`scripts/5.4/`](scripts/5.4/)。**只留档，不再重建、不再出新版**。
+5.4 是厂商内核，主包装上就能跑、语音也是好的（厂商镜像自带驱动）。旧结论「5.4 语音不可用」
+已在 2026-11-11 真机推翻，口径统一在 [docs/内核矩阵.md](docs/内核矩阵.md)。
+
+归档包在 [`archive/5.4-pkg/`](archive/5.4-pkg/)，文档在 [`docs/历史/`](docs/历史/)，
+一次性脚本在 [`ops/kernel/`](ops/kernel/) 与 [`ops/legacy/`](ops/legacy/)。**只留档，不再出新版**。
 
 ## 8. 与 M8 的差异
 
-两台同 SoC、两套参数，**包和文档不可互换**。逐项对照见 [docs/F50-vs-M8.md](docs/F50-vs-M8.md)。
+两台同 SoC、两套参数，**包和文档不可互换**。逐项对照见 [docs/跨机型/F50-vs-M8.md](docs/跨机型/F50-vs-M8.md)。
 
-要做"一端开发、两端兼容"的自定义需求同步，照 [docs/SYNC-M8-F50.md](docs/SYNC-M8-F50.md) 走：
+要做"一端开发、两端兼容"的自定义需求同步，照 [docs/跨机型/同步规矩-M8-F50.md](docs/跨机型/同步规矩-M8-F50.md) 走：
 **AI 先判可行（S/R/D 三档）→ 人点头 → 才落地 → 两端各自真机验**。
-先跑 `python3 scripts/sync-m8.py` 看本次要动的东西落在哪一档。
+先跑 `python3 build/tools/sync-m8.py` 看本次要动的东西落在哪一档。
 云端心跳这类链路问题**不跨端照搬**——M8 有症状不代表 F50 有。
 
 ## 9. 上游与致谢
