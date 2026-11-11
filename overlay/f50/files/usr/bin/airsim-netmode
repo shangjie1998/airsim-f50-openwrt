@@ -215,6 +215,15 @@ rollback() {
 	exit 5
 }
 
+# 切完网必须让 mu300d 把直连监听和 Bonjour 广告搬到新地址：
+# iOS 只认 TXT 里的 host，旧地址还会被手机存进 UserDefaults。
+# 不重绑的表现就是"换了网络、手机还拿着旧 IP，必须重新配对"。
+# 走 rpcd 而不是重启服务 —— 重启会把正在通话的控制/PCM 会话一起掐掉。
+net_refresh() {
+	/sbin/ubus call airsim-net rebind >/dev/null 2>&1 || /bin/ubus call airsim-net rebind >/dev/null 2>&1 || true
+	return 0
+}
+
 do_cell() {
 	guard
 	case "$(cur_mode)" in cell) say '已经是蜂窝模式，无需切换'; return 0 ;; esac
@@ -225,6 +234,7 @@ do_cell() {
 	wifi_reload
 	set_wan 0
 	if check_cell; then
+		net_refresh
 		say '蜂窝模式已就绪（默认路由在蜂窝网卡）'
 		return 0
 	fi
@@ -267,6 +277,7 @@ do_wifi() {
 		ip -4 route del default dev "$CELL_IF" >/dev/null 2>&1 || true
 		[ "$(ip route 2>/dev/null | grep -c '^default')" = 1 ] || err '提示：除了 Wi-Fi 还有一条默认路由，稍后可能又走回蜂窝'
 	fi
+	net_refresh
 	say 'Wi-Fi 模式已就绪（出口走 Wi-Fi，蜂窝数据已断，电话短信不受影响）'
 	return 0
 }
@@ -282,6 +293,7 @@ do_ap() {
 	check_cell >/dev/null 2>&1 || err '提示：蜂窝还没完全就绪，热点开起来后可能暂时上不了网'
 	set_ap 0
 	wifi_reload
+	net_refresh
 	say '热点模式已就绪'
 	return 0
 }
@@ -294,6 +306,7 @@ do_restore() {
 	say "按基线恢复：wan=$pw ap=$pa sta=$ps"
 	set_sta "$ps"; set_ap "$pa"; wifi_reload
 	set_wan "$pw"
+	net_refresh
 	if [ "$pw" = 0 ]; then
 		say '已恢复蜂窝供网'
 	else
