@@ -199,6 +199,7 @@ body.as-menu-on > header .nav{display:none!important}
 .as-root .as-secondary:hover:not(:disabled){background:color-mix(in srgb,var(--as-ink) 8%,transparent)}
 .as-root .as-danger{background:var(--as-red-bg);color:var(--as-red);border-color:color-mix(in srgb,var(--as-red) 30%,transparent)}
 .as-root .as-danger:hover:not(:disabled){background:color-mix(in srgb,var(--as-red) 18%,transparent)}
+.as-root .as-button.is-on{border-color:var(--as-blue);background:color-mix(in srgb,var(--as-blue) 12%,transparent);color:var(--as-blue)}
 .as-root .as-button:disabled{opacity:.43;cursor:default}
 .as-root .as-button:focus-visible,.as-root summary:focus-visible{outline:3px solid color-mix(in srgb,var(--as-blue) 38%,transparent);outline-offset:3px}
 .as-root .as-text-button{display:inline-block;background:transparent;color:var(--as-blue);padding:10px 0 0;min-height:34px;font-size:var(--as-fs-cap);border:0}

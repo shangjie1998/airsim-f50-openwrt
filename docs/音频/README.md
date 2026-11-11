@@ -50,3 +50,23 @@ cat /proc/asound/cards                             # 期望：Loopback + sprdpho
 | 打配件包脚本 | `parts/audio/make-opt.sh` |
 | 成品 payload | `parts/audio/payload/<KREL>/`（`_` 开头的是待重建占位，打包跳过） |
 | 设备落地目录 | `/mnt/mu300-disk/extra/airsim-audio/{bin,ctlset,etc,integration,modules/<KREL>/}` |
+
+## 六、独立页「音频」（2026-11-11）
+
+菜单 `admin/services/airsim/audio`，页面文件 `overlay/f50/files/www/luci-static/resources/view/airsim/audio.js`，跟「蓝牙」页同构，三件事放一起：
+
+| 卡片 | 内容 | 靠什么接口 |
+|---|---|---|
+| 音频配件包 | 状态 / 本机内核 / 覆盖情况 / 件数 / 已装配件包版本，右上角版本号 + 检查更新 | `audio_opt_probe`、`audio_opt_latest`、`audio_opt_install` |
+| 刷机后自检 | 八项一次查完，能补的就地补（原来在「维护」页，已搬到这里） | `selfcheck_run`、`selfcheck_fix` |
+| 切换内核 | 三档（5.4 / 6.18 / 7.3）选择 + 本机现成内核包 + 上游 release 号，**只拼命令不代跑** | `kernel_bundles`（只读） |
+
+- 页面右上角版本号是**音频配件包版本**（`audio-opt vX`，设备上实际装着的那个），右边跟「检查更新」图标一组；主包版本不在这页重复显示。，跟「检查更新」查到的最新版比对，才会判"有新版本"（显示成 `v1.0.2 → v1.0.3` + 绿 ↑）。
+  之前拿包内钉死的 `TAG` 当已装版本，结果是永远显示"已是最新"——已改成读 `audio-opt-version`。
+- 切内核不给执行按钮：要写 boot 分区并重启，重启一律由用户自己来。命令固定为
+  `MU300_RELEASE=<release> MU300_KERNEL_BUNDLE=<包> mu300-update kernel <5.4|6.18|7.3>`。
+
+## 七、装完之后页面还是旧样子？
+
+LuCI 给每个视图脚本拼的是**固定的** `?v=<固件版本>`，文件换了 URL 不变，浏览器可能一直用缓存里的旧版。
+装完包/换完页面后在页面上按一次 `Cmd+Shift+R`（Windows 是 `Ctrl+F5`）就好；这不是脚本没装上。
