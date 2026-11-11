@@ -316,6 +316,130 @@ admin_status() {
 	admin_json "$_e" "$_l" ''
 }
 
+# ---- 直连端口与 mDNS 放行 ----
+# 为什么必须有这一段：Wi-Fi 上行模式下手机和设备的联系全靠 wlan0，
+# 而 wlan0 属于 wlanadmin 区（input=REJECT）。8580-8582 这类直连端口和
+# 5353 组播一条规则都没有，端口绑上去照样被拒（2026-11-12 真机实测：
+# input_wlanadmin 里只有 80/443，reject_from_wlanadmin 里 iifname wlan0 全拒）。
+# 所以这里补两条常驻规则，和 LuCI 的开关解耦：关掉管理页访问不影响手机连接。
+DIRECT_RULE=Allow-AirSIM-direct
+MDNS_RULE=Allow-AirSIM-mdns
+DIRECT_DEV=$ADMIN_DEV
+DIRECT_DATA=/mnt/mu300-disk/extra/airsim/data
+DIRECT_HOST_FILE=/tmp/airsim-direct-host
+
+rule_sections() {
+	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='$1'\$/\1/p"
+}
+
+json_port() {
+	grep -o "\"$1\":[0-9]\{1,5\}" "$DIRECT_DATA/management.json" 2>/dev/null | head -1 | cut -d: -f2
+}
+
+json_str() {
+	grep -o "\"$1\":\"[^\"]*\"" "$DIRECT_DATA/management.json" 2>/dev/null | head -1 | cut -d'"' -f4
+}
+
+# 端口以设备上的真实设置（management.json）为准，读不到才回退默认值 ——
+# 页面上改过端口的话，防火墙必须跟着改，否则改了端口就连不上。
+direct_ports() {
+	_p=$(json_port pair_port);  [ -n "$_p" ] || _p=8580
+	_c=$(json_port control_port); [ -n "$_c" ] || _c=8581
+	_m=$(json_port pcm_port);   [ -n "$_m" ] || _m=8582
+	echo "$_p $_c $_m"
+}
+
+direct_live() {
+	_n=$(nft list chain inet fw4 input_$ZONE_NAME 2>/dev/null | grep -c 'Allow-AirSIM-direct')
+	[ "$_n" -ge 1 ] || return 1
+	nft list chain inet fw4 input_$ZONE_NAME 2>/dev/null | grep -q 'Allow-AirSIM-mdns' || return 1
+	return 0
+}
+
+direct_sync_json() {
+	if direct_sync; then
+		json_init; json_add_boolean ok 1; json_add_string ports "$(direct_ports)"; json_dump
+	else
+		jerr '写不进防火墙规则'
+	fi
+}
+
+# 规则名字前缀统一 Allow-AirSIM-，加新规则前按前缀全清（不按固定名清，
+# 端口不连续时规则数会变，只认固定名会留垃圾）。
+air_rules() {
+	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='Allow-AirSIM-[^']*'\$/\1/p"
+}
+
+# 关键坑（2026-11-12 真机踩到）：fw4 不认 "8580,8581,8582" 这种逗号写法，
+# 会报 invalid value 并把整条规则跳过 —— 表里能查到 uci 配置，nft 里却一条都没有。
+# 端口连续时用范围 "8580-8582" 一条搞定；不连续才拆成多条。
+direct_sync() {
+	admin_zone_ensure || return 1
+	_p1=$(json_port pair_port);     [ -n "$_p1" ] || _p1=8580
+	_p2=$(json_port control_port);  [ -n "$_p2" ] || _p2=8581
+	_p3=$(json_port pcm_port);      [ -n "$_p3" ] || _p3=8582
+	_want="$_p1-$_p3"
+	_cur=$(uci -q get "firewall.$(air_rules | head -1).dest_port" 2>/dev/null)
+	if direct_live && { [ "$_cur" = "$_want" ] || [ "$(air_rules | wc -l)" -ge 2 ]; }; then
+		return 0
+	fi
+	for _s in $(air_rules); do uci -q delete "firewall.$_s"; done
+
+	_add_rule() {
+		[ -n "$(_name_sections=$(uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='$1'\$/\1/p"); echo "$_name_sections")" ] && return 0
+		uci -q add firewall rule >/dev/null || return 1
+		uci -q set "firewall.@rule[-1].name=$1"
+		uci -q set "firewall.@rule[-1].src=$ZONE_NAME"
+		uci -q set "firewall.@rule[-1].proto=$2"
+		uci -q set "firewall.@rule[-1].dest_port=$3"
+		uci -q set "firewall.@rule[-1].target=ACCEPT"
+		uci -q set "firewall.@rule[-1].enabled=1"
+		return 0
+	}
+
+	if [ $((_p2)) -eq $((_p1 + 1)) ] && [ $((_p3)) -eq $((_p2 + 1)) ]; then
+		_add_rule Allow-AirSIM-direct tcp "$_p1-$_p3" || return 1
+	else
+		_n=1
+		for _p in $_p1 $_p2 $_p3; do
+			_add_rule "Allow-AirSIM-direct-$_n" tcp "$_p" || return 1
+			_n=$((_n + 1))
+		done
+	fi
+	_add_rule Allow-AirSIM-mdns udp 5353 || return 1
+	uci -q commit firewall >/dev/null 2>&1 || true
+	$FW_INIT reload >/dev/null 2>&1 || true
+	return 0
+}
+
+# 手机在哪个网段，广告里的 host 就得是哪个：Wi-Fi 上行时 wlan0 有默认路由，
+# 用 STA 地址；热点 / 蜂窝模式用 LAN 桥地址。写进文件让 mu300d 采纳，
+# 再由它做运行期重绑（不重启进程，避免掐断正在进行的通话）。
+rebind_now() {
+	_sta=$(ip -4 -o addr show dev "$DIRECT_DEV" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+	_host=''
+	if [ -n "$_sta" ] && ip route 2>/dev/null | grep -q "^default .*dev $DIRECT_DEV"; then
+		_host=$_sta
+	fi
+	if [ -z "$_host" ]; then
+		_ldev=$(json_str interface); _ldev=${_ldev:-br-lan}
+		_host=$(ip -4 -o addr show dev "$_ldev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+	fi
+	[ -n "$_host" ] || { jerr '没有可用的直连地址，先确认网卡拿到 IP'; return 0; }
+	printf '%s\n' "$_host" > "$DIRECT_HOST_FILE"
+	direct_sync >/dev/null 2>&1 || true
+	if command -v curl >/dev/null 2>&1; then
+		_res=$(curl -s -m 6 -X POST http://127.0.0.1:7581/rebind 2>/dev/null)
+	else
+		_res=$(printf 'POST /rebind HTTP/1.0\r\nContent-Length: 0\r\n\r\n' | nc 127.0.0.1 7581 2>/dev/null)
+	fi
+	json_init
+	json_add_boolean ok 1
+	json_add_string host "$_host"
+	json_add_string gateway "$_res"
+	json_dump
+}
+
 # ---- 一屏所需数据：一次调用打包返回 ----
 # 页面首屏原来要发 4 个 ubus 请求（probe / status / wifi_saved / admin_status），
 # 每个请求都要过一次 rpcd、再起一个 shell，这颗 SoC 上光进程开销就 60 ms 一级；
@@ -423,7 +547,7 @@ flowfix() {
 
 case "$1" in
 list)
-	printf '%s\n' '{"probe":{},"status":{},"screen":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""},"flowfix_check":{},"flowfix_fix":{},"admin_status":{},"admin_set":{"enable":""}}'
+	printf '%s\n' '{"probe":{},"status":{},"screen":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""},"flowfix_check":{},"flowfix_fix":{},"admin_status":{},"admin_set":{"enable":""},"rebind":{},"direct_status":{},"direct_sync":{}}'
 	;;
 call)
 	# rpcd 走 exec 插件时，调用参数是从 stdin 灌进来的，argv 里只有 call 和 方法名
@@ -441,6 +565,9 @@ fi
 	flowfix_fix)   flowfix fix ;;
 	admin_status)  admin_status ;;
 	admin_set)     admin_set "$_args" ;;
+	rebind)        rebind_now ;;
+	direct_status) direct_status ;;
+	direct_sync)   direct_sync_json ;;
 	probe)        net_probe ;;
 	screen)       net_screen ;;
 	status)       need_mode; net_status ;;

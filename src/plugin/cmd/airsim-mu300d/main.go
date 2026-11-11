@@ -16,6 +16,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -31,6 +33,7 @@ var version = "0.1.0-dev"
 type daemon struct {
 	adMu          sync.Mutex
 	advertisement *zeroconf.Server
+	vowlanAd      *zeroconf.Server // 常驻 _airsim-vowlan 广告；与配对用的临时广告分开
 	ifname        string
 	mu            sync.Mutex
 	session       *pairing.Session
@@ -44,6 +47,14 @@ type daemon struct {
 	settings      managementSettings
 	directHosts   map[string]bool
 	tunnel        string
+	direct        *directListeners
+	listenersMu   sync.Mutex
+	// 重绑时要能给新地址重新挂上 HTTP/PCM 服务，这些句柄必须留在 daemon 上。
+	ctx     context.Context
+	cancel  context.CancelFunc
+	public  http.Handler
+	srvMu   sync.Mutex
+	servers []*http.Server
 }
 
 func main() {
@@ -145,17 +156,6 @@ func main() {
 	if *trial {
 		d.gateway.SetEarlyMediaBackend(gateway.NewMU300EarlyMediaTrialBackend(d.bridge.OpenEarlyMedia, filepath.Join(*data, "early-media-trial.json")))
 	}
-	lanInterface, e := net.InterfaceByName(settings.Interface)
-	if e != nil {
-		log.Fatal(e)
-	}
-	gwAd, e := zeroconf.Register("AirSIM-MU300-"+id[len(id)-8:], "_airsim-vowlan._tcp", "local.", settings.ControlPort,
-		[]string{"v=1", "agent_id=" + id, "agent_kind=mu300", "device_name=AirSIM MU300", "manufacturer=ZTE", "model=MU300", "host=" + lan, "control_port=" + portText(settings.ControlPort), "pcm_port=" + portText(settings.PCMPort), "caps=control,pcm"}, []net.Interface{*lanInterface})
-	if e != nil {
-		log.Print("Bonjour unavailable; manual IP pairing remains available")
-	} else {
-		defer gwAd.Shutdown()
-	}
 	listener, e := net.Listen("tcp", "127.0.0.1:7580")
 	if e != nil {
 		log.Fatal(e)
@@ -180,6 +180,7 @@ func main() {
 	// Internal Agent transport only; never registered on the LAN control mux.
 	admin.HandleFunc("/internal/cloud-early-media", d.gateway.ServeCloudEarlyMedia)
 	admin.HandleFunc("/pair/start", d.startPair)
+	admin.HandleFunc("/rebind", d.rebindHandler)
 	admin.HandleFunc("/pair/cancel", d.cancelPair)
 	admin.HandleFunc("/number/refresh", d.refreshNumber)
 	admin.HandleFunc("/call/action", d.callAction)
@@ -190,55 +191,58 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	if len(hosts) > 1 {
-		d.tunnel = hosts[1]
+	if settings.TunnelInterface != "" {
+		if ip, ok := interfaceAddress(settings.TunnelInterface, true); ok {
+			d.tunnel = ip
+		}
 	}
 	listeners, e := bindDirectListeners(hosts, settings)
 	if e != nil {
 		log.Fatal(e)
 	}
+	d.direct = listeners
 	defer listeners.close()
+	// 广告里的 host 必须是"手机当下真能连上的那个地址"：iOS 只认 TXT 的 host，
+	// 不看 A 记录。切网由 airsim-netmode 写 /tmp/airsim-direct-host 并调 /rebind。
+	if adHost := d.adHostFor(hosts); adHost != "" {
+		d.lan = adHost
+	}
+	gwAd, e := d.publishAdvertisement(d.lan)
+	if e != nil {
+		log.Print("Bonjour unavailable; manual IP pairing remains available")
+	} else {
+		d.adMu.Lock()
+		d.vowlanAd = gwAd
+		d.adMu.Unlock()
+		defer gwAd.Shutdown()
+	}
 	d.directHosts = make(map[string]bool)
 	for _, host := range hosts {
 		d.directHosts[host] = true
 	}
-	servers := []*http.Server{{Addr: "127.0.0.1:7581", Handler: admin, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 45 * time.Second, MaxHeaderBytes: 8192}}
-	adminServer := servers[0]
+	adminServer := &http.Server{Addr: "127.0.0.1:7581", Handler: admin, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 45 * time.Second, MaxHeaderBytes: 8192}
+	d.ctx = ctx
+	d.cancel = cancel
+	d.public = privatePairing(public)
+	d.srvMu.Lock()
+	d.servers = append(d.servers, adminServer)
+	d.srvMu.Unlock()
 	go func() {
 		if err := adminServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			cancel()
 		}
 	}()
 	for _, endpoint := range listeners.endpoints {
-		pairServer := &http.Server{Handler: privatePairing(public), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, MaxHeaderBytes: 8192}
-		controlServer := &http.Server{Handler: d.gateway, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 80 * time.Second, MaxHeaderBytes: 8192}
-		servers = append(servers, pairServer, controlServer)
-		go func() {
-			if err := pairServer.Serve(endpoint.pair); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				cancel()
-			}
-		}()
-		go func() {
-			if err := controlServer.Serve(endpoint.control); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				cancel()
-			}
-		}()
-		go func(l net.Listener) {
-			for {
-				c, err := l.Accept()
-				if err != nil {
-					return
-				}
-				go d.gateway.ServePCM(ctx, c)
-			}
-		}(endpoint.pcm)
+		d.serveEndpoint(endpoint)
 	}
 	log.Printf("MU300 plugin ready; pairing port %d", settings.PairPort)
 	<-ctx.Done()
 	d.closePair("")
-	for _, s := range servers {
+	d.srvMu.Lock()
+	for _, s := range d.servers {
 		s.Close()
 	}
+	d.srvMu.Unlock()
 	listener.Close()
 	listeners.close()
 	d.gateway.Shutdown()
@@ -305,7 +309,7 @@ func (d *daemon) status(w http.ResponseWriter, r *http.Request) {
 	bonjour := d.advertisement != nil
 	d.adMu.Unlock()
 	calls := d.callsSnapshot(r.Context())
-	write(w, 200, map[string]any{"product": "AirSIM for MU300", "version": version, "running": true, "lan_ip": d.lan, "tunnel_ip": d.tunnel, "pairing_port": d.settings.PairPort, "control_port": d.settings.ControlPort, "pcm_port": d.settings.PCMPort, "mode": d.settings.Mode, "bonjour_pairing": session != nil && bonjour, "agent_id": d.deviceID, "pairing": session, "paired_this_boot": paired, "audio": d.bridge.Status(), "gateway": d.gateway.Diagnostics(), "devices": dev, "audio_available": e == nil, "agent": d.agentHealth(), "sim": d.agentGet("/api/status"), "relay": d.agentGet("/api/push/status"), "call_active": !calls.Available || len(calls.Calls) > 0, "calls": calls})
+	write(w, 200, map[string]any{"product": "AirSIM for MU300", "version": version, "running": true, "lan_ip": d.lan, "ad_host": d.lan, "bind_hosts": d.hostList(), "tunnel_ip": d.tunnel, "pairing_port": d.settings.PairPort, "control_port": d.settings.ControlPort, "pcm_port": d.settings.PCMPort, "mode": d.settings.Mode, "bonjour_pairing": session != nil && bonjour, "agent_id": d.deviceID, "pairing": session, "paired_this_boot": paired, "audio": d.bridge.Status(), "gateway": d.gateway.Diagnostics(), "devices": dev, "audio_available": e == nil, "agent": d.agentHealth(), "sim": d.agentGet("/api/status"), "relay": d.agentGet("/api/push/status"), "call_active": !calls.Available || len(calls.Calls) > 0, "calls": calls})
 }
 
 func (d *daemon) callActive() bool {
@@ -387,7 +391,9 @@ func (d *daemon) startPair(w http.ResponseWriter, r *http.Request) {
 	}
 	d.adMu.Lock()
 	var ad *zeroconf.Server
-	if i, err := net.InterfaceByName(d.ifname); err == nil {
+	// 配对广告必须发在"手机所在那张网卡"上：Wi-Fi 上行时那是 wlan0，
+	// 死写 br-lan 的话手机连组播都收不到（这也是"Wi-Fi 下搜不到配对"的一半原因）。
+	if i := d.interfaceForHost(d.lan); i != nil {
 		ad, _ = zeroconf.RegisterProxy("AirSIM-MU300-"+s.ID[:8], "_airsim-pair._tcp", "local.", d.settings.PairPort, "airsim-"+s.ID[:8], []string{d.lan}, []string{"v=1", "session=" + s.ID, "key=" + s.Public, fmt.Sprintf("expires=%d", s.Expires)}, []net.Interface{*i})
 		if ad != nil {
 			ad.TTL(30)
@@ -552,4 +558,207 @@ func prepareRegistration(reg map[string]any, deviceID string) {
 	reg["android_device_name"] = "AirSIM MU300"
 	reg["android_manufacturer"] = "ZTE"
 	reg["android_model"] = "MU300"
+}
+
+// ---- 直连监听与 Bonjour 广告的运行期重建 ----
+// iOS 只认 TXT 里的 host（不看 A 记录），并且把配对时的地址存进 UserDefaults。
+// 切网或换 IP 之后，设备必须把监听搬到新地址、把广告里的 host 换成新地址：
+// 否则手机拿旧地址连不上，新地址又发现不了。这里做运行期重建而不是重启进程，
+// 因为重启会把正在通话的控制 / PCM 会话一起掐掉。
+
+const directHostFile = "/tmp/airsim-direct-host"
+
+// serveEndpoint 给一组直连监听挂上配对 / 控制 / PCM 服务。
+// 首次启动和运行期重绑共用这一个函数：重绑只搬地址、不重启进程，
+// 但新 listener 必须重新挂服务，否则端口在听、却没人 accept（真机踩过：
+// TCP 握手成功、HTTP 一直挂着超时）。
+func (d *daemon) serveEndpoint(ep directEndpoint) {
+	pairServer := &http.Server{Handler: d.public, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, MaxHeaderBytes: 8192}
+	controlServer := &http.Server{Handler: d.gateway, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 80 * time.Second, MaxHeaderBytes: 8192}
+	d.srvMu.Lock()
+	d.servers = append(d.servers, pairServer, controlServer)
+	d.srvMu.Unlock()
+	go func() {
+		if err := pairServer.Serve(ep.pair); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			d.cancel()
+		}
+	}()
+	go func() {
+		if err := controlServer.Serve(ep.control); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			d.cancel()
+		}
+	}()
+	go func(l net.Listener) {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go d.gateway.ServePCM(d.ctx, c)
+		}
+	}(ep.pcm)
+}
+
+func (d *daemon) publishAdvertisement(host string) (*zeroconf.Server, error) {
+	txt := []string{"v=1", "agent_id=" + d.deviceID, "agent_kind=mu300", "device_name=AirSIM MU300",
+		"manufacturer=ZTE", "model=MU300", "host=" + host,
+		"control_port=" + portText(d.settings.ControlPort),
+		"pcm_port=" + portText(d.settings.PCMPort), "caps=control,pcm"}
+	// 一条广告只能带一个 host：必须在 host 所属那张网卡上广播。
+	// 同时往 br-lan 和 wlan0 发，另一侧手机就会拿到它根本去不了的地址。
+	var ifaces []net.Interface
+	if i := d.interfaceForHost(host); i != nil {
+		ifaces = []net.Interface{*i}
+	}
+	name := "AirSIM-MU300"
+	if id := d.deviceID; len(id) > 8 {
+		name += "-" + id[len(id)-8:]
+	}
+	ad, err := zeroconf.Register(name, "_airsim-vowlan._tcp", "local.", d.settings.ControlPort, txt, ifaces)
+	if err != nil {
+		return nil, err
+	}
+	return ad, nil
+}
+
+func (d *daemon) interfaceForHost(host string) *net.Interface {
+	for _, n := range directInterfaceNames(d.settings) {
+		if ip, ok := interfaceAddress(n, n == d.settings.TunnelInterface); ok && ip == host {
+			if i, err := net.InterfaceByName(n); err == nil {
+				return i
+			}
+		}
+	}
+	if i, err := net.InterfaceByName(d.settings.Interface); err == nil {
+		return i
+	}
+	return nil
+}
+
+// adHostFor 选广告 host：优先采纳 netmode 写的指示文件（它知道当下是热点还是
+// Wi-Fi 上行），但文件里的地址必须真在当前监听列表里，防止写过时的值。
+func (d *daemon) adHostFor(hosts []string) string {
+	if b, err := os.ReadFile(directHostFile); err == nil {
+		if h := strings.TrimSpace(string(b)); h != "" {
+			for _, v := range hosts {
+				if v == h {
+					return h
+				}
+			}
+		}
+	}
+	// 指示文件可能是上一次开机残留的旧地址（已经不在监听列表里）。
+	// 这种情况按 /proc/net/route 判断当下哪张卡扛着默认路由：Wi-Fi 模式是
+	// 无线口，热点/蜂窝模式是 LAN 桥。重启后也能自己选对。
+	if s := d.settings.STAInterface; s != "" && interfaceDefaultRoute(s) {
+		if ip, ok := interfaceAddress(s, false); ok {
+			return ip
+		}
+	}
+	if ip, ok := interfaceAddress(d.settings.Interface, false); ok {
+		return ip
+	}
+	return d.lan
+}
+
+// interfaceDefaultRoute 看某网卡是否扛着默认路由（/proc/net/route 里
+// destination 全 0 的那一行）。
+func interfaceDefaultRoute(name string) bool {
+	b, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		if f[0] == name && f[1] == "00000000" {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *daemon) hostListLocked() []string {
+	hosts := make([]string, 0, len(d.directHosts))
+	for h := range d.directHosts {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+	return hosts
+}
+
+func (d *daemon) hostList() []string {
+	d.listenersMu.Lock()
+	defer d.listenersMu.Unlock()
+	return d.hostListLocked()
+}
+
+func (d *daemon) rebind() error {
+	d.listenersMu.Lock()
+	defer d.listenersMu.Unlock()
+	hosts, err := directAddresses(d.settings)
+	if err != nil {
+		return err
+	}
+	// 必须先关旧的再绑新的：地址没变时同一进程再绑同一 host:port 会直接
+	// EADDRINUSE（2026-11-12 真机踩到）。代价是中间有一毫秒级空窗，可接受。
+	oldHosts := d.hostListLocked()
+	if old := d.direct; old != nil {
+		old.close()
+	}
+	d.direct = nil
+	next, err := bindDirectListeners(hosts, d.settings)
+	if err != nil {
+		// 新地址绑不上就退回旧地址，别让设备变成"哪边都不通"
+		if prev, e2 := bindDirectListeners(oldHosts, d.settings); e2 == nil {
+			d.direct = prev
+		}
+		return err
+	}
+	d.direct = next
+	for _, ep := range next.endpoints {
+		d.serveEndpoint(ep)
+	}
+	dm := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		dm[h] = true
+	}
+	d.directHosts = dm
+	if d.settings.TunnelInterface != "" {
+		if ip, ok := interfaceAddress(d.settings.TunnelInterface, true); ok {
+			d.tunnel = ip
+		} else {
+			d.tunnel = ""
+		}
+	}
+	adHost := d.adHostFor(hosts)
+	ad, adErr := d.publishAdvertisement(adHost)
+	d.adMu.Lock()
+	old := d.vowlanAd
+	if adErr == nil {
+		d.vowlanAd = ad
+	}
+	d.adMu.Unlock()
+	if old != nil {
+		old.Shutdown()
+	}
+	d.mu.Lock()
+	d.lan = adHost
+	d.mu.Unlock()
+	// 新地址的监听已经起来，广告发不发得出去属于次要问题：
+	// mDNS 挂了还有手动填地址这条路，不该让整次重绑算失败。
+	return nil
+}
+
+func (d *daemon) rebindHandler(w http.ResponseWriter, r *http.Request) {
+	if !method(w, r, "POST") {
+		return
+	}
+	if err := d.rebind(); err != nil {
+		write(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	write(w, 200, map[string]any{"ok": true, "ad_host": d.lan, "bind_hosts": d.hostList(), "tunnel_ip": d.tunnel})
 }
