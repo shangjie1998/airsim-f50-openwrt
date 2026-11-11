@@ -80,14 +80,20 @@ else
 fi
 
 # ---- 5. 音频 KERNEL 元数据 ----
+# 判据只认"档位对得上"：KERNEL 文件在、KREL 字段等于本机内核、模块 vermagic 也认本机内核。
+# 不再比 CONFIG 哈希：编模块时的构建配置和运行内核导出的 /proc/config.gz 天然不是同一份东西，
+# 比它只会天天报红（2026-11-11 真机踩到：声卡已正常出声，判据仍报对不上）。CONFIG 只当记录留着。
 kf=$EXT/modules/$KREL/KERNEL
-want=$(cfg_hash)
 if [ -f "$kf" ]; then
-	got=$(sed -n 's/^CONFIG=//p' "$kf" | head -1)
-	if [ "$got" = "$want" ]; then
-		add '音频身份元数据' ok 0 'CONFIG 与本机内核一致'
+	krel_k=$(sed -n 's/^KREL=//p' "$kf" | head -1)
+	ko1=$(ls "$EXT/modules/$KREL"/*.ko 2>/dev/null | head -1)
+	if [ -n "$krel_k" ] && [ "$krel_k" != "$KREL" ]; then
+		add '音频身份元数据' fail 1 "KERNEL 写的是 $krel_k，本机 $KREL（档位对不上，工具会拒绝加载）"
+	elif [ -n "$ko1" ] && ! grep -aq "$KREL" "$ko1" 2>/dev/null; then
+		add '音频身份元数据' fail 1 "模块 vermagic 不认本机内核 $KREL（.ko 是别处编的）"
 	else
-		add '音频身份元数据' fail 1 "CONFIG 对不上（文件 ${got%${got#????????}}…，本机 ${want%${want#????????}}…）"
+		n=$(ls "$EXT/modules/$KREL"/*.ko 2>/dev/null | wc -l)
+		add '音频身份元数据' ok 0 "档位对得上（KREL=$KREL，模块 $n 个）"
 	fi
 else
 	add '音频身份元数据' fail 1 "缺 $kf，工具会拒绝加载"
@@ -139,13 +145,17 @@ if [ "$FIX" = 1 ]; then
 		fixed="$fixed 预留脚本 enable"
 	fi
 
-	# 2) KERNEL 元数据：按本机内核配置现算
-	if [ -d "$EXT/modules/$KREL" ]; then
-		got=$(sed -n 's/^CONFIG=//p' "$kf" 2>/dev/null | head -1)
-		if [ "$got" != "$want" ]; then
+	# 2) KERNEL 元数据：只校正档位字段（KREL / KEY），CONFIG 原样保留作记录，不按本机哈希改写
+	if [ -d "$EXT/modules/$KREL" ] && [ -f "$kf" ]; then
+		got=$(sed -n 's/^KREL=//p' "$kf" | head -1)
+		if [ "$got" != "$KREL" ]; then
 			key=$(printf '%s' "$KREL" | cut -d. -f1-2)
-			printf 'KEY=%s\nKREL=%s\nCONFIG=%s\nTAG=%s\n' "$key" "$KREL" "$want" "$(cat "$EXT/audio-opt-tag" 2>/dev/null || echo unknown)" > "$kf"
-			fixed="$fixed 音频身份元数据"
+			cfg=$(sed -n 's/^CONFIG=//p' "$kf" | head -1)
+			[ -n "$cfg" ] || cfg=$(cfg_hash)
+			tag=$(sed -n 's/^TAG=//p' "$kf" | head -1)
+			[ -n "$tag" ] || tag=$(sed -n 's/^TAG=//p' "$EXT/audio-opt-tag" | head -1)
+			printf 'KEY=%s\nKREL=%s\nCONFIG=%s\nTAG=%s\n' "$key" "$KREL" "$cfg" "$tag" > "$kf"
+			fixed="$fixed 音频档位元数据"
 		fi
 	fi
 
