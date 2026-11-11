@@ -7,6 +7,9 @@ set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH= cd -- "$HERE/../.." && pwd)
 OUT=${1:-$REPO/out/f50}
+# 输出目录必须是绝对路径：后面会 cd 进源码树再 go build，
+# 相对路径会跟着 cwd 跑，产物落到 out/build-f50/plugin/out/f50 里，校验步骤找不到。
+case "$OUT" in /*) ;; *) OUT=$(pwd)/$OUT ;; esac
 BUILD=$REPO/out/build-f50
 SDK=${GO_SDK:-$HOME/Documents/doubaokaifagongju/go/go-sdk/go}
 
@@ -18,7 +21,7 @@ rm -rf "$BUILD" && mkdir -p "$BUILD"
 rsync -a "$REPO/src/" "$BUILD/"
 # 补丁体检：能不能干净打上、上游是不是已经自己做了。打不上由 apply.py 硬失败，
 # 这里提前把表打出来，方便一眼看到哪个补丁要人修。
-python3 "$REPO/scripts/check-patches.py" || echo "(补丁体检有提示，见上；不影响继续构建)" >&2
+python3 "$REPO/build/tools/check-patches.py" || echo "(补丁体检有提示，见上；不影响继续构建)" >&2
 python3 "$HERE/apply.py" "$BUILD"
 
 export GOROOT="$SDK"; export PATH="$SDK/bin:$PATH"; export GOFLAGS=-mod=vendor
@@ -32,5 +35,8 @@ cd "$BUILD/plugin"
 go build -buildvcs=false -trimpath -ldflags="-s -w -X main.version=$(cat "$REPO/VERSION")" -o "$OUT/airsim-mu300d" ./cmd/airsim-mu300d
 
 echo "== 编好 =="
+for f in airsim-mu300d airsim-agent; do
+	[ -x "$OUT/$f" ] || { echo "缺产物: $OUT/$f" >&2; exit 1; }
+done
 ls -l "$OUT"
 file "$OUT/airsim-mu300d" | cut -c1-60
