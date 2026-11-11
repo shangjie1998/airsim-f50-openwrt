@@ -6,7 +6,8 @@
 				"airsim-audio": [
 					"audio_opt_probe",
 					"selfcheck_run",
-					"audio_opt_latest"
+					"audio_opt_latest",
+					"kernel_bundles"
 				]
 			}
 		},

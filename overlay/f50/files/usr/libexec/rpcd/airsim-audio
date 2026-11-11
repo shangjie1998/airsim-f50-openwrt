@@ -18,6 +18,8 @@ OPT_KERNELS="6.18.60 7.3.1"
 EXT=/mnt/mu300-disk/extra/airsim-audio
 DIR=/tmp/airsim-audioopt
 RUN=/usr/libexec/airsim-audioopt-install
+BOOT=/mnt/mu300-disk/boot
+PKGDIR=/mnt/mu300-disk/pkg
 WANT_KO=25
 
 # 版本比较：a 比 b 新返回 0（awk 退出码），否则 1
@@ -35,7 +37,10 @@ ver_gt() {
 # 配件包"检查更新"：查最新 release tag 与资产名。逻辑全在 /usr/libexec/airsim-opt-latest，
 # 这里只负责把它吐的 KEY=value 转成 JSON，并把"比本机这个新不新"判出来。
 audio_opt_latest() {
-	_cur=${TAG#audio-opt-v}
+	# 已装版本是「设备上实际装的」，不是包里钉的 TAG：拿 TAG 会永远显示"已是最新"
+	_cur=$(status_field version)
+	[ -n "$_cur" ] || _cur=$(cat "$EXT/audio-opt-version" 2>/dev/null)
+	[ -n "$_cur" ] || _cur=${TAG#audio-opt-v}
 	_ok=0; _tag=; _ver=; _file=; _at=0; _cool=0; _err='查不到（脱网或被拒）'; _stale=0; _cached=0
 	
 	# rpcd 的入参走环境变量（force=1 时忽略缓存强制联网）
@@ -251,9 +256,33 @@ _out=$(sh /usr/libexec/airsim-postflash-check $_flags 2>/dev/null) || _out='{"ok
 	printf '%s\n' "$_out"
 }
 
+# 切换内核用：列出本机现成的内核包、boot 里记的是哪一档，给页面拼命令用（只读，不执行切换）
+kernel_bundles() {
+	json_init
+	json_add_string action kernel_bundles
+	json_add_string kernel "$(uname -r)"
+	json_add_string kernel_short "$(uname -r | cut -d. -f1,2)"
+	json_add_string installed "$(cat "$BOOT/installed.kernel" 2>/dev/null)"
+	json_add_string installed_tag "$(cat "$BOOT/installed.tag" 2>/dev/null)"
+	json_add_array choices
+	for k in 5.4 6.18 7.3; do json_add_string "" "$k"; done
+	json_close_array
+	json_add_array bundles
+	for f in "$PKGDIR"/*kernel*.tar.gz /tmp/*kernel*.tar.gz; do
+		[ -f "$f" ] || continue
+		json_add_object ""
+		json_add_string path "$f"
+		json_add_string name "$(basename "$f")"
+		json_add_int size "$(stat -c %s "$f" 2>/dev/null || echo 0)"
+		json_close_object
+	done
+	json_close_array
+	json_dump
+}
+
 case "$1" in
 	list)
-		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{},"audio_opt_latest":{},"selfcheck_run":{},"selfcheck_fix":{}}'
+		printf '%s\n' '{"audio_opt_probe":{},"audio_opt_install":{},"audio_opt_latest":{},"selfcheck_run":{},"selfcheck_fix":{},"kernel_bundles":{}}'
 		;;
 	call)
 		case "$2" in
@@ -262,6 +291,7 @@ case "$1" in
 			audio_opt_latest) audio_opt_latest ;;
 			selfcheck_run) sc_run ;;
 			selfcheck_fix) sc_run fix ;;
+			kernel_bundles) kernel_bundles ;;
 		esac
 		;;
 	*)

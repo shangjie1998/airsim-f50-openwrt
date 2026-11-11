@@ -16,10 +16,10 @@ var btProbe = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_probe', expect:
 var btInstall = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_install', expect: {}, reject: true, nobatch: true });
 var audioProbe = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_probe', expect: {}, reject: true });
 var audioInstall = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_install', expect: {}, reject: true, nobatch: true });
-var scRun = rpc.declare({ object: 'airsim-audio', method: 'selfcheck_run', expect: {}, reject: true, nobatch: true });
-var scFix = rpc.declare({ object: 'airsim-audio', method: 'selfcheck_fix', expect: {}, reject: true, nobatch: true });
 var btLatest = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
 var audioLatest = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
+var flowCheck = rpc.declare({ object: 'airsim-net', method: 'flowfix_check', expect: {}, reject: true, nobatch: true });
+var flowFix = rpc.declare({ object: 'airsim-net', method: 'flowfix_fix', expect: {}, reject: true, nobatch: true });
 
 var releasesURL = 'https://github.com/shangjie1998/airsim-f50-openwrt/releases';
 
@@ -299,78 +299,7 @@ return view.extend({
   ]);
 
 
-  /* ---------------- 配件包检查更新：音频 / 蓝牙共用一套 ---------------- */
-  /* 卡片右上角一组：左边版本号，右边圆形图标按钮。图标随状态变：
-     ↻ 可查（灰） / 旋转 正在查 / ✓ 已是最新（灰绿） / ↑ 有新版本（绿） / ⚠ 查不到（红） */
-  function stamp(epoch) {
-   var n = Number(epoch || 0);
-   if (!n) return '';
-   var d = new Date(n * 1000), p2 = function (x) { return (x < 10 ? '0' : '') + x; };
-   return p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
-  }
-
-  function makeLatestChecker(o) {
-   var ver = E('span', { 'class': 'as-ver' }, o.opt + ' v' + (o.current || '—'));
-   var glyph = E('span', { 'class': 'as-glyph' }, '↻');
-   var btn = E('button', { 'type': 'button', 'class': 'as-icon-btn', 'title': '检查更新（6 小时内不重复联网）' }, [glyph]);
-   var mini = E('p', { 'class': 'as-caption as-opt-mini' }, '');
-   var busy = false, painted = false;
-
-   function paint(res, forced) {
-    painted = true;
-    res = res || {};
-    var latest = res.latest_ver || '', cur = res.current_ver || o.current || '';
-    if (res.has_update === true && latest) {
-     ver.textContent = o.opt + ' v' + cur + ' → v' + latest;
-     glyph.textContent = '↑';
-     btn.className = 'as-icon-btn as-icon-on';
-     btn.title = '有新版本 ' + (res.latest_tag || '') + '：点下面的按钮会直接拉新版';
-     mini.className = 'as-caption as-opt-mini as-mini-green';
-     mini.textContent = '有新版本 ' + (res.latest_tag || ('v' + latest)) + '，点「' + o.installLabel + '」会直接装这个新版。';
-     return;
-    }
-    if (res.ok === true) {
-     ver.textContent = o.opt + ' v' + (cur || latest);
-     glyph.textContent = '✓';
-     btn.className = 'as-icon-btn';
-     mini.className = 'as-caption as-opt-mini';
-     mini.textContent = '已是最新' + (latest ? '（v' + latest + '）' : '')
-      + (stamp(res.checked_at) ? '，' + stamp(res.checked_at) + ' 查的' : '')
-      + (res.cooldown === true ? '；冷却中，这次没联网' : '')
-      + (res.error ? '。' + res.error : '');
-     return;
-    }
-    glyph.textContent = '⚠';
-    btn.className = 'as-icon-btn';
-    mini.className = 'as-caption as-opt-mini as-mini-red';
-    mini.textContent = (res.error || '查不到最新版本')
-     + (stamp(res.checked_at) ? '；上次查到的：v' + (latest || '—') + '（' + stamp(res.checked_at) + '）' : '')
-     + (forced ? '；可能是脱网或 GitHub 暂时拒绝，过会儿再点' : '');
-   }
-
-   function run(force) {
-    if (busy) return Promise.resolve();
-    busy = true; btn.disabled = true; glyph.className = 'as-glyph as-spin';
-    return o.check(force ? 1 : 0).then(function (r) {
-     paint(r, force);
-    }).catch(function (e) {
-     glyph.textContent = '⚠';
-     mini.className = 'as-caption as-opt-mini as-mini-red';
-     mini.textContent = '接口没反应：' + String((e && e.message) || e);
-    }).then(function () {
-     busy = false; btn.disabled = false; glyph.className = 'as-glyph';
-    });
-   }
-
-   btn.addEventListener('click', function () { run(true); });
-
-   function setCurrent(v) {
-    if (!v || painted) return;
-    ver.textContent = o.opt + ' v' + v;
-   }
-
-   return { ver: ver, btn: btn, mini: mini, run: run, paint: paint, setCurrent: setCurrent };
-  }
+  /* 检查更新小部件在 ui.js（ui.latestChecker / ui.stampEpoch），两个页面共用一套。 */
 
   /* ---------------- 可选配件：蓝牙 ---------------- */
   var optNote = noticeBox();
@@ -378,7 +307,7 @@ return view.extend({
   var optMsg = E('p', { 'class': 'as-caption' }, '正在问本机装没装。');
   var optBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装蓝牙');
   var optBusy = false;
-  var btLc = makeLatestChecker({ opt: 'bt-opt', current: '', installLabel: '重新安装蓝牙', check: btLatest });
+  var btLc = ui.latestChecker({ opt: 'bt-opt', current: '', installLabel: '重新安装蓝牙', check: btLatest });
 
   function syncOpt(info) {
    info = info || {};
@@ -435,7 +364,7 @@ return view.extend({
   var audMsg = E('p', { 'class': 'as-caption' }, '正在问本机音频模块齐不齐。');
   var audBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装音频模块');
   var audBusy = false;
-  var audLc = makeLatestChecker({ opt: 'audio-opt', current: '', installLabel: '安装音频模块', check: audioLatest });
+  var audLc = ui.latestChecker({ opt: 'audio-opt', current: '', installLabel: '安装音频模块', check: audioLatest });
 
   function syncAud(info) {
    info = info || {};
@@ -494,64 +423,7 @@ return view.extend({
    });
   });
 
-  /* ---------------- 刷机后自检 ---------------- */
-  var scChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '没查');
-  var scMsg = E('p', { 'class': 'as-caption' }, '刷机、升级、换内核之后点一次：内核、模块树、DSP 内存预留、开机脚本、身份元数据、蓝牙三件、hci0、主服务，八项一起看。');
-  var scList = E('ul', { 'class': 'as-instructions' }, []);
-  var scBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '运行自检');
-  var scFixBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '补齐能补的');
-  var scBusy = false;
-
-  function renderSc(res) {
-   res = res || {};
-   if (res.ok !== true) {
-    scChip.textContent = '不可用';
-    scChip.className = 'as-pill as-pill-red';
-    scMsg.textContent = res.error || '自检没跑起来（主包可能较旧）。';
-    scBtn.disabled = false;
-    scFixBtn.disabled = true;
-    return;
-   }
-   var items = res.items || [], okc = res.ok_count || 0, tot = res.total || items.length;
-   scChip.textContent = okc + '/' + tot + ' 项正常';
-   scChip.className = 'as-pill ' + (okc === tot ? 'as-pill-green' : (okc >= tot - 2 ? 'as-pill-neutral' : 'as-pill-red'));
-   scMsg.textContent = '内核 ' + (res.kernel || '未知') + (res.fixed ? '；刚补了：' + res.fixed : '') + (okc === tot ? '；这一套齐了。' : '；下面标 ✗ 的就是缺的。');
-   while (scList.firstChild) scList.removeChild(scList.firstChild);
-   items.forEach(function(it) {
-    scList.appendChild(E('li', {}, (it.ok ? '✓ ' : '✗ ') + it.name + ' —— ' + (it.detail || '')));
-   });
-   scBtn.disabled = false;
-   scFixBtn.disabled = (res.fixable_count || 0) < 1;
-   scFixBtn.title = scFixBtn.disabled ? '没有能就地补的缺件（缺的多半属配件包，要装对应包）' : '补开机预留脚本、身份元数据、蓝牙三件（只用本机已有副本）';
-  }
-
-  function runSc(fix) {
-   if (scBusy) return;
-   scBusy = true;
-   scBtn.disabled = true;
-   scFixBtn.disabled = true;
-   scMsg.textContent = fix ? '正在补能补的缺件……' : '正在检查……';
-   (fix ? scFix() : scRun()).then(function(res) {
-    scBusy = false;
-    renderSc(res);
-   }).catch(function(e) {
-    scBusy = false;
-    scBtn.disabled = false;
-    scMsg.textContent = '自检接口没反应：' + String((e && e.message) || e);
-   });
-  }
-
-  scBtn.addEventListener('click', function() { runSc(false); });
-  scFixBtn.addEventListener('click', function() { runSc(true); });
-
-  var scCard = E('section', { 'class': 'as-card' }, [
-   E('h3', {}, '刷机后自检'),
-   E('p', { 'class': 'as-copy' }, '刷机丢的往往不是主包，是散在配件包里的那几件。这里一次查完，缺什么、归谁、能不能就地补，都写清楚。'),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '体检结果'), E('dd', {}, [scChip])]),
-   scMsg,
-   scList,
-   E('div', { 'class': 'as-buttons' }, [scBtn, scFixBtn])
-  ]);
+  /* 刷机后自检挪到「音频」独立页（admin/services/airsim/audio）。 */
 
   var optCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '可选配件'),
@@ -581,19 +453,56 @@ return view.extend({
    E('p', { 'class': 'as-caption' }, '只装可选件本身：蓝牙不动开关状态（/etc/config/f50-bt）和已配对记录；音频只补 6.18.60 的 .ko，不动 DSP 以外的程序。两者都走固定 tag，内核对不上会直接拒绝，不会装半截。')
   ]);
 
+  /* 5.4 专用：连热点的客户端"无互联网"体检与修复（脚本 /usr/libexec/airsim-flowfix） */
+  var flowOut = E('pre', { 'class': 'as-out' }, '还没体检。');
+  var flowMsg = E('p', { 'class': 'as-caption' }, '只在 5.4 厂商内核上出现这个问题；6.18 / 7.3 上点了会提示不需要。');
+  var flowBusy = false;
+
+  function renderFlow(r) {
+   r = r || {};
+   flowOut.textContent = r.output || '（没有输出）';
+   var res = r.result || '';
+   if (res === 'ok') { flowMsg.className = 'as-caption as-mini-green'; flowMsg.textContent = '当前没这个问题，不用动。'; }
+   else if (res === 'need_fix') { flowMsg.className = 'as-caption as-mini-red'; flowMsg.textContent = '已经坏了：点「修复」会把软件流卸载关掉并重启防火墙。'; }
+   else if (res === 'suggest') { flowMsg.className = 'as-caption'; flowMsg.textContent = '现在还没坏，但开关是开的——建议先点「修复」预防，切到流量模式就不会踩雷。'; }
+   else if (res === 'fixed') { flowMsg.className = 'as-caption as-mini-green'; flowMsg.textContent = '已经修好。客户端断开重连一次热点即可。'; }
+   else if (res === 'skip') { flowMsg.className = 'as-caption'; flowMsg.textContent = '这个内核没有这个问题，不用修。'; }
+   else { flowMsg.className = 'as-caption as-mini-red'; flowMsg.textContent = '执行失败，看下面的输出。'; }
+  }
+
+  function runFlow(fn) {
+   if (flowBusy) return;
+   flowBusy = true;
+   flowCheckBtn.disabled = flowFixBtn.disabled = true;
+   flowOut.textContent = '执行中…';
+   fn().then(function(r) { renderFlow(r[0]); }).catch(function(e) {
+    flowMsg.className = 'as-caption as-mini-red';
+    flowMsg.textContent = '接口没反应：' + String((e && e.message) || e);
+   }).then(function() { flowBusy = false; flowCheckBtn.disabled = flowFixBtn.disabled = false; });
+  }
+
+  var flowCheckBtn = E('button', { 'type': 'button', 'class': 'as-button', 'click': function() { runFlow(flowCheck); } }, '体检');
+  var flowFixBtn = E('button', { 'type': 'button', 'class': 'as-button', 'click': function() { runFlow(flowFix); } }, '修复');
+
+  var flowCard = E('section', { 'class': 'as-card' }, [
+   E('h3', {}, '客户端上网体检（5.4）'),
+   flowMsg,
+   flowOut,
+   E('div', { 'class': 'as-buttons' }, [flowCheckBtn, flowFixBtn])
+  ]);
+
   var versionCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '版本说明'),
    E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, '当前安装：' + (state.version || '—')),
    E('ul', { 'class': 'as-instructions' }, [
-    E('li', {}, '当前线：OpenWrt 6.18 内核（kano 上游分支）+ 本项目 overlay，单卡。'),
+    E('li', {}, '主包不绑内核：5.4.254 / 6.18.60 / 7.3.1 一条包，只剩 aarch64 架构闸。'),
     E('li', {}, '备份包按设备指纹（eMMC cid + 序列号）标记，换 TF 卡不变，别人的包装不进来。'),
-    E('li', {}, '6.18 线不再提供断网修复脚本；5.4 时代那套已归档，不与当前版本混用。'),
+    E('li', {}, '5.4 的热点客户端"无互联网"老问题：脚本 /usr/libexec/airsim-flowfix 已随主包提供，维护页有体检/修复按钮。'),
     E('li', {}, '重启后丢音频属上游内存预留限制，靠开机轮询脚本抢占，不改内核。'),
     E('li', {}, '双卡逻辑保留在页面代码里，本机只有一张卡，卡选择自动隐藏。')
    ])
   ]);
 
-  scRun().then(renderSc).catch(function() { scMsg.textContent = '这台机器没有自检接口（主包版本较旧）。'; });
   btProbe().then(syncOpt).catch(function() { optMsg.textContent = '这台机器没有安装器接口（主包版本较旧）。'; });
   audioProbe().then(syncAud).catch(function() { audMsg.textContent = '这台机器没有音频可选件接口（主包版本较旧）。'; });
 
@@ -613,7 +522,7 @@ return view.extend({
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 维护'), E('h2', {}, '备份、更新、诊断。'), E('p', {}, '折腾完想回退的时候，这里能救回来。')]),
     E('span', { 'class': 'as-version' }, 'v' + (state.version || '—'))
    ]),
-   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, optCard, scCard, diagCard, versionCard]),
+   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, optCard, flowCard, diagCard, versionCard]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 维护')
   ]);
  },

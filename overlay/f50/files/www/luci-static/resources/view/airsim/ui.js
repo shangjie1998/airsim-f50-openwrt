@@ -102,7 +102,8 @@ var PAGES = [
  { id: 'sms',         title: '短信' },
  { id: 'maintenance', title: '维护' },
  { id: 'settings',    title: '外观与设置' },
- { id: 'bluetooth',   title: '蓝牙' }
+ { id: 'bluetooth',   title: '蓝牙' },
+ { id: 'audio',       title: '音频' }
 ];
 
 /* 链接一律交给 L.url 生成：它知道 /cgi-bin/luci 这层前缀和实际脚本名。
@@ -214,6 +215,82 @@ function busy(button, flag) {
  else button.classList.remove('is-busy');
 }
 
+/* ---------------- 配件包「检查更新」小部件（音频/蓝牙两个页面共用） ----------------
+ * 卡片右上角一组：左边版本号，右边圆形图标按钮。图标随状态变：
+ * ↻ 可查（灰） / 旋转 正在查 / ✓ 已是最新 / ↑ 有新版本（绿） / ⚠ 查不到（红）。
+ * 不挂常亮箭头：常亮箭头等于承诺"随时能升"，会误导。
+ * 用法：ui.latestChecker({ opt:'audio-opt', installLabel:'安装音频模块', check: audioLatest })
+ */
+function stampEpoch(epoch) {
+ var n = Number(epoch || 0);
+ if (!n) return '';
+ var d = new Date(n * 1000), p2 = function(x) { return (x < 10 ? '0' : '') + x; };
+ return p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+}
+
+function latestChecker(o) {
+ var ver = E('span', { 'class': 'as-ver' }, o.opt + ' v' + (o.current || '—'));
+ var glyph = E('span', { 'class': 'as-glyph' }, '↻');
+ var btn = E('button', { 'type': 'button', 'class': 'as-icon-btn', 'title': '检查更新（6 小时内不重复联网）' }, [glyph]);
+ var mini = E('p', { 'class': 'as-caption as-opt-mini' }, '');
+ var busy = false, painted = false;
+
+ function paint(res, forced) {
+  painted = true;
+  res = res || {};
+  var latest = res.latest_ver || '', cur = res.current_ver || o.current || '';
+  if (res.has_update === true && latest) {
+   ver.textContent = o.opt + ' v' + cur + ' → v' + latest;
+   glyph.textContent = '↑';
+   btn.className = 'as-icon-btn as-icon-on';
+   btn.title = '有新版本 ' + (res.latest_tag || '') + '：点下面的按钮会直接拉新版';
+   mini.className = 'as-caption as-opt-mini as-mini-green';
+   mini.textContent = '有新版本 ' + (res.latest_tag || ('v' + latest)) + '，点「' + o.installLabel + '」会直接装这个新版。';
+   return;
+  }
+  if (res.ok === true) {
+   ver.textContent = o.opt + ' v' + (cur || latest);
+   glyph.textContent = '✓';
+   btn.className = 'as-icon-btn';
+   mini.className = 'as-caption as-opt-mini';
+   mini.textContent = '已是最新' + (latest ? '（v' + latest + '）' : '')
+    + (stampEpoch(res.checked_at) ? '，' + stampEpoch(res.checked_at) + ' 查的' : '')
+    + (res.cooldown === true ? '；冷却中，这次没联网' : '')
+    + (res.error ? '。' + res.error : '');
+   return;
+  }
+  glyph.textContent = '⚠';
+  btn.className = 'as-icon-btn';
+  mini.className = 'as-caption as-opt-mini as-mini-red';
+  mini.textContent = (res.error || '查不到最新版本')
+   + (stampEpoch(res.checked_at) ? '；上次查到的：v' + (latest || '—') + '（' + stampEpoch(res.checked_at) + '）' : '')
+   + (forced ? '；可能是脱网或 GitHub 暂时拒绝，过会儿再点' : '');
+ }
+
+ function run(force) {
+  if (busy) return Promise.resolve();
+  busy = true; btn.disabled = true; glyph.className = 'as-glyph as-spin';
+  return o.check(force ? 1 : 0).then(function(r) {
+   paint(r, force);
+  }).catch(function(e) {
+   glyph.textContent = '⚠';
+   mini.className = 'as-caption as-opt-mini as-mini-red';
+   mini.textContent = '接口没反应：' + String((e && e.message) || e);
+  }).then(function() {
+   busy = false; btn.disabled = false; glyph.className = 'as-glyph';
+  });
+ }
+
+ btn.addEventListener('click', function() { run(true); });
+
+ function setCurrent(v) {
+  if (!v || painted) return;
+  ver.textContent = o.opt + ' v' + v;
+ }
+
+ return { ver: ver, btn: btn, mini: mini, run: run, paint: paint, setCurrent: setCurrent };
+}
+
 return baseclass.extend({
  install: install,
  paint: paint,
@@ -229,5 +306,7 @@ return baseclass.extend({
  setMode: setMode,
  setDensity: setDensity,
  setTransparency: setTransparency,
- isDark: function() { return isDark(parse()); }
+ isDark: function() { return isDark(parse()); },
+ stampEpoch: stampEpoch,
+ latestChecker: latestChecker
 });
