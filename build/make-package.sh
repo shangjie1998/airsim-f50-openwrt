@@ -19,18 +19,19 @@ NAME=airsim-f50-$VER
 STAGE=$HERE/dist/stage/$NAME
 OUT=$HERE/dist/$NAME.tar.gz
 
-# 打包前先过一致性闸（版本号 / 配件包版本 / 内核口径文档），不一致就不许出包
+if [ "${1:-}" = "--build" ]; then
+	: "${GOROOT:=$HOME/Documents/doubaokaifagongju/go/go-sdk/go}"
+	export GOROOT PATH="$GOROOT/bin:$PATH"
+	sh "$HERE/overlay/f50/build.sh" >/dev/null
+fi
+
+# 一致性闸放在重编之后：闸要比对二进制内嵌版本，重编前比对必然对不上（升号后 out/f50 还是上一版）
 if command -v python3 >/dev/null 2>&1; then
 	python3 "$HERE/build/tools/check-consistency.py" || { echo "一致性检查没过，拒绝打包" >&2; exit 1; }
 else
 	echo "  没装 python3，跳过一致性检查（建议装上）" >&2
 fi
 
-if [ "${1:-}" = "--build" ]; then
-	: "${GOROOT:=$HOME/Documents/doubaokaifagongju/go/go-sdk/go}"
-	export GOROOT PATH="$GOROOT/bin:$PATH"
-	sh "$HERE/overlay/f50/build.sh" >/dev/null
-fi
 
 [ -x "$HERE/out/f50/airsim-agent" ] || { echo "没有 out/f50/airsim-agent，先跑 overlay/f50/build.sh" >&2; exit 1; }
 
