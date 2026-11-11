@@ -1,7 +1,22 @@
 {
 	"luci-app-airsim-audio": {
 		"description": "Grant access to F50 6.18 audio module optional package + post-flash self check",
-		"read": { "ubus": { "airsim-audio": [ "audio_opt_probe", "selfcheck_run" ] } },
-		"write": { "ubus": { "airsim-audio": [ "audio_opt_install", "selfcheck_fix" ] } }
+		"read": {
+			"ubus": {
+				"airsim-audio": [
+					"audio_opt_probe",
+					"selfcheck_run",
+					"audio_opt_latest"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"airsim-audio": [
+					"audio_opt_install",
+					"selfcheck_fix"
+				]
+			}
+		}
 	}
 }

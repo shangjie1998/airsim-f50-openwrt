@@ -328,6 +328,32 @@ body.as-menu-on > header .nav{display:none!important}
 .as-backup-drop:hover,.as-backup-drop.is-active{border-color:var(--as-blue);background:color-mix(in srgb,var(--as-blue) 8%,transparent)}
 .as-backup-drop:focus-visible{outline:3px solid color-mix(in srgb,var(--as-blue) 38%,transparent);outline-offset:3px}
 
+
+/* ---------- 配件卡片头：左边标题、右下角「版本号 + 检查更新图标」 ----------
+ * 用法：<div class="as-card-head"><h4>标题</h4><div class="as-head-meta">
+ *          <span class="as-ver">audio-opt v1.0.3</span>
+ *          <button class="as-icon-btn"><span class="as-glyph">↻</span></button>
+ *       </div></div>
+ * 图标语义：↻ 可查 → 旋转(正在查) → ✓ 已最新 / ↑ 有新版本(绿) / ⚠ 查不到(红)。
+ * 不挂常亮箭头：常亮的箭头等于承诺"随时能升"，会误导。
+ */
+.as-root .as-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.as-root .as-card-head h4{margin:0;font-size:var(--as-fs-body);font-weight:600;color:var(--as-ink)}
+.as-root .as-head-meta{display:flex;align-items:center;gap:8px;min-width:0;margin-left:auto}
+.as-root .as-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--as-fs-note);color:var(--as-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.as-root .as-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;
+ border:1px solid var(--as-line);border-radius:999px;background:var(--as-surface-strong);color:var(--as-muted);
+ cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;flex:0 0 auto}
+.as-root .as-icon-btn:hover{background:var(--as-surface);color:var(--as-ink);border-color:var(--as-line-strong)}
+.as-root .as-icon-btn:disabled{opacity:.55;cursor:default}
+.as-root .as-icon-btn.as-icon-on{color:var(--as-green);border-color:var(--as-green);background:var(--as-green-bg)}
+.as-root .as-glyph{font-size:14px;line-height:1;display:inline-block}
+.as-root .as-glyph.as-spin{animation:as-spin 1s linear infinite}
+@keyframes as-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.as-root .as-opt-mini{margin:4px 0 0}
+.as-root .as-opt-mini.as-mini-green{color:var(--as-green)}
+.as-root .as-opt-mini.as-mini-red{color:var(--as-red)}
+
 /* ---------- 响应式（手机档：行转上下排，按钮拉满） ---------- */
 @media(max-width:600px){
  .as-root{padding:16px;border-radius:20px}
@@ -337,6 +363,8 @@ body.as-menu-on > header .nav{display:none!important}
  .as-row{display:block;padding:10px 0}
  .as-row dd{text-align:left;margin-top:3px}
  .as-buttons .as-button{flex:1 1 100%}
+ .as-card-head{gap:8px}
+ .as-head-meta{width:100%;margin-left:0}      /* 窄屏：版本号+图标整组换到标题下面一行，靠左 */
  .as-modal{padding:20px}
  .as-modal .as-modal-actions .as-button{flex:1}
 }
