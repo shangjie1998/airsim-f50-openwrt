@@ -18,6 +18,8 @@ var audioProbe = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_probe'
 var audioInstall = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_install', expect: {}, reject: true, nobatch: true });
 var scRun = rpc.declare({ object: 'airsim-audio', method: 'selfcheck_run', expect: {}, reject: true, nobatch: true });
 var scFix = rpc.declare({ object: 'airsim-audio', method: 'selfcheck_fix', expect: {}, reject: true, nobatch: true });
+var btLatest = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
+var audioLatest = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
 
 var releasesURL = 'https://github.com/shangjie1998/airsim-f50-openwrt/releases';
 
@@ -296,17 +298,93 @@ return view.extend({
    diagNote
   ]);
 
+
+  /* ---------------- 配件包检查更新：音频 / 蓝牙共用一套 ---------------- */
+  /* 卡片右上角一组：左边版本号，右边圆形图标按钮。图标随状态变：
+     ↻ 可查（灰） / 旋转 正在查 / ✓ 已是最新（灰绿） / ↑ 有新版本（绿） / ⚠ 查不到（红） */
+  function stamp(epoch) {
+   var n = Number(epoch || 0);
+   if (!n) return '';
+   var d = new Date(n * 1000), p2 = function (x) { return (x < 10 ? '0' : '') + x; };
+   return p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+  }
+
+  function makeLatestChecker(o) {
+   var ver = E('span', { 'class': 'as-ver' }, o.opt + ' v' + (o.current || '—'));
+   var glyph = E('span', { 'class': 'as-glyph' }, '↻');
+   var btn = E('button', { 'type': 'button', 'class': 'as-icon-btn', 'title': '检查更新（6 小时内不重复联网）' }, [glyph]);
+   var mini = E('p', { 'class': 'as-caption as-opt-mini' }, '');
+   var busy = false, painted = false;
+
+   function paint(res, forced) {
+    painted = true;
+    res = res || {};
+    var latest = res.latest_ver || '', cur = res.current_ver || o.current || '';
+    if (res.has_update === true && latest) {
+     ver.textContent = o.opt + ' v' + cur + ' → v' + latest;
+     glyph.textContent = '↑';
+     btn.className = 'as-icon-btn as-icon-on';
+     btn.title = '有新版本 ' + (res.latest_tag || '') + '：点下面的按钮会直接拉新版';
+     mini.className = 'as-caption as-opt-mini as-mini-green';
+     mini.textContent = '有新版本 ' + (res.latest_tag || ('v' + latest)) + '，点「' + o.installLabel + '」会直接装这个新版。';
+     return;
+    }
+    if (res.ok === true) {
+     ver.textContent = o.opt + ' v' + (cur || latest);
+     glyph.textContent = '✓';
+     btn.className = 'as-icon-btn';
+     mini.className = 'as-caption as-opt-mini';
+     mini.textContent = '已是最新' + (latest ? '（v' + latest + '）' : '')
+      + (stamp(res.checked_at) ? '，' + stamp(res.checked_at) + ' 查的' : '')
+      + (res.cooldown === true ? '；冷却中，这次没联网' : '')
+      + (res.error ? '。' + res.error : '');
+     return;
+    }
+    glyph.textContent = '⚠';
+    btn.className = 'as-icon-btn';
+    mini.className = 'as-caption as-opt-mini as-mini-red';
+    mini.textContent = (res.error || '查不到最新版本')
+     + (stamp(res.checked_at) ? '；上次查到的：v' + (latest || '—') + '（' + stamp(res.checked_at) + '）' : '')
+     + (forced ? '；可能是脱网或 GitHub 暂时拒绝，过会儿再点' : '');
+   }
+
+   function run(force) {
+    if (busy) return Promise.resolve();
+    busy = true; btn.disabled = true; glyph.className = 'as-glyph as-spin';
+    return o.check(force ? 1 : 0).then(function (r) {
+     paint(r, force);
+    }).catch(function (e) {
+     glyph.textContent = '⚠';
+     mini.className = 'as-caption as-opt-mini as-mini-red';
+     mini.textContent = '接口没反应：' + String((e && e.message) || e);
+    }).then(function () {
+     busy = false; btn.disabled = false; glyph.className = 'as-glyph';
+    });
+   }
+
+   btn.addEventListener('click', function () { run(true); });
+
+   function setCurrent(v) {
+    if (!v || painted) return;
+    ver.textContent = o.opt + ' v' + v;
+   }
+
+   return { ver: ver, btn: btn, mini: mini, run: run, paint: paint, setCurrent: setCurrent };
+  }
+
   /* ---------------- 可选配件：蓝牙 ---------------- */
   var optNote = noticeBox();
   var optChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '检查中');
   var optMsg = E('p', { 'class': 'as-caption' }, '正在问本机装没装。');
   var optBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装蓝牙');
   var optBusy = false;
+  var btLc = makeLatestChecker({ opt: 'bt-opt', current: '', installLabel: '重新安装蓝牙', check: btLatest });
 
   function syncOpt(info) {
    info = info || {};
    var installed = info.installed === true, busy = info.busy === true;
    optBusy = busy;
+   btLc.setCurrent(info.ver || (info.version || '').replace(/^bt-opt-v/, ''));
    optChip.textContent = busy ? '正在装' : (installed ? '已安装' : '未安装');
    optChip.className = 'as-pill ' + (installed || busy ? 'as-pill-green' : 'as-pill-neutral');
    optBtn.textContent = installed ? '重新安装蓝牙' : '安装蓝牙';
@@ -357,10 +435,12 @@ return view.extend({
   var audMsg = E('p', { 'class': 'as-caption' }, '正在问本机音频模块齐不齐。');
   var audBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装音频模块');
   var audBusy = false;
+  var audLc = makeLatestChecker({ opt: 'audio-opt', current: '', installLabel: '安装音频模块', check: audioLatest });
 
   function syncAud(info) {
    info = info || {};
    var installed = info.installed === true, busy = info.busy === true;
+   audLc.setCurrent(info.ver || (info.version || '').replace(/^audio-opt-v/, ''));
    var matched = info.matched === true, kOk = info.kernel_ok === true, extOk = info.ext_present === true;
    var kern = info.kernel || '未知', avail = String(info.available || '').replace(/\s+/g, ' ').trim();
    audBusy = busy;
@@ -477,13 +557,23 @@ return view.extend({
    E('h3', {}, '可选配件'),
    E('p', { 'class': 'as-copy' }, '这两样都不在主包里：刷机、升级之后如果对应页面没了或者放不出声，就是这一套缺了，从这里补回来。'),
    E('div', { 'class': 'as-opt' }, [
-    E('div', { 'class': 'as-row' }, [E('dt', {}, '蓝牙'), E('dd', {}, [optChip])]),
+    E('div', { 'class': 'as-card-head' }, [
+     E('h4', {}, '蓝牙配件包'),
+     E('div', { 'class': 'as-head-meta' }, [btLc.ver, btLc.btn])
+    ]),
+    btLc.mini,
+    E('div', { 'class': 'as-row' }, [E('dt', {}, '状态'), E('dd', {}, [optChip])]),
     optMsg,
     E('div', { 'class': 'as-buttons' }, [optBtn]),
     optNote
    ]),
    E('div', { 'class': 'as-opt' }, [
-    E('div', { 'class': 'as-row' }, [E('dt', {}, '音频模块'), E('dd', {}, [audChip])]),
+    E('div', { 'class': 'as-card-head' }, [
+     E('h4', {}, '音频模块（可选配件）'),
+     E('div', { 'class': 'as-head-meta' }, [audLc.ver, audLc.btn])
+    ]),
+    audLc.mini,
+    E('div', { 'class': 'as-row' }, [E('dt', {}, '状态'), E('dd', {}, [audChip])]),
     audMsg,
     E('div', { 'class': 'as-buttons' }, [audBtn]),
     audNote
