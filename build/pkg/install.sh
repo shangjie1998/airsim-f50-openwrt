@@ -26,6 +26,10 @@ case "$(uname -m)" in
 aarch64) : ;;
 *) echo "  当前架构 $(uname -m)，本包只对 aarch64 有效。" >&2; exit 3 ;;
 esac
+# 配件包版本不写死：从本包带的 rpcd 后端里读 TAG（唯一真值在 parts/audio/AUDIO-OPT-VERSION）
+OPTV=$(sed -n 's/^TAG=audio-opt-\(v[0-9.]*\)/audio-opt \1/p' "$HERE/files/usr/libexec/rpcd/airsim-audio" 2>/dev/null | head -1)
+[ -n "$OPTV" ] || OPTV="audio-opt（版本见页面配件卡片）"
+
 case "$K" in
 5.4.*)
 	echo "  内核 ${K}：主体可用；语音用这台机器自带的厂商驱动（厂商 5.4 镜像里就是全的）。"
@@ -35,11 +39,11 @@ case "$K" in
 	AUD_VENDOR=1
 	;;
 6.18.*)
-	echo "  内核 ${K}：主体可用，语音取决于音频配件包（audio-opt 1.0.3 支持 6.18.60）"
+	echo "  内核 ${K}：主体可用，语音取决于音频配件包（${OPTV}，支持 6.18.60）"
 	AUD_SUPPORTED=1
 	;;
 7.3.*)
-	echo "  内核 ${K}：主体可用，语音取决于音频配件包（audio-opt 1.0.3 支持 7.3.1）"
+	echo "  内核 ${K}：主体可用，语音取决于音频配件包（${OPTV}，支持 7.3.1）"
 	AUD_SUPPORTED=1
 	;;
 *)
