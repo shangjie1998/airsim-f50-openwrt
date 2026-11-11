@@ -304,7 +304,7 @@ return view.extend({
        E('strong', {}, admOn ? 'Wi-Fi 那边可以打开管理页' : '只允许 USB 口打开管理页'),
        E('div', { 'class': 'as-caption' }, '只放行 80/443 · 绑定 ' + (adm.device || 'wlan0') + ' 无线口')
       ]),
-      admOn ? pill(admLive ? '已生效' : '没生效', admLive ? 'red' : 'neutral') : pill('已关', 'green')
+      admOn ? pill(admLive ? '已生效' : '没生效', admLive ? 'green' : 'red') : pill('已关', 'neutral')
      ]),
      E('div', { 'class': 'as-switch-row', 'click': function(ev) {
       if (ev.target === admSwitch || admSwitch.contains(ev.target)) return;

@@ -84,7 +84,14 @@ return view.extend({
   var headersArea = E('textarea', { 'id': 'as-call-headers', 'rows': '3', 'class': 'as-textarea', 'autocomplete': 'off', 'spellcheck': 'false' });
   var bodyArea = E('textarea', { 'id': 'as-call-body', 'rows': '6', 'class': 'as-textarea', 'spellcheck': 'false' });
 
-  var enabled = E('input', { 'type': 'checkbox', 'id': 'as-call-enabled' });
+  /* 「启用来电通知」这一个换成滑块。原生复选框留成隐藏的真值源，
+   * 页面里别的逻辑（取值/填表/校验）一行不动，开关只负责把 checked 拨过去。 */
+  var enabled = E('input', { 'type': 'checkbox', 'id': 'as-call-enabled', 'hidden': true });
+  var enabledSwitch = glass.switch(false, function(next) {
+   enabled.checked = next;
+   glass.switchSet(enabledSwitch, next);
+   enabled.dispatchEvent(new Event('change'));
+  });
   var notifyRinging = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_ringing' });
   var notifyAnswered = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_answered' });
   var notifyEnded = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_ended' });
@@ -120,7 +127,10 @@ return view.extend({
     E('section', { 'class': 'as-card' }, [
      E('h3', {}, '开关'),
      E('p', { 'class': 'as-copy' }, '点一下立刻生效，不用再点下面的保存设置。'),
-     E('label', { 'class': 'as-check', 'for': 'as-call-enabled' }, [enabled, E('span', {}, '启用来电通知')]),
+     E('div', { 'class': 'as-switch-row', 'click': function(ev) {
+      if (ev.target === enabledSwitch || enabledSwitch.contains(ev.target)) return;
+      glass.switchToggle(enabledSwitch);
+     } }, [enabledSwitch, enabled, E('span', {}, '启用来电通知')]),
      E('p', { 'class': 'as-caption' }, '关掉后不再推任何通话事件，转发服务照常运行，随时能再打开。')
     ]),
     E('section', { 'class': 'as-card' }, [
@@ -170,6 +180,7 @@ return view.extend({
    ['enabled', 'notify_ringing', 'notify_answered', 'notify_ended', 'notify_missed'].forEach(function(k) {
     q(k).checked = c[k] === '1' || c[k] === 1 || (c[k] === '' && (k === 'notify_ringing' || k === 'notify_ended' || k === 'notify_missed'));
    });
+   glass.switchSet(enabledSwitch, q('enabled').checked);
    urlInput.value = c.url || '';
    methodSelect.value = c.method || 'POST';
    typeSelect.value = c.content_type || 'application/json';
@@ -276,8 +287,8 @@ return view.extend({
    try { base = JSON.parse(self.savedPayload || '{}'); } catch (_) { base = {}; }
    var next = Object.assign({}, base, { enabled: on ? '1' : '0' });
    var problem = validate(next, status);
-   if (problem) { this.checked = !on; error(problem); return; }
-   this.disabled = true;
+   if (problem) { this.checked = !on; glass.switchSet(enabledSwitch, !on); error(problem); return; }
+   this.disabled = true; enabledSwitch.disabled = true;
    try {
     var r = await L.resolveDefault(rpcSave(JSON.stringify(next)), {});
     if (!r || !r.ok) throw Error((r && r.error) || '保存失败');
@@ -288,9 +299,9 @@ return view.extend({
     error(''); markSaved();
     ui.toast(on ? '已开启来电通知' : '已关闭来电通知', { type: 'success' });
    } catch (e) {
-    this.checked = !on;
+    this.checked = !on; glass.switchSet(enabledSwitch, !on);
     error('切换失败：' + (e.message || '请稍后再试') + '。');
-   } finally { this.disabled = false; }
+   } finally { this.disabled = false; enabledSwitch.disabled = false; }
   });
 
   saveBtn.addEventListener('click', async function() {
