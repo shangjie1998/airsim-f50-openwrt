@@ -168,7 +168,7 @@ sh build/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.t
 - `<N>` 是本仓库打包序号，**每出一包 +1**
 - 适用范围新包写 `any`（主包不绑内核），老资产仍带 `6.18`；5.4 旧名 `0.1.0.3-r22-f50` 不再升号
 
-`build/bump-version.sh` 负责 +1 并同步 `VERSION`、`PACKAGING-VERSION`、`AGENT-VERSION`，
+`build/bump-version.sh` 负责 +1 并同步 `VERSION`、`AGENT-VERSION`，
 只认 `any` / `6.18`（新包用 `sh build/bump-version.sh <N> r<NN> any`）。
 `build/make-package.sh` 负责把二进制、`overlay/f50/files`
 整棵树、音频抢占脚本和安装/卸载脚本打成一个 `dist/*.tar.gz`。
@@ -220,7 +220,7 @@ sh build/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.t
 
 ## 10. 许可证
 
-本适配沿用上游非商业定位，见 [LICENSE](LICENSE)、[NOTICE](NOTICE)。
+本适配沿用上游非商业定位，见 [LICENSE](src/plugin/LICENSE)、[NOTICE](src/plugin/NOTICE)。
 AirSIM Agent 为 **PolyForm Noncommercial 1.0.0**；mu300-audio 按文件采用 **GPL-2.0 / MIT**；
 ALSA 按组件采用 **LGPL-2.1-or-later / GPL-2.0-or-later**。各组件保留各自权利，
 整包不能称为无商业限制的开源软件。

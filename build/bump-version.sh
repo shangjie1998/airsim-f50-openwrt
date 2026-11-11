@@ -14,7 +14,7 @@
 #   sh build/bump-version.sh              # 序号 +1，内核范围保持不变
 #   sh build/bump-version.sh 6            # 指定序号
 #   sh build/bump-version.sh 6 r24        # 序号与上游 release 一起改
-#   sh build/bump-version.sh 6 r24 any    # 顺便把内核范围改成 any（推荐新包用）
+#   sh build/bump-version.sh 6 r24 any    # 顺手把适用范围写成 any（现在只认这个）
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CUR=$(cat "$HERE/VERSION")
@@ -22,9 +22,9 @@ CUR=$(cat "$HERE/VERSION")
 KREL=$(printf '%s' "$CUR" | sed -n 's/^0\.1\.0\.[0-9][0-9]*-r[0-9][0-9]*-\(.*\)$/\1/p')
 [ -n "$KREL" ] || { echo "VERSION '$CUR' 不是 0.1.0.<n>-r<nn>-<内核范围> 形式" >&2; exit 1; }
 case "$KREL" in
-6.18|any) ;;
-5.4) echo "VERSION '$CUR': 5.4 线的旧包名（-r22-f50），不再升号；新包统一走 any" >&2; exit 1 ;;
-*) echo "VERSION '$CUR' 的内核范围 '$KREL' 不认识（只认 6.18 / any）" >&2; exit 1 ;;
+any) ;;
+6.18) echo "VERSION '$CUR'：主包已不绑内核（0.1.0.20 起），新包一律 any，不再出 6.18 后缀" >&2; exit 1 ;;
+*) echo "VERSION '$CUR' 的适用范围 '$KREL' 不认识（现在只认 any）" >&2; exit 1 ;;
 esac
 
 REL=$(printf '%s' "$CUR" | sed -n 's/^0\.1\.0\.[0-9][0-9]*-\(r[0-9][0-9]\)-.*$/\1/p')
@@ -41,14 +41,13 @@ if [ "${2:-}" != "" ]; then
 	case "$2" in r[0-9][0-9]) REL=$2 ;; *) echo "上游段必须是 rNN，如 r23" >&2; exit 1 ;; esac
 fi
 if [ "${3:-}" != "" ]; then
-	case "$3" in 6.18|any) KREL=$3 ;; *) echo "内核范围只认 6.18 / any" >&2; exit 1 ;; esac
+	case "$3" in any) KREL=$3 ;; *) echo "适用范围只认 any（主包不绑内核）" >&2; exit 1 ;; esac
 fi
 
 NEW="0.1.0.$NEXT-$REL-$KREL"
 AGENT="0.4.7-mu300.$NEW"
 
 printf '%s\n' "$NEW"   > "$HERE/VERSION"
-printf '%s\n' "$NEW"   > "$HERE/PACKAGING-VERSION"
 printf '%s\n' "$AGENT" > "$HERE/AGENT-VERSION"
 
 echo "$NEW"

@@ -149,6 +149,7 @@ wifi_connect() {
 	json_get_var ssid ssid
 	json_get_var key key
 	json_get_var enc encryption
+	[ -n "$enc" ] || json_get_var enc enc      # 命令行习惯写 enc，页面写 encryption，两个都认
 	[ -n "$ssid" ] || { jerr '缺少 Wi-Fi 名称'; return 0; }
 	enc=${enc:-psk2}
 	case "$enc" in
@@ -243,7 +244,7 @@ net_probe() {
 
 case "$1" in
 list)
-	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{}}'
+	printf '%s\n' '{"probe":{},"status":{},"mode_set":{"mode":""},"wifi_scan":{},"wifi_saved":{},"wifi_connect":{"ssid":"","key":"","encryption":""},"wifi_forget":{"ssid":""}}'
 	;;
 call)
 	need_probe
