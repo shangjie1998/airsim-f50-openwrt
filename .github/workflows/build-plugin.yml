@@ -1,7 +1,7 @@
 name: build-plugin
 
 # 只编插件二进制（纯 Go，arm64）。内核模块 .ko 不在这里编：
-# 它绑死 6.18.60 的 vermagic 与自造 kit，属于归档物，见 docs/6.18/F50-6.18音频自编.md
+# 它绑死 6.18.60 的 vermagic 与自造 kit，属于配件，见 docs/音频/自编过程.md 与 docs/内核矩阵.md
 on:
   workflow_dispatch:
   push:
