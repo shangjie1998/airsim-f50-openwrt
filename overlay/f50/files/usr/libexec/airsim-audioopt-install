@@ -12,7 +12,8 @@ FILE=${AIRSIM_OPT_FILE:-airsim-f50-audio-opt-1.0.3-k6.18.60+7.3.1.tar.gz}
 API=https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/$TAG
 DIR=/tmp/airsim-audioopt
 MSG=$DIR/msg
-KREL_WANT=6.18.60
+# 配件包里到底给了哪几套模块，以此为准；加新内核要同步 parts/audio/payload 与这里
+OPT_KERNELS=${AIRSIM_OPT_KERNELS:-"6.18.60 7.3.1"}
 EXT=/mnt/mu300-disk/extra/airsim-audio
 
 mkdir -p "$DIR"
@@ -20,7 +21,10 @@ say() { echo "$*" > "$MSG"; echo "$*" >&2; }
 die() { say "失败：$*"; exit 1; }
 
 krel=$(uname -r)
-[ "$krel" = "$KREL_WANT" ] || die "本机内核 $krel，音频可选件只给 $KREL_WANT 用"
+case " $OPT_KERNELS " in
+	*" $krel "*) ;;
+	*) die "本机内核 $krel，音频可选件只给 $OPT_KERNELS 用（换到对应内核再装）" ;;
+esac
 [ -d "$EXT" ] || die "音频扩展目录不存在：$EXT"
 command -v curl >/dev/null 2>&1 || die '本机没有 curl'
 
