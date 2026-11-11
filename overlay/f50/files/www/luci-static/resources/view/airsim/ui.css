@@ -49,16 +49,17 @@ html[data-theme="dark"][data-transparency="solid"]{--as-surface:rgba(28,28,30,.9
 .as-root{
  box-sizing:border-box;color:var(--as-ink);font-family:var(--font);font-size:var(--as-fs-body);line-height:1.47;
  padding:var(--as-pad);border-radius:26px;margin:10px auto;max-width:none;width:auto;-webkit-font-smoothing:antialiased;
+ /* 根容器不再自己铺一层实色底：iPad 上内容不满一屏时，
+  * 底部那段"混黑渐变"会露出一整块深色矩形，看着像一块不透明的玻璃。
+  * 现在只留顶部两团很淡的光斑，底色交给页面本身透出来。 */
  background:
-  radial-gradient(1000px 620px at 10% -10%,color-mix(in srgb,var(--as-blue) 9%,transparent),transparent 64%),
-  radial-gradient(820px 540px at 94% 2%,color-mix(in srgb,var(--as-green) 7%,transparent),transparent 62%),
-  linear-gradient(170deg,var(--as-bg),var(--as-bg) 55%,color-mix(in srgb,var(--as-bg) 92%,#000));
+  radial-gradient(1000px 620px at 10% -10%,rgba(0,122,255,.06),transparent 64%),
+  radial-gradient(820px 540px at 94% 2%,rgba(52,199,89,.05),transparent 62%);
 }
 html[data-theme="dark"] .as-root{
  background:
-  radial-gradient(1000px 620px at 10% -10%,color-mix(in srgb,var(--as-blue) 14%,transparent),transparent 64%),
-  radial-gradient(820px 540px at 94% 2%,color-mix(in srgb,var(--as-green) 9%,transparent),transparent 62%),
-  linear-gradient(170deg,#111114,#101013 55%,#0a0a0c);
+  radial-gradient(1000px 620px at 10% -10%,rgba(10,132,255,.10),transparent 64%),
+  radial-gradient(820px 540px at 94% 2%,rgba(48,209,88,.07),transparent 62%);
 }
 .as-root *{box-sizing:border-box}
 .as-root h2,.as-root h3,.as-root p,.as-root dl,.as-root dd,.as-root h4{margin:0}
@@ -118,20 +119,25 @@ body.as-menu-on .mobile-nav-submenu,
 body.as-menu-on > header .nav{display:none!important}
 
 /* ---------- 布局 ---------- */
-/* 瀑布流：卡片按自身内容高低往下排，列数随可用宽度 1/2/3 栏铺满。
- * 这样每张卡都是内容撑开的高度，不会为对齐而拉出一块空白，也不会挤成一团。
- * 单张卡（.as-wide）跨所有列，占满一行。间距、内边距、卡片最小宽都是固定值。 */
+/* 桌面保持原来的瀑布流（columns 多列，短卡不留白，桌面端观感就是这么来的）。
+ * 移动端（≤1100px，含 iPad 竖屏 820 / 横屏全屏 1096）一律固定单列：
+ * iPad 的 Safari 在多列下会吞卡、跳列，单列实测没问题。
+ * 1100 这个门槛正好把 iPad mini 横屏（1096）盖住，桌面窗口够宽才回到多列。 */
 .as-layout{columns:var(--as-card-min);column-gap:var(--as-gap)}
 .as-layout>*{break-inside:avoid;margin:0 0 var(--as-gap);width:100%}
 .as-layout>*:last-child{margin-bottom:0}
 .as-wide{column-span:all}
 /* 整页只有一张卡时别缩在半栏里，直接占满 */
 .as-layout>:only-child{column-span:all}
-/* 概览页右侧那一摞：用 display:contents 让里头的卡片直接参与分列，
- * 不再整块塞进一列，避免左列留一大片空白 */
-.as-actions{display:contents}
-.as-actions>*{margin:0 0 var(--as-gap);break-inside:avoid}
-@media(max-width:720px){.as-layout{columns:1}}
+/* 两种条件任一命中就单列：
+ * ① 触屏设备（iPad / 手机）—— (hover:none) + (pointer:coarse)；
+ * ② 窗口不宽（≤1200px）—— 桌面窗口缩窄、或右侧窄栏里打开时也要单列，不然挤成一条竖线。
+ * 只有"桌面 + 窗口够宽"才回到 columns 瀑布流。 */
+@media (max-width:1200px), (hover:none) and (pointer:coarse){.as-layout{columns:1}}
+/* 别再用一层 display:contents 的容器让卡片"参与分列"。
+ * Safari 在多列布局下会把这层容器的子卡片吞掉，
+ * 表现就是 iPad 上整张卡不显示（概览页"启动服务""配对客户端"就是这么丢的）。
+ * 要跨列就把 section 直接平铺进 .as-layout。 */
 
 /* ---------- 玻璃卡 ---------- */
 .as-card{

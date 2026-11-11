@@ -387,21 +387,20 @@ return view.extend({
      E('details', { 'class': 'as-details' }, [E('summary', {}, '连接与诊断'), E('dl', {}, [row('云端 Relay', 'relay'), row('上行 / 下行帧', 'frames'), row('最近音频错误', 'audioError')]), text('relayError', 'p', 'as-technical')]),
      text('updated', 'p', 'as-updated')
     ]),
-    E('div', { 'class': 'as-actions' }, [
-     E('section', { 'class': 'as-card', 'aria-label': '服务控制' }, [E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '01'), E('h3', {}, '启动服务')]), text('serviceCopy', 'p', 'as-copy'),
-      E('div', { 'class': 'as-buttons' }, [button('启动服务', 'start', 'as-primary'), button('关闭服务', 'stop', 'as-secondary')]),
-      text('stopHint', 'p', 'as-caption'), nodes.feedback,
-      button('重新读取号码', 'number_refresh', 'as-text-button')
-     ]),
-     E('section', { 'class': 'as-card as-pair', 'aria-label': '配对客户端' }, [
-      E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '02'), E('h3', {}, '配对客户端')]),
-      E('p', { 'class': 'as-copy' }, '让 iPhone 与 F50 处于同一局域网。'),
-      E('div', { 'class': 'as-code-area' }, [text('discovery', 'p', 'as-discovery'), text('code', 'div', 'as-code'), text('countdown', 'p', 'as-caption')]),
-      E('div', { 'class': 'as-buttons' }, [button('获取配对码', 'pair_start', 'as-primary'), button('关闭配对', 'pair_cancel', 'as-secondary'),
-       E('button', { 'type': 'button', 'class': 'as-button as-secondary', 'click': function() { return openPairManager(); } }, '清除历史配对')]),
-      E('ol', { 'class': 'as-instructions' }, [E('li', {}, '在 AirSIM 中打开“添加设备”。'), E('li', {}, '选择自动发现的 AirSIM-F50。'), E('li', {}, '输入上方六位配对码，完成连接。')])
-     ])
+    E('section', { 'class': 'as-card', 'aria-label': '服务控制' }, [E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '01'), E('h3', {}, '启动服务')]), text('serviceCopy', 'p', 'as-copy'),
+     E('div', { 'class': 'as-buttons' }, [button('启动服务', 'start', 'as-primary'), button('关闭服务', 'stop', 'as-secondary')]),
+     text('stopHint', 'p', 'as-caption'), nodes.feedback,
+     button('重新读取号码', 'number_refresh', 'as-text-button')
     ]),
+    E('section', { 'class': 'as-card as-pair', 'aria-label': '配对客户端' }, [
+     E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '02'), E('h3', {}, '配对客户端')]),
+     E('p', { 'class': 'as-copy' }, '让 iPhone 与 F50 处于同一局域网。'),
+     E('div', { 'class': 'as-code-area' }, [text('discovery', 'p', 'as-discovery'), text('code', 'div', 'as-code'), text('countdown', 'p', 'as-caption')]),
+     E('div', { 'class': 'as-buttons' }, [button('获取配对码', 'pair_start', 'as-primary'), button('关闭配对', 'pair_cancel', 'as-secondary'),
+      E('button', { 'type': 'button', 'class': 'as-button as-secondary', 'click': function() { return openPairManager(); } }, '清除历史配对')]),
+     E('ol', { 'class': 'as-instructions' }, [E('li', {}, '在 AirSIM 中打开“添加设备”。'), E('li', {}, '选择自动发现的 AirSIM-F50。'), E('li', {}, '输入上方六位配对码，完成连接。')])
+    ]),
+
     E('section', { 'class': 'as-card as-dial', 'aria-label': '拨号与通话' }, [
      E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '03'), E('h3', {}, '拨号与通话')]),
      E('p', { 'class': 'as-copy' }, '使用 F50 的 SIM 卡发起电话。'),
