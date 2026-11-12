@@ -34,17 +34,86 @@ print(f'文件替换 {n} 个')
 #    a/AirSIM/module/module-agent/sms.go）。补丁必须干净打上，打不上就报错，
 #    免得上游改了上下文后静默漏掉。
 patch_dir = HERE / 'patches'
+MANIFEST = patch_dir / 'manifest.tsv'
+
+
+
+def read_manifest():
+    rows = []
+    if not MANIFEST.is_file():
+        return rows
+    for line in MANIFEST.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        cols = line.split("	")
+        cols += [""] * (5 - len(cols))
+        rows.append({
+            "patch": cols[0].strip(),
+            "state": (cols[1].strip() or "active"),
+            "repo": cols[2].strip(),
+            "merged": cols[3].strip(),
+            "anchors": [a for a in cols[4].split(";") if a.strip()],
+        })
+    return rows
+
+def contains(root, needle):
+    """在树里找一段源码文本，跳 vendor 与二进制。"""
+    exts = {'.go', '.sh', '.py', '.uc', '.json', '.lua'}
+    for p in root.rglob('*'):
+        if not p.is_file() or 'vendor' in p.parts or p.suffix not in exts:
+            continue
+        try:
+            if needle in p.read_text(encoding='utf-8', errors='replace'):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+rows = {r['patch']: r for r in read_manifest()}
+if not rows:
+    sys.stderr.write('缺少 patches/manifest.tsv，不知道怎么处理补丁\n')
+    sys.exit(1)
+
 applied = 0
 if patch_dir.is_dir():
     for pf in sorted(patch_dir.glob('*.patch')):
+        row = rows.get(pf.name)
+        if row is None:
+            sys.stderr.write(f'补丁未登记到 manifest.tsv: {pf.name}\n')
+            sys.exit(1)
+        if row['state'] != 'active':
+            sys.stderr.write(f'{pf.name} 状态是 {row["state"]}，不该留在 patches/ 顶层\n')
+            sys.exit(1)
         r = subprocess.run(['patch', '-p1', '-N', '--batch', '-i', str(pf)],
                            cwd=str(ROOT), capture_output=True, text=True)
         if r.returncode != 0:
             sys.stderr.write(f'补丁打不上: {pf.name}\n{r.stdout}{r.stderr}')
             sys.exit(1)
         applied += 1
+
+# 已合入源码的补丁：不打，但必须证明源码里真有这功能。
+# 否则一旦有人同步上游把改动冲掉，这里能立刻拦住，而不是编出个没功能的二进制。
+merged_n = 0
+for key, row in rows.items():
+    if row['state'] != 'merged':
+        continue
+    flags = [f for f in row['merged'].split(';') if f.strip()]
+    if not flags:
+        sys.stderr.write(f'{key} 标了 merged 却没写"已合并标志串"，无法校验\n')
+        sys.exit(1)
+    missing = [f for f in flags if not contains(ROOT, f)]
+    if missing:
+        sys.stderr.write(f'{key} 标了 merged，但源码里找不到: {missing}\n'
+                         f'补救：把补丁移回 patches/ 顶层并把状态改回 active，'
+                         f'或把这段功能重新写进 src/\n')
+        sys.exit(1)
+    merged_n += 1
 if applied:
     print(f'补丁 {applied} 个')
+if merged_n:
+    print(f'已合入源码校验 {merged_n} 个')
 
 # 2) 字符串替换：只改 .go，跳过 vendor 和 _test.go
 pairs = []
