@@ -286,7 +286,7 @@ return view.extend({
 
     E('section', { 'class': 'as-card', 'id': 'as-wifi-card' }, [
      E('h3', {}, '连接 Wi-Fi'),
-     E('p', { 'class': 'as-caption' }, '扫描会占用射频：热点开着的时候扫描，手机那边会断网几秒。建议插 USB 线用电脑操作。'),
+     E('p', { 'class': 'as-caption' }, '只扫这台机器能连的信道：' + (probe.band === '5g' ? '5G ' : '') + (probe.channels || '36 40 44 48') + ' 这几个。2.4G 和其它信道扫得到也连不上，所以不列。热点开着时不做扫描——先把上面的开关拨到「Wi-Fi 上网」，热点关掉再扫。'),
      E('div', { 'class': 'as-actions' }, [scanBtn]),
      listBox,
      E('div', { 'class': 'as-details' }, [

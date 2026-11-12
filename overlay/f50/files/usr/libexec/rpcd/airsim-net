@@ -54,13 +54,16 @@ wifi_scan() {
 		fi
 	fi
 	ifc=$(live_if)
-	# live_if 只回答"哪个 netdev 挂着 phy"，热点模式下它给的是 AP 类型的 wlan0；
-	# AP 接口本身不做扫描，拿它去 iwinfo scan 永远空。只有 STA 接口能直接扫，
-	# 其它一律走临时 managed 接口。
+	# 热点开着时不做扫描：单射频扫一次会让连着热点的手机断几秒，而且 AP 接口本身
+	# 不响应扫描请求。让用户先把上面开关拨到 Wi-Fi 模式（热点关掉、射频腾出来）再扫。
 	if [ -n "$ifc" ]; then
 		_t=$(iw dev "$ifc" info 2>/dev/null | awk '/type/{print $2; exit}')
 		case "$_t" in
 			managed|station) ;;
+			ap|AP)
+				jerr '热点开着的时候不扫描（一扫就会把连着热点的设备断几秒）。先把上面开关拨到「Wi-Fi 上网」，热点关掉之后再来扫。'
+				return 0
+				;;
 			*) ifc='' ;;
 		esac
 	fi
