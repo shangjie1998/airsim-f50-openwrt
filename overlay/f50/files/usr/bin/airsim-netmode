@@ -82,6 +82,7 @@ cur_mode() {
 	case "$w$a$s" in
 		011) echo cell ;;
 		110) echo wifi ;;
+		010) echo wifi-pending ;;   # 热点已关、射频腾空、等用户扫描选网
 		001) echo ap ;;
 		011 | 110) echo wifi ;;
 		*) echo unknown ;;
@@ -249,7 +250,19 @@ do_cell() {
 do_wifi() {
 	guard
 	case "$(cur_mode)" in wifi) say '已经是 Wi-Fi 模式，无需切换'; return 0 ;; esac
-	[ -n "$(uci -q get wireless.$STA.ssid 2>/dev/null)" ] || { err '还没配置过 Wi-Fi：请先在「联网」页选一个网络并输入密码'; exit 4; }
+	# 还没配过外部 Wi-Fi 时，以前这里直接报错退回，等于把人锁死：要扫描得先关热点，
+	# 要关热点得先切模式，而切模式又要求先有 SSID。管理页走 USB 口，不依赖无线，
+	# 所以这里允许先把热点关掉、把射频腾出来，让用户去扫描选网；连上之后
+	# wifi_connect 会自己再走一遍完整切换（先连 Wi-Fi、再断蜂窝）。
+	if [ -z "$(uci -q get wireless.$STA.ssid 2>/dev/null)" ]; then
+		save_base
+		set_ap 1
+		set_sta 0
+		wifi_reload
+		net_refresh
+		say '热点已关，射频腾出来给扫描。回「联网」页点扫描、选一个 Wi-Fi 输密码；连上后自动切到 Wi-Fi 上网'
+		return 0
+	fi
 	save_base
 	say '正在切到 Wi-Fi：先把外部 Wi-Fi 连起来，连上之后再断蜂窝（反着来会先丢网）'
 	# 注：radio0 的 noscan 只管热点（hostapd 不做信道外扫描），实测对 STA 扫描与

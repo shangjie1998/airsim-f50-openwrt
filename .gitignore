@@ -12,3 +12,6 @@ archive/旧产物/*.zip
 
 # 本地冷备份（git bundle，体积大，不入库）
 saves/*.bundle
+
+# 本地打包产物（发布物不进仓库）
+dist/
