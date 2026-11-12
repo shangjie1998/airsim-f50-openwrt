@@ -14,68 +14,30 @@ func tailnetIPv4(ip net.IP) bool {
 func privateIPv4(ip net.IP) bool {
 	return ip.To4() != nil && (ip.IsPrivate() || ip.IsLinkLocalUnicast() || tailnetIPv4(ip))
 }
-
-// directInterfaceNames 是允许承载直连监听的网卡白名单：LAN 桥、无线网卡、可选隧道。
-// 蜂窝口（sipa_eth0 之类）永远不在白名单里 —— 运营商常给 10.x 私有地址，
-// 无脑"枚举所有私有 IPv4"会把 8580-8582 绑到运营商内网，等于对外开洞。
-func directInterfaceNames(s managementSettings) []string {
-	names := []string{s.Interface}
-	if s.STAInterface != "" && s.STAInterface != s.Interface {
-		names = append(names, s.STAInterface)
+func directAddresses(s managementSettings) ([]string, error) {
+	lan, err := lanAddress(s.Interface)
+	if err != nil {
+		return nil, err
 	}
-	if s.TunnelInterface != "" && s.TunnelInterface != s.Interface {
-		names = append(names, s.TunnelInterface)
+	hosts := []string{lan}
+	if s.TunnelInterface == "" {
+		return hosts, nil
 	}
-	return names
-}
-
-// interfaceAddress 取某网卡上第一个私有 IPv4；tunnelOnly 时只认 100.64/10。
-func interfaceAddress(name string, tunnelOnly bool) (string, bool) {
-	i, err := net.InterfaceByName(name)
+	i, err := net.InterfaceByName(s.TunnelInterface)
 	if err != nil || i.Flags&net.FlagUp == 0 {
-		return "", false
+		return nil, errors.New("Tailscale 接口未就绪，请先连接隧道")
 	}
 	addrs, err := i.Addrs()
 	if err != nil {
-		return "", false
+		return nil, err
 	}
-	for _, a := range addrs {
-		ip, _, err := net.ParseCIDR(a.String())
-		if err != nil || ip.To4() == nil {
-			continue
-		}
-		if tunnelOnly {
-			if !tailnetIPv4(ip) {
-				continue
-			}
-		} else if !privateIPv4(ip) {
-			continue
-		}
-		return ip.String(), true
-	}
-	return "", false
-}
-
-// directAddresses 列出所有要监听的地址。主网卡（LAN 桥）必须有地址，缺了就是硬错；
-// 无线与隧道按"当前有没有地址"尽力而为 —— 热点模式下无线没地址、Wi-Fi 模式下
-// 隧道没连上，都不该让服务起不来。
-func directAddresses(s managementSettings) ([]string, error) {
-	primary, ok := interfaceAddress(s.Interface, false)
-	if !ok {
-		return nil, errors.New("LAN 网卡没有私有 IPv4 地址")
-	}
-	hosts := []string{primary}
-	if s.STAInterface != "" {
-		if ip, ok := interfaceAddress(s.STAInterface, false); ok && ip != primary {
-			hosts = append(hosts, ip)
+	for _, addr := range addrs {
+		ip, _, _ := net.ParseCIDR(addr.String())
+		if tailnetIPv4(ip) {
+			return append(hosts, ip.String()), nil
 		}
 	}
-	if s.TunnelInterface != "" {
-		if ip, ok := interfaceAddress(s.TunnelInterface, true); ok && ip != primary {
-			hosts = append(hosts, ip)
-		}
-	}
-	return hosts, nil
+	return nil, errors.New("Tailscale 接口缺少 100.64.0.0/10 IPv4 地址")
 }
 
 type directEndpoint struct{ pair, control, pcm net.Listener }
@@ -88,62 +50,34 @@ func (d *directListeners) close() {
 	for _, l := range d.all {
 		l.Close()
 	}
-	d.all = nil
-	d.endpoints = nil
 }
 
-func (d *directListeners) hostCount() int { return len(d.endpoints) }
-
-// bindDirectListeners 在尽量多的地址上开监听：某个地址暂时不可用（地址刚消失、
-// 端口被占）时跳过它，而不是让整个服务起不来。一个都绑不上才算失败 —— 那时
-// 签名响应也确实没法给出可用的网关端口。
+// Bind every socket before accepting claims. A partial failure closes all sockets,
+// so the signed response never advertises a guessed or occupied gateway port.
 func bindDirectListeners(hosts []string, s managementSettings) (*directListeners, error) {
 	d := &directListeners{}
-	var firstErr error
 	for _, host := range hosts {
-		var local []net.Listener
-		ok := true
+		var ls []net.Listener
 		for _, port := range []int{s.PairPort, s.ControlPort, s.PCMPort} {
 			l, err := net.Listen("tcp4", net.JoinHostPort(host, strconv.Itoa(port)))
 			if err != nil {
-				firstErr = err
-				ok = false
-				break
+				d.close()
+				return nil, err
 			}
-			local = append(local, l)
+			d.all = append(d.all, l)
+			ls = append(ls, l)
 		}
-		if !ok {
-			for _, l := range local {
-				l.Close()
-			}
-			continue
-		}
-		d.all = append(d.all, local...)
-		d.endpoints = append(d.endpoints, directEndpoint{local[0], local[1], local[2]})
-	}
-	if d.hostCount() == 0 {
-		d.close()
-		if firstErr != nil {
-			return nil, firstErr
-		}
-		return nil, errors.New("没有可用的直连监听地址")
+		d.endpoints = append(d.endpoints, directEndpoint{ls[0], ls[1], ls[2]})
 	}
 	return d, nil
 }
-
 func (d *daemon) hasDirectRoute(r *http.Request) bool {
 	addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
 	if !ok {
 		return false
 	}
 	host, _, err := net.SplitHostPort(addr.String())
-	if err != nil {
-		return false
-	}
-	d.listenersMu.Lock()
-	direct := d.directHosts[host]
-	d.listenersMu.Unlock()
-	return direct
+	return err == nil && d.directHosts[host]
 }
 func privatePairing(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

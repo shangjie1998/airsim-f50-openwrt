@@ -22,23 +22,10 @@ import (
 	"time"
 )
 
-// maxGatewayKeys 是密钥表上限。满了不再报错，改为淘汰最久没被用过的一条。
-const maxGatewayKeys = 16
-
-// keyInfo 是每条 secret 的旁挂信息，存在同目录的 .meta 文件里。
-// vowlan-clients.json 本身仍是纯 secret 数组，老设备、已配对手机都不受影响；
-// .meta 丢了或坏了只是退回"先到先得"，鉴权照常。
-type keyInfo struct {
-	Client string `json:"client,omitempty"` // 客户端公钥（配对 claim 里的 client_public）
-	Added  int64  `json:"added,omitempty"`
-	Used   int64  `json:"used,omitempty"`
-}
-
 type Gateway struct {
 	mu              sync.Mutex
 	path, id        string
 	keys            []string
-	meta            map[string]keyInfo
 	seen            map[string]int64
 	pcm             bool
 	earlyBackend    EarlyMediaBackend
@@ -53,14 +40,7 @@ type Gateway struct {
 }
 
 func New(path, id string) (*Gateway, error) {
-	g := &Gateway{path: path, id: id, seen: make(map[string]int64), meta: make(map[string]keyInfo), client: &http.Client{Timeout: 75 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-	// 元数据单独一个文件，读不到就算了，不能因为它坏了把整个服务拦住。
-	if mb, err := os.ReadFile(path + ".meta"); err == nil {
-		var meta map[string]keyInfo
-		if json.Unmarshal(mb, &meta) == nil && meta != nil {
-			g.meta = meta
-		}
-	}
+	g := &Gateway{path: path, id: id, seen: make(map[string]int64), client: &http.Client{Timeout: 75 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return g, nil
@@ -68,26 +48,12 @@ func New(path, id string) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-	if json.Unmarshal(b, &g.keys) != nil || len(g.keys) > maxGatewayKeys {
+	if json.Unmarshal(b, &g.keys) != nil || len(g.keys) > 16 {
 		return nil, errors.New("invalid gateway state")
 	}
 	for _, key := range g.keys {
 		if _, err := decode(key); err != nil {
 			return nil, err
-		}
-	}
-	// 老版本的密钥表没有旁挂信息。给它们补一个以文件修改时间为准的基准，
-	// 免得一上来就被当成"从没被用过"而在淘汰时最先出局。
-	if fi, err := os.Stat(path); err == nil {
-		base := fi.ModTime().Unix()
-		for _, key := range g.keys {
-			if info, ok := g.meta[key]; !ok || info.Added == 0 {
-				info.Added = base
-				if info.Used == 0 {
-					info.Used = base
-				}
-				g.meta[key] = info
-			}
 		}
 	}
 	return g, nil
@@ -117,102 +83,46 @@ func (g *Gateway) checkAddLocked(encoded string) error {
 			return nil
 		}
 	}
-	// 满 16 条不再预检拒绝：Commit 时会按"最久未用"淘汰一条再收进来，
-	// 否则反复配对第 17 次永远 500。
+	if len(g.keys) >= 16 {
+		return errors.New("gateway client limit reached")
+	}
 	return nil
 }
-func (g *Gateway) Add(encoded string) error { return g.AddClient(encoded, "") }
-
-// AddClient 收一条密钥。client 是客户端公钥标识（配对 claim 的 client_public），
-// 传空表示不知道身份，退回纯 secret 去重。
-//   - 同一个 client 重新配对：旧 secret 被替换，不会一格一格往上叠
-//   - 真满了 maxGatewayKeys 条：淘汰 Used 最小（最久没被用过）的那条
-func (g *Gateway) AddClient(encoded, client string) error {
+func (g *Gateway) Add(encoded string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err := g.checkAddLocked(encoded); err != nil {
 		return err
 	}
-	if g.meta == nil {
-		g.meta = make(map[string]keyInfo)
-	}
-	now := time.Now().Unix()
-
 	for _, key := range g.keys {
 		if key == encoded {
-			info := g.meta[key]
-			if client != "" {
-				info.Client = client
-			}
-			if info.Added == 0 {
-				info.Added = now
-			}
-			info.Used = now
-			g.meta[key] = info
-			return g.persistMeta()
+			return nil
 		}
 	}
-
-	keys := append([]string(nil), g.keys...)
-	if client != "" {
-		for i, key := range keys {
-			if info, ok := g.meta[key]; ok && info.Client == client {
-				keys = append(keys[:i], keys[i+1:]...)
-				delete(g.meta, key)
-				break
-			}
-		}
-	}
-	if len(keys) >= maxGatewayKeys {
-		victim := 0
-		for i := 1; i < len(keys); i++ {
-			cur, best := g.meta[keys[i]], g.meta[keys[victim]]
-			if cur.Used < best.Used || (cur.Used == best.Used && cur.Added < best.Added) {
-				victim = i
-			}
-		}
-		delete(g.meta, keys[victim])
-		keys = append(keys[:victim], keys[victim+1:]...)
-	}
-	keys = append(keys, encoded)
-	g.meta[encoded] = keyInfo{Client: client, Added: now, Used: now}
-
-	if err := g.persist(keys); err != nil {
-		return err
-	}
-	g.keys = keys
-	return g.persistMeta()
-}
-
-// writeAtomic 写临时文件、fsync、再 rename，避免写一半断电留下半截 JSON。
-func writeAtomic(path string, data []byte) error {
-	f, err := os.OpenFile(path+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	keys := append(append([]string(nil), g.keys...), encoded)
+	b, _ := json.Marshal(keys)
+	f, err := os.OpenFile(g.path+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	if err = f.Chmod(0600); err == nil {
-		_, err = f.Write(data)
+		_, err = f.Write(b)
 	}
 	if err == nil {
 		err = f.Sync()
 	}
-	if ce := f.Close(); err == nil {
+	ce := f.Close()
+	if err == nil {
 		err = ce
 	}
 	if err != nil {
 		return err
 	}
-	return os.Rename(path+".tmp", path)
-}
-
-func (g *Gateway) persist(keys []string) error {
-	b, _ := json.Marshal(keys)
-	return writeAtomic(g.path, b)
-}
-
-func (g *Gateway) persistMeta() error {
-	b, _ := json.Marshal(g.meta)
-	return writeAtomic(g.path+".meta", b)
+	if err = os.Rename(g.path+".tmp", g.path); err != nil {
+		return err
+	}
+	g.keys = keys
+	return nil
 }
 func Sign(key []byte, canonical string) string {
 	m := hmac.New(sha256.New, key)
@@ -246,15 +156,6 @@ func (g *Gateway) authenticate(method, path string, body []byte, ts, nonce, sig 
 		key, _ := decode(encoded)
 		if hmac.Equal([]byte(Sign(key, canonical(method, path, body, ts, nonce))), []byte(sig)) {
 			g.seen[nonce] = now + 61
-			// 只记在内存里，落盘等下次配对时顺带写，别为每个请求写磁盘
-			if g.meta != nil {
-				info := g.meta[encoded]
-				info.Used = now
-				if info.Added == 0 {
-					info.Added = now
-				}
-				g.meta[encoded] = info
-			}
 			return key
 		}
 	}
@@ -538,46 +439,4 @@ func (g *Gateway) Shutdown() {
 	g.closing = true
 	g.mu.Unlock()
 	g.pcmSessions.Wait()
-}
-
-// clientOnlineWindow 是一把密钥多久没鉴权就算"离线"。客户端醒着时每几秒
-// 就来查一次 health / 长轮询 events，所以两分钟没有动静就是走了。
-const clientOnlineWindow = 120
-
-// ClientInfo 是页面能看到的已配对设备信息。密钥本身不透明，只暴露尾号区分。
-type ClientInfo struct {
-	Index       int    `json:"index"`
-	Fingerprint string `json:"fingerprint"`
-	LastUsed    int64  `json:"last_used,omitempty"`
-	Online      bool   `json:"online"`
-}
-
-// fingerprintOf 取密钥编码的尾 9 位。
-// 必须和 rpcd 回退路径里的 `tail -c 9` 一致，否则同一条密钥在两条数据
-// 来源下会显示成两个不同的尾号，用户会以为多出来一台设备。
-func fingerprintOf(encoded string) string {
-	const n = 9
-	if len(encoded) <= n {
-		return encoded
-	}
-	return encoded[len(encoded)-n:]
-}
-
-// Clients 按文件顺序列出已配对设备，附带各自最后一次鉴权时间和在线状态。
-// 时间戳取自 meta 里鉴权命中时记的 Used，只用于展示，不参与鉴权。
-func (g *Gateway) Clients() []ClientInfo {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	now := time.Now().Unix()
-	out := make([]ClientInfo, 0, len(g.keys))
-	for i, encoded := range g.keys {
-		last := g.meta[encoded].Used
-		out = append(out, ClientInfo{
-			Index:       i + 1,
-			Fingerprint: fingerprintOf(encoded),
-			LastUsed:    last,
-			Online:      last > 0 && now-last <= clientOnlineWindow,
-		})
-	}
-	return out
 }
