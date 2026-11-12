@@ -9,8 +9,9 @@
 #             补丁也不打，结果编出来的二进制没这功能）。
 # merged 状态的补丁文件一律移到 patches/merged/，不留在顶层。
 AirSIM-e164-cnum.patch	active			normalizeSelfNumber	decodeMaybeUCS2
-merged/AirSIM-pair-clients.patch	merged	kai-wu-cortex/airsim-mu300	/pair/clients	map[string]int64;/pair/cancel
 AirSIM-mu300-sms-send.patch	active			send --stdin;mu300SentReply
 AirSIM-mu300-signal-operator.patch	active			mu300VendorSignalDBM	mu300RefreshModem;AT+CSQ
 AirSIM-f50-release-source.patch	active	airsim-f50-openwrt	kai-wu-cortex/airsim-mu300;luci-app-airsim-
 AirSIM-f50-tar-update.patch	active	airsim-f50-	luci-app-airsim-;apk --keys-dir;SHA256SUMS
+AirSIM-f50-sta-reachability.patch	active
+AirSIM-mu300-keytable-lru.patch	active

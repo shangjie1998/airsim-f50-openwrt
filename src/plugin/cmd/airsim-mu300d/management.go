@@ -24,12 +24,9 @@ import (
 )
 
 type managementSettings struct {
-	Mode      string `json:"mode"`
-	RelayURL  string `json:"relay_url"`
-	Interface string `json:"interface"`
-	// STAInterface 是"连上游 Wi-Fi 时设备自己的无线网卡"。Wi-Fi 模式下它就是
-	// 手机所在的网段，直连端口必须在这儿也监听，否则手机搜到广告也连不上。
-	STAInterface    string `json:"sta_interface,omitempty"`
+	Mode            string `json:"mode"`
+	RelayURL        string `json:"relay_url"`
+	Interface       string `json:"interface"`
 	TunnelInterface string `json:"tunnel_interface,omitempty"`
 	PairPort        int    `json:"pair_port"`
 	ControlPort     int    `json:"control_port"`
@@ -37,7 +34,7 @@ type managementSettings struct {
 }
 
 func defaultSettings() managementSettings {
-	return managementSettings{Mode: "cloud", Interface: "br-lan", STAInterface: "wlan0", PairPort: 8580, ControlPort: 8581, PCMPort: 8582}
+	return managementSettings{Mode: "cloud", Interface: "br-lan", PairPort: 8580, ControlPort: 8581, PCMPort: 8582}
 }
 
 var interfacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,15}$`)
@@ -48,9 +45,6 @@ func (s managementSettings) validate() error {
 	}
 	if !interfacePattern.MatchString(s.Interface) {
 		return errors.New("LAN 接口名称无效")
-	}
-	if s.STAInterface != "" && (!interfacePattern.MatchString(s.STAInterface) || s.STAInterface == s.Interface || s.STAInterface == "lo") {
-		return errors.New("无线接口名称无效或与 LAN 重复")
 	}
 	if s.TunnelInterface != "" && (!interfacePattern.MatchString(s.TunnelInterface) || s.TunnelInterface == s.Interface || s.TunnelInterface == "lo") {
 		return errors.New("Tailscale 接口名称无效或与 LAN 重复")
