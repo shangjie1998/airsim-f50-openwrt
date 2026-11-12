@@ -190,8 +190,29 @@ btopt_msg() { cat "$BT_OPT_DIR/msg" 2>/dev/null | head -1; }
 
 btopt_probe() {
 	kver=$(uname -r)
+	# 当前内核是否自带蓝牙驱动：7.3.1 这类镜像自带 wcn_bsp/sprdbt_tty，
+	# 不需要 bt-opt 配件包（那份 .ko 是按 6.18.60 编的，别混用）。
+	# 光看文件存不存在不够：切过内核以后，目录里可能躺的是别的内核编的残留。
+	# 有 modinfo 就把 vermagic 一起核对，必须正好是当前内核那一版。
+	native_bt=1
+	for m in wcn_bsp sprdbt_tty; do
+		f="/lib/modules/$kver/$m.ko"
+		if [ ! -f "$f" ]; then
+			native_bt=0
+			continue
+		fi
+		if command -v modinfo >/dev/null 2>&1; then
+			# modinfo 的 "vermagic:" 后面是 tab，先归一化再取第二个字段
+			v=$(modinfo "$f" 2>/dev/null | tr '\t' ' ' | awk '/^vermagic:/{print $2; exit}')
+			case "$v" in
+				"$kver"|"$kver "*) ;;
+				*) native_bt=0 ;;
+			esac
+		fi
+	done
 	installed=0
 	[ -x /usr/bin/bluetoothd ] && [ -x /usr/bin/btattach ] && installed=1
+	[ "$native_bt" = 1 ] && [ -d /sys/class/bluetooth/hci0 ] && installed=1
 
 	busy=0
 	case "$(btopt_state)" in
@@ -206,7 +227,9 @@ btopt_probe() {
 	json_add_string message "$(btopt_msg)"
 	json_add_string kernel "$kver"
 	json_add_string want_kernel "$BT_OPT_KVER"
-	json_add_boolean kernel_ok "$([ "$kver" = "$BT_OPT_KVER" ] && echo 1 || echo 0)"
+	json_add_boolean native_bt "$native_bt"
+	# 原生自带驱动就算 OK，别让"内核版本不等于配件包版本"误报成不能装
+	json_add_boolean kernel_ok "$([ "$native_bt" = 1 ] || [ "$kver" = "$BT_OPT_KVER" ] && echo 1 || echo 0)"
 	json_add_boolean hci_present "$([ -d /sys/class/bluetooth ] || [ -e /dev/ttyBT0 ] && echo 1 || echo 0)"
 	json_add_string version "$BT_OPT_TAG"
 	json_add_string file "$BT_OPT_FILE"

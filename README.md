@@ -33,7 +33,7 @@
 | 通话采集 | `FE_ST_VOICE_PCM_C` = `hw:1,16` |
 | 通话播放 | `FE_ST_VOICE_PCM_P` = `hw:1,53`（8 kHz 直通，不做上采样） |
 | 音频扩展目录 | `/mnt/mu300-disk/extra/airsim-audio/`（`bin/ ctlset etc/ integration/ modules/<KREL>/`） |
-| 地址 / 账号 | `192.168.77.1`，root |
+| 地址 / 账号 | `192.168.77.x`，root |
 | SIM | 实测可用（号码已打码不写进仓库），`已注册`，`phone_number_status=available` |
 
 **安全边界（硬约束）**：**A 卡槽的 Android 系统一个字节不动**（不刷机、不碰 boot / bootloader / 分区表 / modem NV）；
@@ -71,15 +71,22 @@
 
 ## 3. 直接安装（插件 + 音频模块，两步走）
 
-### 3-1 装音频模块（只在没装过 `modules/6.18.60/` 时做，做完必须重启）
+### 3-1 装音频模块（按当前内核走，做完必须重启）
+
+常规做法：LuCI → **维护 → 可选配件**，装 `audio-opt 1.0.3`。
+同一个包（`k6.18.60+7.3.1`）里带两套 payload，装的时候按设备当前内核自动选；
+`5.4` 是厂商镜像自带，不用装。
+
+`6.18.60` 另有一条手工救急路（`ops/install-audio/装音频模块.sh`，只认 6.18.60，
+自己编的 modules 包放在 `PKG_TAR` 指向的位置）：
 
 ```sh
 # 主机侧
-scp dist/airsim-f50-audio-opt-1.0.3-k6.18.60+7.3.1.tar.gz root@192.168.77.1:/tmp/airsim-audio-opt.tar.gz
-scp ops/install-audio/装音频模块.sh root@192.168.77.1:/tmp/
+scp <自编的>modules-6.18.60.tar.gz root@192.168.77.x:/tmp/airsim-audio-6.18.60-modules.tar.gz
+scp ops/install-audio/装音频模块.sh root@192.168.77.x:/tmp/
 
 # 设备侧
-ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --install'
+ssh root@192.168.77.x 'sh /tmp/装音频模块.sh --install'
 ```
 
 装完 **必须重启一次**：`audio_reserve` 要在开机 `S10` 抢那 9 MB 连续区，
@@ -88,12 +95,12 @@ ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --install'
 重启后自检：
 
 ```sh
-ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --verify'
+ssh root@192.168.77.x 'sh /tmp/装音频模块.sh --verify'
 ```
 
 | 判据 | 期望 |
 |---|---|
-| `mu300-audio-dsp drivers` | 打印 `/mnt/mu300-disk/extra/airsim-audio/modules/6.18.60` |
+| `mu300-audio-dsp drivers` | 打印 `/mnt/mu300-disk/extra/airsim-audio/modules/<当前内核>`（`6.18.60` 或 `7.3.1`） |
 | `mu300-audio-dsp status` | `drivers: 19/19 loaded`、`memory: 0 pages missing`、`power-up: yes` |
 | `cat /proc/asound/cards` | 出现 `1 [sprdphonesc2730]: sprdphone-sc2730` |
 | `dmesg \| grep aud_send_cmd` | `out,cmd ... ret-value:0` |
@@ -102,11 +109,11 @@ ssh root@192.168.77.1 'sh /tmp/装6.18音频模块.sh --verify'
 ### 3-2 装插件包（覆盖式更新，先备份再换）
 
 ```sh
-scp dist/airsim-f50-0.1.0.26-r23-any.tar.gz root@192.168.77.1:/tmp/p.pkg.tar.gz
-ssh root@192.168.77.1 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh *\/install.sh'
+scp dist/airsim-f50-0.1.0.26-r23-any.tar.gz root@192.168.77.x:/tmp/p.pkg.tar.gz
+ssh root@192.168.77.x 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh *\/install.sh'
 ```
 
-`install.sh` 会先检查内核（非 6.18 直接退出码 3，不写设备一个文件），把旧二进制、页面、
+`install.sh` 只识别内核、不拦人（`5.4` / `6.18.60` / `7.3.1` 和没验过的新内核都照装，只提示差别），把旧二进制、页面、
 `rpcd` 后端、菜单/ACL、`init.d`、`uci` 一并备份到 `/usr/lib/airsim/backup-<版本>/`，
 再停服务 → 铺 `files/` 整棵树 → 起服务 → 重启 `rpcd`/`uhttpd`。
 
@@ -116,7 +123,7 @@ ssh root@192.168.77.1 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.g
 
 ### 3-3 配对
 
-LuCI → 服务 → AirSIM（或 `http://192.168.77.1/cgi-bin/luci/admin/services/airsim`）取配对码，
+LuCI → 服务 → AirSIM（或 `http://192.168.77.x/cgi-bin/luci/admin/services/airsim`）取配对码，
 iPhone 端 AirSIM 添加设备时选 **`AirSIM-F50-…`**。
 
 ## 3-4 这一包新增了什么
