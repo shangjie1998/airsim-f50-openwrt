@@ -45,3 +45,26 @@ AirSIM-pair-clients.patch          干净           未合并        都在
 |---|---|---|
 | `AirSIM-e164-cnum.patch` | `AirSIM/module/module-agent/sms.go` | 本机号码统一成 E.164（`8613…`/`0086…` → `+8613…`） |
 | `AirSIM-pair-clients.patch` | `plugin/internal/gateway/gateway.go`、`plugin/cmd/airsim-mu300d/main.go` | 加 `GET /pair/clients`：逐客户端"上次使用 / 在线"（鉴权成功时记时间戳，120 秒窗口判定在线） |
+
+## 状态列：active / merged（防"功能静默消失"）
+
+`manifest.tsv` 第二列是状态，`apply.py` 与 `check-patches.py` 都按它分流：
+
+| 状态 | 位置 | 构建时行为 | 失败判据 |
+|---|---|---|---|
+| `active` | `patches/` 顶层 | 必须用 `patch -p1 -N` 打上 | 打不上（返回码非 0）立即 `sys.exit(1)` |
+| `merged` | `patches/merged/` | 不打 | 在树里找不到"已合并标志串"就 `sys.exit(1)` |
+
+`merged` 是给"功能已经直接写进 `src/`"的补丁用的。**它存在的唯一目的
+是让漏掉能被机器发现**：源码同步上游时被冲掉改动、或合并时手滑丢了一行，
+构建会当场停在"标了 merged，但源码里找不到 xxx"，而不是照旧编出一个没这功能的二进制。
+
+规则：
+
+6. 一个补丁的功能进了 `src/`，就把 `.patch` 移到 `patches/merged/`，状态改
+   `merged`，并在标志串列写**一段只会在该功能里出现的源码文本**（函数名、
+   路由字符串、正则、错误文案都行）。标志串要选得"窄"——像仓库地址这种
+   到处都有的串不能当判据。
+7. 反方向也要管：`active` 补丁打不上就是构建失败（现状已有），不许改成
+   `-l`/`--fuzz`/`--forward` 绕过。打不上说明上游上下文变了，去改 hunk。
+8. 新增补丁必须登记，`apply.py` 遇到未登记的补丁直接退出——不许"打了但没记账"。

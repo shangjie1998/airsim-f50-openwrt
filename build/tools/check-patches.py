@@ -24,12 +24,13 @@ def read_manifest():
         if not line or line.startswith("#"):
             continue
         cols = line.split("\t")
-        cols += [""] * (4 - len(cols))
+        cols += [""] * (5 - len(cols))
         rows.append({
-            "patch": cols[0],
-            "repo": cols[1].strip(),
-            "merged": cols[2].strip(),
-            "anchors": [a for a in cols[3].split(";") if a.strip()],
+            "patch": cols[0].strip(),
+            "state": (cols[1].strip() or "active"),
+            "repo": cols[2].strip(),
+            "merged": cols[3].strip(),
+            "anchors": [a for a in cols[4].split(";") if a.strip()],
         })
     return rows
 
@@ -86,6 +87,18 @@ def main():
         if not patch.is_file():
             print(f"{row['patch']:34} {'文件不存在':12} {'-':10} -")
             bad.append(row["patch"])
+            continue
+
+        if row["state"] == "merged":
+            flags = [f for f in row["merged"].split(";") if f.strip()]
+            found = all(any(f in p.read_text(encoding="utf-8", errors="replace")
+                            for p in (ROOT / "src").rglob("*")
+                            if p.is_file() and "vendor" not in p.parts
+                            and p.suffix in {".go", ".sh", ".py", ".uc", ".json", ".lua"})
+                        for f in flags)
+            print(f"{row['patch']:34} {'已合入源码' if found else '源码里找不到':12} {'-':10} -")
+            if not found:
+                bad.append(row["patch"] + "（标 merged 但源码缺功能）")
             continue
 
         ok, detail = dry_run(patch)

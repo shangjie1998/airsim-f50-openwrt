@@ -1,11 +1,16 @@
-# 补丁登记表。check-patches.py 读这张表做两件事：
-#   1) 本地干净树 dry-run，看补丁还能不能干净打上（打不上 = 上游上下文变了）
-#   2) 拉上游最新文件，看我们补的功能是不是已经被作者合并（合并了就该删补丁）
+# 补丁登记表。apply.py（构建时）与 check-patches.py（体检时）都只认这张表。
 #
-# 列：补丁文件	上游仓库（空=无上游对照）	已合并标志串	补丁依赖的锚点串（分号分隔）
-AirSIM-e164-cnum.patch				normalizeSelfNumber	decodeMaybeUCS2
-AirSIM-pair-clients.patch	kai-wu-cortex/airsim-mu300	/pair/clients	map[string]int64;/pair/cancel
-AirSIM-mu300-sms-send.patch			send --stdin;mu300SentReply
-AirSIM-mu300-signal-operator.patch		mu300VendorSignalDBM	mu300RefreshModem;AT+CSQ
-AirSIM-f50-release-source.patch		airsim-f50-openwrt	kai-wu-cortex/airsim-mu300;luci-app-airsim-
-AirSIM-f50-tar-update.patch		airsim-f50-	luci-app-airsim-;apk --keys-dir;SHA256SUMS
+# 列：补丁文件	状态	上游仓库（空=无上游对照）	已合并标志串	补丁依赖的锚点串（分号分隔）
+#
+# 状态只有两个取值：
+#   active —— 构建时必须打进树里。打不上就构建失败，不许静默跳过。
+#   merged —— 该功能已经直接写进了 src/，构建时不打补丁；但必须在 src/ 里
+#             找得到"已合并标志串"，找不到就构建失败（防止源码里改丢了、
+#             补丁也不打，结果编出来的二进制没这功能）。
+# merged 状态的补丁文件一律移到 patches/merged/，不留在顶层。
+AirSIM-e164-cnum.patch	active			normalizeSelfNumber	decodeMaybeUCS2
+merged/AirSIM-pair-clients.patch	merged	kai-wu-cortex/airsim-mu300	/pair/clients	map[string]int64;/pair/cancel
+AirSIM-mu300-sms-send.patch	active			send --stdin;mu300SentReply
+AirSIM-mu300-signal-operator.patch	active			mu300VendorSignalDBM	mu300RefreshModem;AT+CSQ
+AirSIM-f50-release-source.patch	active	airsim-f50-openwrt	kai-wu-cortex/airsim-mu300;luci-app-airsim-
+AirSIM-f50-tar-update.patch	active	airsim-f50-	luci-app-airsim-;apk --keys-dir;SHA256SUMS
