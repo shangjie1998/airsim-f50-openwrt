@@ -38,3 +38,51 @@
  				installable = true
  			}
  		}
+
+--- a/plugin/cmd/airsim-mu300d/management_test.go
++++ b/plugin/cmd/airsim-mu300d/management_test.go
+@@ -95,11 +95,13 @@
+ 
+ func TestUpdateSelection(t *testing.T) {
+ 	var releases []githubRelease
++	// F50 版本口径是 v0.1.0.<N>-r23-<kver>，安装包名 airsim-f50-<ver>.tar.gz，
++	// 跟上游 MU300 的 v0.1.0-r<n> + apk 不是一套。
+ 	if e := json.Unmarshal([]byte(`[
+-	 {"tag_name":"v0.1.0-r9","assets":[{"name":"luci-app-airsim-0.1.0-r9.apk"}]},
+-	 {"tag_name":"v0.1.0-r13","prerelease":true,"assets":[{"name":"luci-app-airsim-0.1.0-r13.apk"}]},
+-	 {"tag_name":"v0.1.0-r20","draft":true,"assets":[{"name":"luci-app-airsim-0.1.0-r20.apk"}]},
+-	 {"tag_name":"v9.0.0-r1","assets":[]},
++	 {"tag_name":"v0.1.0.9-r23-6.18","assets":[{"name":"airsim-f50-0.1.0.9-r23-6.18.tar.gz"}]},
++	 {"tag_name":"v0.1.0.13-r23-6.18","prerelease":true,"assets":[{"name":"airsim-f50-0.1.0.13-r23-6.18.tar.gz"}]},
++	 {"tag_name":"v0.1.0.20-r23-6.18","draft":true,"assets":[{"name":"airsim-f50-0.1.0.20-r23-6.18.tar.gz"}]},
++	 {"tag_name":"v9.0.0.1-r23-6.18","assets":[]},
+ 	 {"tag_name":"<script>alert(1)</script>","assets":[]}
+ 	]`), &releases); e != nil {
+ 		t.Fatal(e)
+@@ -110,20 +112,20 @@
+ 		want     string
+ 		tag      string
+ 	}{
+-		{"0.1.0-r12", true, "available", "v0.1.0-r13"},
+-		{"0.1.0-r12", false, "ahead", "v0.1.0-r9"},
+-		{"0.1.0-r13", true, "current", "v0.1.0-r13"},
+-		{"0.1.0-dev", true, "unknown_version", "v0.1.0-r13"},
++		{"0.1.0.12-r23-6.18", true, "available", "v0.1.0.13-r23-6.18"},
++		{"0.1.0.12-r23-6.18", false, "ahead", "v0.1.0.9-r23-6.18"},
++		{"0.1.0.13-r23-6.18", true, "current", "v0.1.0.13-r23-6.18"},
++		{"0.1.0-dev", true, "unknown_version", "v0.1.0.13-r23-6.18"},
+ 	} {
+ 		r := selectRelease(releases, item.v, item.previews)
+ 		if r["status"] != item.want || r["latest"] != item.tag {
+ 			t.Fatal(r)
+ 		}
+ 	}
+-	if selectRelease(nil, "0.1.0-r13", true)["status"] != "no_release" {
++	if selectRelease(nil, "0.1.0.13-r23-6.18", true)["status"] != "no_release" {
+ 		t.Fatal("empty channel")
+ 	}
+-	if !newer("v0.1.0-r13", "v0.1.0-r9") || newer("0.1.0-r9", "0.1.0-r13") {
++	if !newer("v0.1.0.13-r23-6.18", "v0.1.0.9-r23-6.18") || newer("0.1.0.9-r23-6.18", "0.1.0.13-r23-6.18") {
+ 		t.Fatal("lexical version comparison")
+ 	}
+ }

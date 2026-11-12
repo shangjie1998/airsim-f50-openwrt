@@ -200,3 +200,126 @@
  		pkg := filepath.Join(work, name)
  		guard, e := managementLock(data, true)
  		if e != nil {
+
+--- a/plugin/cmd/airsim-mu300d/updates_test.go
++++ b/plugin/cmd/airsim-mu300d/updates_test.go
+@@ -2,6 +2,8 @@
+ 
+ import (
+ 	"context"
++	"crypto/sha256"
++	"encoding/hex"
+ 	"errors"
+ 	"os"
+ 	"path/filepath"
+@@ -41,60 +43,79 @@
+ }
+ 
+ func TestUpdateInstallTransactionFailsClosed(t *testing.T) {
+-	for _, mode := range []string{"success", "bad-signature", "wrong-version", "busy", "apk-failure", "installed-version-mismatch"} {
++	// 主包是 tar.gz 覆盖包：校验和取 .sha256 附件，解包后跑包内 install.sh。
++	// 每个 mode 都要证明：失败时一个字节都没装、成功时只装一次。
++	for _, mode := range []string{"success", "sha-missing", "sha-mismatch", "busy", "tar-failure", "install-failure", "version-mismatch"} {
+ 		t.Run(mode, func(t *testing.T) {
+-			applied, verified, preflight := 0, false, false
++			dir := t.TempDir()
++			pkg := filepath.Join(dir, "airsim-f50.tar.gz")
++			if err := os.WriteFile(pkg, []byte("payload"), 0o644); err != nil {
++				t.Fatal(err)
++			}
++			if mode != "sha-missing" {
++				sum := sha256.Sum256([]byte("payload"))
++				line := hex.EncodeToString(sum[:])
++				if mode == "sha-mismatch" {
++					line = strings.Repeat("0", 64)
++				}
++				body := line + "  airsim-f50.tar.gz\n"
++				if err := os.WriteFile(pkg+".sha256", []byte(body), 0o644); err != nil {
++					t.Fatal(err)
++				}
++			}
++			extracted, applied := 0, 0
+ 			run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+-				a := strings.Join(args, " ")
+-				switch {
+-				case strings.Contains(a, " verify "):
+-					if mode == "bad-signature" {
+-						return nil, errors.New("bad signature")
++				switch name {
++				case "tar":
++					if mode == "tar-failure" {
++						return nil, errors.New("tar failed")
+ 					}
+-					verified = true
++					// 真解包由 mock 代替：在 -C 指定目录里造出 install.sh。
++					target := args[len(args)-1]
++					script := filepath.Join(target, "install.sh")
++					if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
++						t.Fatalf("准备解包目录失败: %v", err)
++					}
++					extracted++
+ 					return nil, nil
+-				case strings.HasPrefix(a, "adbdump "):
+-					if !verified {
+-						t.Fatal("read unverified metadata")
++				case "sh":
++					if extracted != 1 {
++						t.Fatal("install script ran before extraction")
+ 					}
+-					v := "0.1.0-r15"
+-					if mode == "wrong-version" {
+-						v = "0.1.0-r12"
+-					}
+-					return []byte("info:\n  name: luci-app-airsim\n  version: " + v + "\n  arch: aarch64_generic\npaths:"), nil
+-				case strings.Contains(a, " add "):
+-					if !verified || !preflight || !strings.Contains(a, "--no-network") || strings.Contains(a, "allow-untrusted") {
+-						t.Fatal("unsafe install sequence")
+-					}
+ 					applied++
+-					if mode == "apk-failure" {
+-						return nil, errors.New("apk failed")
++					if mode == "install-failure" {
++						return nil, errors.New("install failed")
+ 					}
+ 					return nil, nil
+-				default:
++				case "/usr/lib/airsim/airsim-mu300d":
+ 					if applied != 1 {
+ 						t.Fatal("queried installed version before apply")
+ 					}
+-					if mode == "installed-version-mismatch" {
+-						return []byte(`{"version":"0.1.0-r12"}`), nil
++					v := "0.1.0-r15"
++					if mode == "version-mismatch" {
++						v = "0.1.0-r12"
+ 					}
+-					return []byte(`{"version":"0.1.0-r15"}`), nil
++					return []byte(`{"version":"` + v + `"}`), nil
+ 				}
++				t.Fatalf("unexpected command: %s %s", name, strings.Join(args, " "))
++				return nil, nil
+ 			}
+-			e := applyUpdatePackage(context.Background(), run, func() error {
+-				preflight = true
++			preflight := func() error {
+ 				if mode == "busy" {
+ 					return errors.New("busy")
+ 				}
+ 				return nil
+-			}, func(string, string) {}, "/keys", "/pkg.apk", "v0.1.0-r15")
++			}
++			e := applyUpdatePackage(context.Background(), run, preflight, func(string, string) {}, "/keys", pkg, "v0.1.0-r15")
+ 			if (e == nil) != (mode == "success") {
+ 				t.Fatal(mode, e)
+ 			}
+-			if (mode == "bad-signature" || mode == "wrong-version" || mode == "busy") && applied != 0 {
++			// 校验/预检/解包阶段就失败时，一个字节都不能装；
++			// install.sh 失败与版本未确认是"装过但结果不对"，按设计不回滚。
++			if (mode == "sha-missing" || mode == "sha-mismatch" || mode == "busy" || mode == "tar-failure") && applied != 0 {
+ 				t.Fatal("unsafe package installed")
+ 			}
+-			if applied > 1 {
++			if applied > 1 || extracted > 1 {
+ 				t.Fatal("install retried")
+ 			}
+ 		})
