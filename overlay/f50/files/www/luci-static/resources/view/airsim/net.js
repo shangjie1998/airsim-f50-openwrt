@@ -58,7 +58,7 @@ return view.extend({
   if (probe.noscan === true) limits.push('热点固定 36 信道、不做信道外扫描，这是出厂设置，不要改。');
 
   var statusLines = [
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '当前状态'), E('dd', {}, mode === 'wifi' ? 'Wi-Fi 上网' : mode === 'ap' ? '流量 + 热点' : mode === 'cell' ? '流量（热点关）' : '状态没读出来')]),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '当前状态'), E('dd', {}, mode === 'wifi' ? 'Wi-Fi 上网' : mode === 'wifi-pending' ? 'Wi-Fi 待配置（热点已关）' : mode === 'ap' ? '流量 + 热点' : mode === 'cell' ? '流量（热点关）' : '状态没读出来')]),
    E('div', { 'class': 'as-row' }, [E('dt', {}, '出口'), E('dd', {}, (st.route_dev || '—') + (st.sta_ip ? ' · ' + st.sta_ip : ''))]),
    E('div', { 'class': 'as-row' }, [E('dt', {}, '已连 Wi-Fi'), E('dd', {}, st.sta_ssid || '（未连接）')])
   ];
@@ -68,7 +68,7 @@ return view.extend({
    * 我们用 !important 也压不干净（真机上看到的是"蓝方块里一个勾"）。
    * 换成 button + 圆点，样式全在自己手里，主题插不进来。 */
   var feed = E('p', { 'class': 'as-feedback' }, '');
-  var uplinkOn = mode === 'wifi';
+  var uplinkOn = mode === 'wifi' || mode === 'wifi-pending';
   var uplinkSwitch = glass.switch(uplinkOn, function(next) {
    uplinkSwitch.disabled = true;
    feed.setAttribute('class', 'as-feedback as-feedback-pending');
@@ -78,6 +78,17 @@ return view.extend({
    netModeSet(next ? 'wifi' : 'ap').then(function(res) {
     if (res && res.ok) {
      feed.setAttribute('class', 'as-feedback as-feedback-success');
+     /* 还没配置过外部 Wi-Fi 时，这一步只是把热点关掉、腾出射频，并没有真的切到 Wi-Fi。
+      * 直接刷新页面，开关会跟着"待配置"状态弹回去，看着像没生效；这里就地更新，
+      * 再把人直接领到下面的扫描卡。 */
+     if (next && !(saved && saved.ssid)) {
+      uplinkSwitch.disabled = false;
+      glass.switchSet(uplinkSwitch, true);
+      feed.textContent = '热点已关，射频腾出来了。下面点「扫描」，选一个 Wi-Fi 输密码，连上后会自动切到 Wi-Fi 上网。';
+      var wifiCard = document.getElementById('as-wifi-card');
+      if (wifiCard && wifiCard.scrollIntoView) wifiCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+     }
      feed.textContent = (next ? '已切到 Wi-Fi 上网。' : '已切成流量 + 热点。') + (res.message ? ' ' + res.message : '');
      window.setTimeout(function() { window.location.reload(); }, 1500);
     } else {
@@ -137,7 +148,7 @@ return view.extend({
     if (!visible && ap.encryption !== 'NONE') keyInput.focus();
    };
    var locked = ap.encryption && ap.encryption !== 'NONE';
-   return E('div', { 'class': 'as-dev-item', 'click': function(ev) { if (ev.target === keyInput || ev.target.tagName === 'BUTTON') return; open(); } }, [
+   return E('div', { 'class': 'as-dev-item as-dev-stack', 'click': function(ev) { if (ev.target === keyInput || ev.target.tagName === 'BUTTON') return; open(); } }, [
     E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
      E('div', {}, [
       E('strong', {}, ap.ssid),
@@ -273,7 +284,7 @@ return view.extend({
      E('p', { 'class': 'as-caption' }, '开：连外部 Wi-Fi 上网，流量和热点都关。关：用流量上网，并把热点开起来。顺序是固定的 —— 连 Wi-Fi 时先确认拿到地址再断流量，反过来会先丢网；失败会自动退回切换前的状态。')
     ]),
 
-    E('section', { 'class': 'as-card' }, [
+    E('section', { 'class': 'as-card', 'id': 'as-wifi-card' }, [
      E('h3', {}, '连接 Wi-Fi'),
      E('p', { 'class': 'as-caption' }, '扫描会占用射频：热点开着的时候扫描，手机那边会断网几秒。建议插 USB 线用电脑操作。'),
      E('div', { 'class': 'as-actions' }, [scanBtn]),

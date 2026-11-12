@@ -378,7 +378,7 @@ return view.extend({
    ui.stylesheet(),
    E('style', {}, glass.css()),
    (ui.menu ? ui.menu('overview') : ''),
-   E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · F50 控制台'), E('h2', {}, '这台 F50，先在这一页看清楚。'), E('p', {}, '运行状态、起停电话网关、配对新客户端都在这一页。换上网通道去「联网」，音频、蓝牙、短信、维护各自一页。哪项看着不对劲，先去「维护」跑一遍自检 —— 它会告诉你是真坏了还是只是没开。')]), text('version', 'span', 'as-version')]),
+   E('header', { 'class': 'as-header' }, [E('div', {}, [E('div', { 'class': 'as-eyebrow' }, ['AirSIM · F50 控制台 · ', E('span', { 'class': 'as-sign' }, '飞 · D/s · 杰')]), E('h2', {}, '这台 F50，先在这一页看清楚。'), E('p', {}, '运行状态、起停电话网关、配对新客户端都在这一页。换上网通道去「联网」，音频、蓝牙、短信、维护各自一页。哪项看着不对劲，先去「维护」跑一遍自检 —— 它会告诉你是真坏了还是只是没开。')]), text('version', 'span', 'as-version')]),
    E('div', { 'class': 'as-layout' }, [
     E('section', { 'class': 'as-card as-status', 'aria-label': '设备状态' }, [
      E('div', { 'class': 'as-card-heading' }, [E('h3', {}, '设备状态'), text('live', 'span', 'as-pill')]),

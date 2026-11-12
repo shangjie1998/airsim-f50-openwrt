@@ -69,6 +69,8 @@ var BODY = [
 '.as-root .as-header h2{font-size:var(--fs-title);line-height:var(--lh-title);font-weight:700;letter-spacing:-.015em}',
 '.as-root .as-card h3,.as-root .as-card-heading{font-size:var(--fs-h3);line-height:var(--lh-h3);font-weight:600}',
 '.as-root .as-eyebrow{font-size:var(--fs-note);line-height:var(--lh-note);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}',
+/* 署名段保持原样大小写（D/s 这类写法不能被 uppercase 抬成 D/S），字距也收一点，免得挤压 */
+'.as-root .as-eyebrow .as-sign{text-transform:none;letter-spacing:.04em}',
 '.as-root .as-caption{font-size:var(--fs-cap);line-height:var(--lh-cap);color:var(--ink-2)}',
 '.as-root .as-facts dt,.as-root .as-field-label{font-size:var(--fs-note);line-height:var(--lh-note);color:var(--ink-2)}',
 '.as-root .as-facts dd,.as-root .as-row dd{font-size:var(--fs-body);line-height:var(--lh-body);color:var(--ink)}',
@@ -110,7 +112,17 @@ var BODY = [
 '.as-root .as-feedback{border-radius:var(--g-radius-xs);font-size:var(--fs-cap);line-height:var(--lh-cap)}',
 '.as-feedback:empty{display:none !important}',
 '.as-root .as-notice{border-radius:var(--g-radius-s);font-size:var(--fs-cap);line-height:var(--lh-cap)}',
-'.as-root .as-dev-item,.as-root .as-details{border-radius:var(--g-radius-s)}',
+/* 这两类只有单边边框（.as-dev-item 是下边框、.as-details 是上边框），配圆角会在
+   两端画成弧线，看起来像"半个框"。单边边框一律不给圆角。 */
+'.as-root .as-dev-item,.as-root .as-details{border-radius:0}',
+/* 联网页的 Wi-Fi 条目是上下结构（标题行 + 折叠起来的密码面板），不能跟着清单的横向布局：
+   横向 flex 会把密码框挤到右边、把带圆角的上边框压成"半截框"。这里改回纵向。 */
+'.as-root .as-dev-stack{display:block;justify-content:flex-start;align-items:stretch;gap:0;padding:12px 0;cursor:pointer}',
+'.as-root .as-dev-stack .as-inline{margin-top:0}',
+'.as-root .as-dev-stack .as-details{margin-top:12px}',
+/* 手动输入区：两个输入框之间留一口气，别贴在一起 */
+'.as-root .as-details .as-input+.as-input{margin-top:10px}',
+'.as-root .as-details .as-actions{margin-top:12px}',
 '.as-root .as-notice-warn{color:var(--g-warn);background:var(--g-warn-bg);}',
 
 /* ---- 降级：不支持 backdrop-filter 的老设备退回不透明底，别变成灰糊 ---- */
