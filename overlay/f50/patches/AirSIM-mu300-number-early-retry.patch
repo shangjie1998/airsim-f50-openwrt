@@ -1,0 +1,83 @@
+diff --git a/AirSIM/module/module-agent/mu300.go b/AirSIM/module/module-agent/mu300.go
+index ad116f3..4ddf0ea 100644
+--- a/AirSIM/module/module-agent/mu300.go
++++ b/AirSIM/module/module-agent/mu300.go
+@@ -52,12 +52,13 @@ func (a *agent) mu300PollLoop() {
+ 	ticker := time.NewTicker(time.Second)
+ 	defer ticker.Stop()
+ 	n := 0
++	started := time.Now()
+ 	for {
+ 		a.mu300CallMu.Lock()
+ 		_, err := a.mu300PollRefreshCalls()
+ 		a.mu300CallMu.Unlock()
+ 		a.setCallError(err)
+-		if n%30 == 0 && a.mu300MetadataIdle() {
++		if numberRetryDue(n, time.Since(started), a.mu300Number()) && a.mu300MetadataIdle() {
+ 			a.mu300RefreshModem()
+ 		}
+ 		n++
+@@ -65,6 +66,23 @@ func (a *agent) mu300PollLoop() {
+ 	}
+ }
+ 
++// numberRetryDue 决定这一秒要不要刷新元数据（顺带读一次 AT+CNUM）。
++// 常规 30 秒一轮；但 AT+CNUM 读的是 SIM 里的 MSISDN，不少运营商卡要等网络
++// 注册完成后才下发，开机后半小时内都可能是空的。所以开机头 3 分钟、号码仍
++// 为空时提到 5 秒一轮，拿到号或超时后自动回到常规节奏。
++func numberRetryDue(n int, uptime time.Duration, number string) bool {
++	if n%30 == 0 {
++		return true
++	}
++	return uptime < 3*time.Minute && number == "" && n%5 == 0
++}
++
++func (a *agent) mu300Number() string {
++	a.mu.RLock()
++	defer a.mu.RUnlock()
++	return a.modem.PhoneNumber
++}
++
+ func (a *agent) mu300AT(command string, timeout time.Duration) (string, error) {
+ 	if a.callControlCommand != nil {
+ 		return a.callControlCommand(command, timeout)
+diff --git a/AirSIM/module/module-agent/number_retry_test.go b/AirSIM/module/module-agent/number_retry_test.go
+new file mode 100644
+index 0000000..70b239e
+--- /dev/null
++++ b/AirSIM/module/module-agent/number_retry_test.go
+@@ -0,0 +1,34 @@
++package main
++
++import (
++	"testing"
++	"time"
++)
++
++// 号码刷新节奏：常规 30 秒一轮；开机头 3 分钟且号码为空时 5 秒一轮。
++// 这条判据决定客户端开机后多久能看到本机号码，边界要钉死。
++func TestNumberRetryDue(t *testing.T) {
++	const number = "+8613800138000"
++	cases := []struct {
++		name   string
++		n      int
++		uptime time.Duration
++		number string
++		want   bool
++	}{
++		{"常规节奏 30 秒，已有号", 30, 2 * time.Minute, number, true},
++		{"常规节奏 30 秒，无号", 30, 2 * time.Minute, "", true},
++		{"开机初期无号，5 秒点加速", 5, 10 * time.Second, "", true},
++		{"开机初期无号，非 5 秒点不加速", 7, 10 * time.Second, "", false},
++		{"开机初期已有号，不加速", 5, 10 * time.Second, number, false},
++		{"超过 3 分钟，不加速", 5, 4 * time.Minute, "", false},
++		{"刚好 3 分钟边界，不加速", 5, 3 * time.Minute, "", false},
++		{"第 1 秒，不加速", 1, time.Second, "", false},
++		{"5 秒点但已超时很久，不加速", 5, 30 * time.Minute, "", false},
++	}
++	for _, c := range cases {
++		if got := numberRetryDue(c.n, c.uptime, c.number); got != c.want {
++			t.Errorf("%s: numberRetryDue(%d, %v, %q) = %v, want %v", c.name, c.n, c.uptime, c.number, got, c.want)
++		}
++	}
++}
