@@ -182,6 +182,7 @@ func main() {
 	admin.HandleFunc("/pair/start", d.startPair)
 	admin.HandleFunc("/rebind", d.rebindHandler)
 	admin.HandleFunc("/pair/cancel", d.cancelPair)
+	admin.HandleFunc("/pair/clients", d.pairClients)
 	admin.HandleFunc("/number/refresh", d.refreshNumber)
 	admin.HandleFunc("/call/action", d.callAction)
 	public := http.NewServeMux()
@@ -309,7 +310,7 @@ func (d *daemon) status(w http.ResponseWriter, r *http.Request) {
 	bonjour := d.advertisement != nil
 	d.adMu.Unlock()
 	calls := d.callsSnapshot(r.Context())
-	write(w, 200, map[string]any{"product": "AirSIM for MU300", "version": version, "running": true, "lan_ip": d.lan, "ad_host": d.lan, "bind_hosts": d.hostList(), "tunnel_ip": d.tunnel, "pairing_port": d.settings.PairPort, "control_port": d.settings.ControlPort, "pcm_port": d.settings.PCMPort, "mode": d.settings.Mode, "bonjour_pairing": session != nil && bonjour, "agent_id": d.deviceID, "pairing": session, "paired_this_boot": paired, "audio": d.bridge.Status(), "gateway": d.gateway.Diagnostics(), "devices": dev, "audio_available": e == nil, "agent": d.agentHealth(), "sim": d.agentGet("/api/status"), "relay": d.agentGet("/api/push/status"), "call_active": !calls.Available || len(calls.Calls) > 0, "calls": calls})
+	write(w, 200, map[string]any{"product": "AirSIM for MU300", "version": version, "running": true, "lan_ip": d.lan, "ad_host": d.lan, "bind_hosts": d.hostList(), "tunnel_ip": d.tunnelAddress(), "pairing_port": d.settings.PairPort, "control_port": d.settings.ControlPort, "pcm_port": d.settings.PCMPort, "mode": d.settings.Mode, "bonjour_pairing": session != nil && bonjour, "agent_id": d.deviceID, "pairing": session, "paired_this_boot": paired, "audio": d.bridge.Status(), "gateway": d.gateway.Diagnostics(), "devices": dev, "audio_available": e == nil, "agent": d.agentHealth(), "sim": d.agentGet("/api/status"), "relay": d.agentGet("/api/push/status"), "call_active": !calls.Available || len(calls.Calls) > 0, "calls": calls})
 }
 
 func (d *daemon) callActive() bool {
@@ -417,6 +418,21 @@ func (d *daemon) cancelPair(w http.ResponseWriter, r *http.Request) {
 	d.closePair("")
 	write(w, 200, map[string]bool{"ok": true})
 }
+
+// pairClients 列出已配对客户端，带最后一次鉴权时间与在线状态。
+// rpcd 的 airsim-pair 优先读这条，读不到才回退读文件（那时没有在线状态）。
+func (d *daemon) pairClients(w http.ResponseWriter, r *http.Request) {
+	if !method(w, r, "GET") {
+		return
+	}
+	if d.gateway == nil {
+		write(w, 200, map[string]any{"clients": []any{}, "total": 0, "limit": 16})
+		return
+	}
+	clients := d.gateway.Clients()
+	write(w, 200, map[string]any{"clients": clients, "total": len(clients), "limit": 16})
+}
+
 func (d *daemon) closePair(id string) {
 	d.adMu.Lock()
 	defer d.adMu.Unlock()
@@ -521,7 +537,7 @@ func (d *daemon) claim(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if d.gateway.Add(localSecret) != nil {
+	if d.gateway.AddClient(localSecret, claim.ClientPublic) != nil {
 		write(w, 500, map[string]string{"error": "gateway_key_storage_failed"})
 		return
 	}
@@ -599,11 +615,26 @@ func (d *daemon) serveEndpoint(ep directEndpoint) {
 	}(ep.pcm)
 }
 
-func (d *daemon) publishAdvertisement(host string) (*zeroconf.Server, error) {
+// advertisementText 拼 mDNS TXT。iOS 只认这里列出的字段名，别随手改名。
+func (d *daemon) advertisementText(host string) []string {
 	txt := []string{"v=1", "agent_id=" + d.deviceID, "agent_kind=mu300", "device_name=AirSIM MU300",
 		"manufacturer=ZTE", "model=MU300", "host=" + host,
 		"control_port=" + portText(d.settings.ControlPort),
 		"pcm_port=" + portText(d.settings.PCMPort), "caps=control,pcm"}
+	// iOS 在探测不到 host 时会读 TXT 里的 alt_host 走隧道回退
+	// （VoWLANController.swift:1286，三个字段必须同时出现才认）。
+	// 只有隧道地址真的存在、且与主 host 不同才写；没有隧道接口就一个字段都不加，
+	// 手机侧行为跟现在完全一致。
+	if alt := d.tunnelAddress(); alt != "" && alt != host {
+		txt = append(txt, "alt_host="+alt,
+			"alt_control_port="+portText(d.settings.ControlPort),
+			"alt_pcm_port="+portText(d.settings.PCMPort))
+	}
+	return txt
+}
+
+func (d *daemon) publishAdvertisement(host string) (*zeroconf.Server, error) {
+	txt := d.advertisementText(host)
 	// 一条广告只能带一个 host：必须在 host 所属那张网卡上广播。
 	// 同时往 br-lan 和 wlan0 发，另一侧手机就会拿到它根本去不了的地址。
 	var ifaces []net.Interface
@@ -619,6 +650,14 @@ func (d *daemon) publishAdvertisement(host string) (*zeroconf.Server, error) {
 		return nil, err
 	}
 	return ad, nil
+}
+
+// tunnelAddress 是隧道网卡地址（Tailscale 之类），没有就返回空。
+// 广告在 rebind 里会重建，status 也会读，所以统一走锁。
+func (d *daemon) tunnelAddress() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.tunnel
 }
 
 func (d *daemon) interfaceForHost(host string) *net.Interface {
@@ -727,11 +766,14 @@ func (d *daemon) rebind() error {
 	}
 	d.directHosts = dm
 	if d.settings.TunnelInterface != "" {
-		if ip, ok := interfaceAddress(d.settings.TunnelInterface, true); ok {
+		ip, ok := interfaceAddress(d.settings.TunnelInterface, true)
+		d.mu.Lock()
+		if ok {
 			d.tunnel = ip
 		} else {
 			d.tunnel = ""
 		}
+		d.mu.Unlock()
 	}
 	adHost := d.adHostFor(hosts)
 	ad, adErr := d.publishAdvertisement(adHost)

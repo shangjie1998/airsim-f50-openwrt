@@ -127,7 +127,11 @@ func TestSecretValidationAndBoundedClients(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if g.Add(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("z", 32)))) == nil {
-		t.Fatal("unbounded clients")
+	// 第 17 条不再报"超额"：按最久未用淘汰前面一条，表始终封顶
+	if err := g.Add(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("z", 32)))); err != nil {
+		t.Fatalf("17th key should evict, not fail: %v", err)
+	}
+	if got := len(g.keys); got != maxGatewayKeys {
+		t.Fatalf("client table size = %d, want %d", got, maxGatewayKeys)
 	}
 }

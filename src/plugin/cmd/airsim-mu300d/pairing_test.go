@@ -215,31 +215,24 @@ func TestWrongPairingCodeNeverReachesRegistration(t *testing.T) {
 	}
 }
 
-func TestPairingInvalidOrFullGatewayDoesNotReplaceAgentRegistration(t *testing.T) {
-	for _, full := range []bool{false, true} {
-		d := pairingFixture(t, func(*http.Request) (*http.Response, error) {
-			t.Fatal("invalid or over-capacity gateway key reached Agent")
-			return nil, nil
-		})
-		reg := pairingRegistrationFixture(99)
-		if full {
-			for i := byte(0); i < 16; i++ {
-				if err := d.gateway.Add(pairingRegistrationFixture(i)["vowlan_secret"].(string)); err != nil {
-					t.Fatal(err)
-				}
-			}
-		} else {
-			reg["vowlan_secret"] = "invalid-key"
-		}
-		s, err := pairing.New(time.Now())
-		if err != nil {
-			t.Fatal(err)
-		}
-		d.session = s
-		w := httptest.NewRecorder()
-		d.claim(w, httptest.NewRequest("POST", "/pair/v1/claim", bytes.NewReader(encryptedPairingClaim(t, s, s.Code, reg))))
-		if w.Code != http.StatusInternalServerError || d.paired {
-			t.Fatal("gateway failure accepted")
-		}
+// 密钥格式非法时必须在碰 Agent 之前就拒掉，别把一次注册消耗在一个废 key 上。
+// （"表满"这一路已经改成淘汰最久未用，不再算失败，因此不再需要这条保护。）
+func TestPairingInvalidGatewayKeyDoesNotReplaceAgentRegistration(t *testing.T) {
+	d := pairingFixture(t, func(*http.Request) (*http.Response, error) {
+		t.Fatal("invalid gateway key reached Agent")
+		return nil, nil
+	})
+	reg := pairingRegistrationFixture(99)
+	reg["vowlan_secret"] = "invalid-key"
+
+	s, err := pairing.New(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.session = s
+	w := httptest.NewRecorder()
+	d.claim(w, httptest.NewRequest("POST", "/pair/v1/claim", bytes.NewReader(encryptedPairingClaim(t, s, s.Code, reg))))
+	if w.Code != http.StatusInternalServerError || d.paired {
+		t.Fatal("gateway failure accepted")
 	}
 }
