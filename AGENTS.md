@@ -183,6 +183,36 @@ git log --all --oneline -S"<可疑串>"    # 历史里也翻不到才算清完
 最后靠 `git filter-repo --replace-text` 重写历史 + 强推 main 与 tag 才算清掉。
 做法与验证步骤见 `docs/踩坑记录.md`「公开仓库脱敏与历史重写」一节。
 
+## 8c. 改上游 Go 只走补丁层（硬规则，2026-11-12）
+
+`src/` 是上游原样快照，**永远不要直接改**。所有上游 Go 的改动写成
+`overlay/f50/patches/*.patch`，构建时由 `overlay/f50/apply.py` 打进合并树。
+
+踩过的坑：把改动直接写进 `src/` 之后，补丁还在顶层照旧打 → 3/4 hunk reject，
+`apply.py` 退出，标准构建其实是坏的；而直接 `cd src/plugin && go build` 又能编出
+"看着正常但缺功能"的二进制。两个方向都能骗过眼睛。
+
+必须遵守：
+
+1. 改上游 Go：只改 `patches/*.patch`，不在 `src/` 动手。
+2. 新补丁必须登记 `patches/manifest.tsv`（状态 `active`）。`apply.py` 遇到未登记的
+   补丁会直接退出，`check-patches.py` 也会报。
+3. 构建只走 `sh overlay/f50/build.sh`。它做三件事：rsync `src/` → 跑
+   `check-patches.py` 体检 → `apply.py` 打补丁（打不上硬失败）→ 编译。
+   **不要**用 `cd src/plugin && go build` 验证，那棵树没有补丁。
+4. 补丁改了行为就带测试，测试 hunk 写进**同一个** patch（谁改行为谁负责测试）。
+   例：`AirSIM-f50-tar-update.patch` 把主包改成 tar.gz + `.sha256`，就得同时改
+   `updates_test.go`，否则测试在"Release 缺少安装包校验和"挂掉。
+5. 验证补丁真进了产物：`strings` 按包查功能串 —— plugin 侧查 `airsim-mu300d`，
+   Agent 侧查 `airsim-agent`。"补丁数对得上"不算证据，符号可能被内联/裁剪。
+6. 打不上就去改 hunk 上下文，不许 `--fuzz` / `-l` / `--forward` 绕过。
+7. 写测试断言要贴代码意图，不要为了让测试变绿放宽语义（例如"安装已执行但版本
+   未确认"按设计不回滚，就不该断言零安装）。
+
+另外一条同类教训：写内核/版本判断时按**多档前缀**写全（`5.4.*` / `6.18.*` / `7.3.*`），
+别拿某一档当唯一判据。之前 `airsim-bt` 的 `kernel_ok` 只比 `6.18.60`，在 7.3.1 上
+恒为 false，就是漏写了其它档。
+
 ## 9. 文件地图
 
 ```text
