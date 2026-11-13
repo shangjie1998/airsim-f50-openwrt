@@ -33,8 +33,12 @@ var LIGHT = [
 '--g-track:#c7c7cc;--g-track-edge:rgba(0,0,0,.12);--g-knob:#fff;',
 '--g-warn:#b42326;--g-warn-bg:rgba(255,59,48,.10);',
 '--ink:#1d1d1f;--ink-2:#6e6e73;--ink-3:#8e8e93;--ink-4:#aeaeb2;',
-'--fs-title:34px;--lh-title:41px;--fs-h3:22px;--lh-h3:28px;',
-'--fs-body:15px;--lh-body:22px;--fs-cap:13px;--lh-cap:18px;--fs-note:12px;--lh-note:16px;',
+/* 字号只有一处真源：ui.css 的 --as-fs-*。这里只做别名，不再自己定义 px。
+ * 之前这里另挂一套 --fs-*，注入的 <style> 排在 ui.css 后面，
+ * 结果 ui.css 改 rem 也压不住，iPad 调大字号时说明文字一动不动。
+ * 行高用无单位倍数，字号长了行高自己跟着长，不会挤在一起。 */
+'--fs-title:var(--as-fs-title,2.125rem);--lh-title:1.21;--fs-h3:var(--as-fs-h3,1.375rem);--lh-h3:1.27;',
+'--fs-body:var(--as-fs-body,.9375rem);--lh-body:1.47;--fs-cap:var(--as-fs-cap,.8125rem);--lh-cap:1.38;--fs-note:var(--as-fs-note,.75rem);--lh-note:1.33;',
 '}'
 ].join('');
 
@@ -142,12 +146,15 @@ function css() {
 
 /* 滑块开关：真 DOM 圆钮。开 = 钮在左、轨道蓝；关 = 钮在右、轨道灰。
  * onToggle(next) 里拿到的就是目标状态；失败时调 switchSet 撤回。 */
-function makeSwitch(on, onToggle) {
+/* 开关本体是一段没有文字的圆点，读屏只会念「开关，已打开」，不知道管的是哪一项。
+ * 第三个参数 label 会挂成 aria-label；页面里旁边那行说明文字是画出来的，关联不到按钮。 */
+function makeSwitch(on, onToggle, label) {
 	var knob = E('span', { 'class': 'g-knob' });
 	var btn = E('button', {
 		'class': 'g-switch',
 		'type': 'button',
 		'role': 'switch',
+		'aria-label': label || null,
 		'click': function(ev) {
 			ev.stopPropagation();
 			if (btn.disabled) return;

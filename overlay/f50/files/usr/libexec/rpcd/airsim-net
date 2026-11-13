@@ -160,6 +160,13 @@ END {
 	json_add_array aps
 	while IFS='|' read -r bssid ssid ch bandl sig enc; do
 		[ -n "$ssid" ] || continue           # 隐藏 SSID 的单独由页面引导手输
+		# iwinfo 扫描结果里非 ASCII 字节会被转义成字面 "\xe5\x88\x98" 这种 C 风格串，
+		# 直接吐给前端就是一片乱码，写进 uci 更连不上（wpa_supplicant 会当字面反斜杠）。
+		# 这里还原成真正的 UTF-8：printf %b 认 \xHH。只有出现 \x 才动手，
+		# 免得把 SSID 里本来就有的 \ 或 % 解释坏。
+		case "$ssid" in
+			*'\x'*) ssid=$(printf '%b' "$ssid") ;;
+		esac
 		if ! allowed_chan "$ch"; then skipped=$((skipped + 1)); continue; fi
 		cnt=$((cnt + 1))
 		json_add_object

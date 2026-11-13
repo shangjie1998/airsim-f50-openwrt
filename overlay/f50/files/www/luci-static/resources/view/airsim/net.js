@@ -37,6 +37,28 @@ function pill(text, kind) {
  return E('span', { 'class': 'as-pill' + (kind ? ' as-pill-' + kind : '') }, text);
 }
 
+/* 后端已经把 iwinfo 那层 \xe5\x88\x98 还原成真 UTF-8 了，这里只做兜底：
+ * 万一还有哪条漏网（比如某些固件的 iw 也会转义），显示前再过一遍，
+ * 转成 %E5%88%98 交给 decodeURIComponent，解不开就原样返回，绝不吞字符。*/
+function showSsid(s) {
+ var str = s == null ? '' : String(s);
+ if (!/\\x[0-9a-fA-F]{2}/.test(str)) return str;
+ try {
+  return decodeURIComponent(str.replace(/\\x([0-9a-fA-F]{2})/g, '%$1'));
+ } catch (e) {
+  return str;
+ }
+}
+
+/* 信号分档照苹果那套来：-50 极好 / -60 很好 / -70 一般 / -80 差 / -90 以下别用。
+ * 列表只留 >= -80 的，弱的收进一个折叠，点开才看——不静默吞掉，也不让一堆
+ * -90 的噪音占满屏幕让人挑花眼。iOS 的 Wi-Fi 列表是强信号在前，这里照排。*/
+var WEAK_RSSI = -80;
+function rssiOf(ap) {
+ var m = /(-?\d+(?:\.\d+)?)\s*dBm/.exec((ap && ap.signal) || '') || /(-?\d+(?:\.\d+)?)/.exec((ap && ap.signal) || '');
+ return m ? parseFloat(m[1]) : 0;
+}
+
 return view.extend({
  load: function() {
   /* 一次调用拿齐四张卡片的数据：原来分四次，每次都要过一遍 rpcd 再起一个 shell，
@@ -60,14 +82,14 @@ return view.extend({
   var statusLines = [
    E('div', { 'class': 'as-row' }, [E('dt', {}, '当前状态'), E('dd', {}, mode === 'wifi' ? 'Wi-Fi 上网' : mode === 'wifi-pending' ? 'Wi-Fi 待配置（热点已关）' : mode === 'ap' ? '流量 + 热点' : mode === 'cell' ? '流量（热点关）' : '状态没读出来')]),
    E('div', { 'class': 'as-row' }, [E('dt', {}, '出口'), E('dd', {}, (st.route_dev || '—') + (st.sta_ip ? ' · ' + st.sta_ip : ''))]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '已连 Wi-Fi'), E('dd', {}, st.sta_ssid || '（未连接）')])
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '已连 Wi-Fi'), E('dd', {}, showSsid(st.sta_ssid) || '（未连接）')])
   ];
 
   /* ---- 卡 1：上网方式（一个滑块两态）----
    * 为什么不用 input[type=checkbox]：主题给复选框挂了伪元素渐变和勾，
    * 我们用 !important 也压不干净（真机上看到的是"蓝方块里一个勾"）。
    * 换成 button + 圆点，样式全在自己手里，主题插不进来。 */
-  var feed = E('p', { 'class': 'as-feedback' }, '');
+  var feed = E('p', { 'class': 'as-feedback', 'role': 'status', 'aria-live': 'polite' }, '');
   var uplinkOn = mode === 'wifi' || mode === 'wifi-pending';
   var uplinkSwitch = glass.switch(uplinkOn, function(next) {
    uplinkSwitch.disabled = true;
@@ -103,13 +125,13 @@ return view.extend({
     feed.setAttribute('class', 'as-feedback as-feedback-error');
     feed.textContent = '切换请求失败：' + (err && err.message ? err.message : err) + '（多半是半分钟内没连上 Wi-Fi，已退回原状态）';
    });
-  });
+  }, 'Wi-Fi 上网');
 
   /* ---- 卡 2：Wi-Fi 列表 ---- */
   var listBox = E('div', { 'class': 'as-devs' }, [E('p', { 'class': 'as-caption' }, '还没扫描。')]);
   var scanBtn = E('button', { 'class': 'as-btn', 'type': 'button' }, '扫描');
-  var manualSsid = E('input', { 'class': 'as-input', 'type': 'text', 'placeholder': '隐藏网络：直接输 Wi-Fi 名称' });
-  var manualKey = E('input', { 'class': 'as-input', 'type': 'password', 'placeholder': '密码（开放网络留空）' });
+  var manualSsid = E('input', { 'id': 'as-net-manual-ssid', 'class': 'as-input', 'type': 'text', 'placeholder': '隐藏网络：直接输 Wi-Fi 名称' });
+  var manualKey = E('input', { 'id': 'as-net-manual-key', 'class': 'as-input', 'type': 'password', 'placeholder': '密码（开放网络留空）' });
 
   function connect(ssid, encryption, key) {
    feed.removeAttribute('class');
@@ -130,10 +152,12 @@ return view.extend({
    });
   }
 
+  var apSeq = 0;
   function apRow(ap) {
-   var keyInput = E('input', { 'class': 'as-input', 'type': 'password', 'placeholder': '这个 Wi-Fi 的密码' });
+   apSeq += 1;
+   var keyInput = E('input', { 'id': 'as-net-key-' + apSeq, 'class': 'as-input', 'type': 'password', 'placeholder': '这个 Wi-Fi 的密码' });
    var panel = E('div', { 'class': 'as-details', 'style': 'display:none' }, [
-    keyInput,
+    ui.field(showSsid(ap.ssid) + ' 的密码', keyInput),
     E('div', { 'class': 'as-actions' }, [
      E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
       var k = (keyInput.value || '').trim();
@@ -151,7 +175,7 @@ return view.extend({
    return E('div', { 'class': 'as-dev-item as-dev-stack', 'click': function(ev) { if (ev.target === keyInput || ev.target.tagName === 'BUTTON') return; open(); } }, [
     E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
      E('div', {}, [
-      E('strong', {}, ap.ssid),
+      E('strong', {}, showSsid(ap.ssid)),
       E('div', { 'class': 'as-caption' }, (ap.band || '') + ' · 信道 ' + ap.channel + ' · ' + ap.signal + (locked ? ' · 加密' : ' · 开放'))
      ]),
      ap.supported === false ? pill('不支持', 'red') : (locked ? pill('加密', 'neutral') : pill('开放', 'green'))
@@ -166,11 +190,19 @@ return view.extend({
     listBox.appendChild(E('p', { 'class': 'as-caption' }, (res && res.error) || '扫描失败。'));
     return;
    }
-   if (!res.aps || !res.aps.length) {
-    listBox.appendChild(E('p', { 'class': 'as-caption' }, '这个频段上没扫到可连的热点。'));
+   var all = res.aps || [];
+   var strong = all.filter(function(ap) { return rssiOf(ap) >= WEAK_RSSI; })
+    .sort(function(a, b) { return rssiOf(b) - rssiOf(a); });   /* 强的在前，跟 iOS 一样 */
+
+   /* 低于 -80 dBm 的直接不出现：连上也是卡，列出来只会让人多犹豫一次。 */
+   if (!strong.length) {
+    listBox.appendChild(E('p', { 'class': 'as-caption' },
+     all.length ? '附近热点的信号都低于 ' + WEAK_RSSI + ' dBm，连上也用不了，挪近点再扫。'
+                : '这个频段上没扫到可连的热点。'));
    } else {
-    res.aps.forEach(function(ap) { listBox.appendChild(apRow(ap)); });
+    strong.forEach(function(ap) { listBox.appendChild(apRow(ap)); });
    }
+
    if (res.filtered) {
     listBox.appendChild(E('p', { 'class': 'as-caption' }, '另有 ' + res.filtered + ' 个在 2.4G 或其它信道上，本机连不上，没列出。'));
    }
@@ -191,14 +223,14 @@ return view.extend({
    savedBox = E('div', {}, [
     E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
      E('div', {}, [
-      E('strong', {}, saved.ssid),
+      E('strong', {}, showSsid(saved.ssid)),
       E('div', { 'class': 'as-caption' }, (saved.encryption === 'psk2' ? 'WPA2' : saved.encryption === 'sae' ? 'WPA3' : '开放') + (saved.has_key ? ' · 密码已保存' : ''))
      ]),
      pill('当前' , 'green')
     ]),
     E('div', { 'class': 'as-actions' }, [
      E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
-      if (!window.confirm('删除保存的「' + saved.ssid + '」？删完要重新输密码。')) return;
+      if (!window.confirm('删除保存的「' + showSsid(saved.ssid) + '」？删完要重新输密码。')) return;
       netForget().then(function(res) {
        feed.className = 'as-feedback ' + (res && res.ok ? 'as-feedback-success' : 'as-feedback-error');
        feed.textContent = (res && (res.message || res.error)) || '';
@@ -218,7 +250,7 @@ return view.extend({
   var adm = (d && d.admin) || {};
   var admOn = adm.enabled === true;
   var admLive = adm.live === true;
-  var admFeed = E('p', { 'class': 'as-feedback' }, '');
+  var admFeed = E('p', { 'class': 'as-feedback', 'role': 'status', 'aria-live': 'polite' }, '');
   admFeed.style.display = 'none';   // 没有话说的时候不要留一个空框
   var admSwitch = glass.switch(admOn, function(nextOn) {
    var next = nextOn ? 1 : 0;
@@ -246,7 +278,7 @@ return view.extend({
     admFeed.className = 'as-feedback as-feedback-error';
     admFeed.textContent = '请求失败：' + err;
    });
-  });
+  }, '允许从 Wi-Fi 打开管理页');
 
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('net') : ''),
@@ -290,9 +322,9 @@ return view.extend({
      E('div', { 'class': 'as-actions' }, [scanBtn]),
      listBox,
      E('div', { 'class': 'as-details' }, [
-      E('div', { 'class': 'as-field-label' }, '隐藏网络 / 手动输入'),
-      manualSsid,
-      manualKey,
+      E('p', { 'class': 'as-caption' }, '隐藏网络 / 手动输入'),
+      ui.field('Wi-Fi 名称', manualSsid),
+      ui.field('密码（开放网络留空）', manualKey),
       E('div', { 'class': 'as-actions' }, [
        E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
         var s = (manualSsid.value || '').trim();

@@ -399,7 +399,20 @@ agt_ensure() {
 	# 带参数的形式（实测 rc=1 直接起不来）。它认 -x script，脚本本身有 shebang，
 	# 所以最稳的是直接后台跑，别指望它。
 	"$AGT_RUN" >/dev/null 2>&1 &
-	sleep 1
+	# 等它就绪再回去。以前这里只 sleep 1：进程是起来了，但它里面的 python
+	# 还要开 pty、拉 bluetoothctl、连 D-Bus、注册配对 agent，开机后这段远不止 1 秒。
+	# scan_on 正好落进这个空档就白发了 —— 表现出来就是「重启后第一次扫描扫不出东西，
+	# 关一下再开就好了」。agent 是在主循环里写心跳的，心跳变新鲜 = 真能接命令了。
+	_w=0
+	while [ "$_w" -lt 12 ]; do
+		_now=$(date +%s)
+		_hb=0
+		[ -f "$AGT_DIR/heartbeat" ] && _hb=$(cat "$AGT_DIR/heartbeat" 2>/dev/null)
+		case "${_hb:-0}" in ''|*[!0-9]*) _hb=0 ;; esac
+		[ $((_now - _hb)) -le 3 ] && break
+		sleep 1
+		_w=$((_w + 1))
+	done
 	pgrep -f '[a]irsim-bt-agent' >/dev/null 2>&1
 }
 

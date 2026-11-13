@@ -140,7 +140,9 @@ function btCard(bt) {
  }
 
  /* 附近设备：扫一次 15 秒，边扫边刷，完了把按钮放开 */
- var nearBox = E('div', {}, [E('p', { 'class': 'as-caption' }, '点「扫描」找周围能连的设备（15 秒）。')]);
+ /* 这里别再写一遍「点扫描找设备」——卡片抬头已经说了，两句话叠一起是重复。
+  * 内容由 renderNearby 填，没扫过就是空着。*/
+ var nearBox = E('div', {});
  var scanBtn = E('button', { 'type': 'button', 'class': 'as-btn', 'click': function() { startScan(); } }, '扫描附近的设备');
 
  function renderNearby(n) {
@@ -263,7 +265,7 @@ function btCard(bt) {
 
  /* 这四个值做成活节点：开关一动就整体重画，不留旧值 */
  var stateValue = E('dd', {}, stateText(bt));
- var info = E('p', { 'class': 'as-caption', style: 'margin-top:12px' }, summary(bt));
+ var info = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite', style: 'margin-top:12px' }, summary(bt));
  var nameValue = E('dd', {}, (bt && bt.name) || '—');
  var addrValue = E('dd', {}, (bt && bt.address) || '—');
  var visValue = E('dd', {}, visText(bt));
