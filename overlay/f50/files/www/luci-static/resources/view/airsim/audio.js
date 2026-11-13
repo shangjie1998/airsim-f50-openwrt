@@ -25,7 +25,7 @@ function card(title, body, wide) {
 /* ---------------- 音频配件包 ---------------- */
 function optCard(lc) {
  var chip = E('span', { 'class': 'as-pill as-pill-neutral' }, '读取中');
- var msg = E('p', { 'class': 'as-caption' }, '正在读取……');
+ var msg = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '正在读取……');
  var note = E('p', { 'class': 'as-caption' }, '');
  var busy = false;
 
@@ -110,7 +110,7 @@ function optCard(lc) {
 /* ---------------- 刷机后自检 ---------------- */
 function selfCheckCard() {
  var chip = E('span', { 'class': 'as-pill as-pill-neutral' }, '没查');
- var msg = E('p', { 'class': 'as-caption' }, '刷机、升级、换内核之后点一次：内核、模块树、DSP 内存预留、开机脚本、身份元数据、蓝牙三件、hci0、主服务，八项一起看。');
+ var msg = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '刷机、升级、换内核之后点一次：内核、模块树、DSP 内存预留、开机脚本、身份元数据、蓝牙三件、hci0、主服务，八项一起看。');
  var list = E('ul', { 'class': 'as-instructions' }, []);
  var runBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '运行自检');
  var fixBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '补齐能补的');
@@ -167,20 +167,27 @@ function kernelCard() {
  var kernRow = E('dd', {}, '—');
  var instRow = E('dd', {}, '—');
  var pick = KERNEL_CHOICES[0];
- var rel = E('input', { 'type': 'text', 'class': 'as-input', 'placeholder': 'v2026.11.02.1' });
- var bundleSel = E('select', { 'class': 'as-input' });
+ var rel = E('input', { 'id': 'as-audio-release', 'type': 'text', 'class': 'as-input', 'placeholder': 'v2026.11.02.1' });
+ var bundleSel = E('select', { 'id': 'as-audio-bundle', 'class': 'as-input' });
  var cmd = E('pre', { 'class': 'as-out' }, '（选好内核和包，命令会显示在这里）');
  var tip = E('p', { 'class': 'as-caption' }, '只给命令，不代跑：切内核要写 boot 分区并重启，重启这步必须你自己来。');
+ /* 复制结果单独一行播报：原来直接改写上面那句常驻说明，复制一次说明就永久没了，回不来。 */
+ var copyFeed = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '');
 
  var group = E('div', { 'class': 'as-buttons' });
  KERNEL_CHOICES.forEach(function(k) {
   var b = E('button', { 'type': 'button', 'class': 'as-button', 'click': function() {
    pick = k;
-   Array.prototype.forEach.call(group.children, function(x) { x.classList.toggle('is-on', x.dataset.k === k); });
+   Array.prototype.forEach.call(group.children, function(x) {
+    x.classList.toggle('is-on', x.dataset.k === k);
+    /* 选中态要能被读屏认出来：光换颜色等于只给眼睛看。 */
+    x.setAttribute('aria-pressed', x.dataset.k === k ? 'true' : 'false');
+   });
    paint();
   } }, k);
   b.dataset.k = k;
   if (k === pick) b.classList.add('is-on');
+  b.setAttribute('aria-pressed', k === pick ? 'true' : 'false');
   group.appendChild(b);
  });
 
@@ -198,10 +205,10 @@ function kernelCard() {
   var t = cmd.textContent || '';
   if (!t) return;
   if (navigator.clipboard && navigator.clipboard.writeText) {
-   navigator.clipboard.writeText(t).then(function() { tip.textContent = '已复制，去 SSH 里粘。'; })
-    .catch(function() { tip.textContent = '复制被浏览器拦了，手动选中那行命令复制。'; });
+   navigator.clipboard.writeText(t).then(function() { copyFeed.textContent = '已复制，去 SSH 里粘。'; })
+    .catch(function() { copyFeed.textContent = '复制被浏览器拦了，手动选中那行命令复制。'; });
   } else {
-   tip.textContent = '这个浏览器不让自动复制，手动选中那行命令复制。';
+   copyFeed.textContent = '这个浏览器不让自动复制，手动选中那行命令复制。';
   }
  } }, '复制命令');
 
@@ -231,13 +238,12 @@ function kernelCard() {
   E('div', { 'class': 'as-row' }, [E('dt', {}, 'boot 记录'), instRow]),
   E('div', { 'class': 'as-field-label' }, '目标内核'),
   group,
-  E('div', { 'class': 'as-field-label' }, '上游 release 号'),
-  rel,
-  E('div', { 'class': 'as-field-label' }, '本机现成的内核包'),
-  bundleSel,
+  ui.field('上游 release 号', rel),
+  ui.field('本机现成的内核包', bundleSel),
   cmd,
   E('div', { 'class': 'as-buttons' }, [copyBtn]),
   tip,
+  copyFeed,
   E('p', { 'class': 'as-caption' }, '包不在机器上时先从上游下载到 /mnt/mu300-disk/pkg/ 或 /tmp，再回来选。切换命令要以 root 在设备上跑。')
  ], true);
 }

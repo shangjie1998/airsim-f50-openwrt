@@ -84,7 +84,7 @@ function install() {
 
 /* 页面统一用这个挂样式表，路径只写一次。
  * ui.css 改了要跟着改样式版本号，否则浏览器会一直吃旧缓存（这坑踩过两次）。 */
-var CSSVERSION = '20261113b';
+var CSSVERSION = '20261113m';
 function stylesheet(name) {
  return E('link', { 'rel': 'stylesheet', 'href': L.resource('view/airsim/' + (name || 'ui.css')) + '?v=' + CSSVERSION });
 }
@@ -113,19 +113,15 @@ function menu(current) {
  current = current || '';
  var base = L.url('admin/services/airsim');
  var items = [];
- var activeTitle = '';
 
  PAGES.forEach(function(page) {
   var active = page.id === current;
-  if (active) activeTitle = page.title;
   items.push(E('a', {
    'class': 'as-menu-item' + (active ? ' is-active' : ''),
    'href': base + '/' + page.id,
    'aria-current': active ? 'page' : null
   }, page.title));
  });
-
- if (!activeTitle) activeTitle = 'AirSIM';
 
  /* 菜单一挂上，就给 body 打标记；ui.css 靠这个标记才去关主题那排页签。
   * 万一浏览器还在用旧版 ui.js（没有 menu 函数），页面只传 null，主题页签照旧可用，不会整页没有导航。 */
@@ -142,11 +138,33 @@ function menu(current) {
 
  return E('nav', { 'class': 'as-menu', 'aria-label': 'AirSIM 页面' }, [
   E('div', { 'class': 'as-menu-strip' }, items),
+  /* 窄屏只保留下拉。以前这里还摆了一个 .as-menu-current 显示当前页名，
+   * 加上下拉里选中的也是同一页，屏幕上就是「蓝牙 蓝牙」两遍。
+   * 下拉自带 aria-label 和选中项，够用了。*/
   E('div', { 'class': 'as-menu-narrow' }, [
-   E('span', { 'class': 'as-menu-current' }, activeTitle),
    picker
   ])
  ]);
+}
+
+/* 字段封装：视觉标签和真实 <label for> 一次生成。
+ * 以前各页自己写 `<div class="as-field-label">`，标签只是画上去的，
+ * 点它不会聚焦输入框、读屏也念不出字段名。这里统一收口：
+ * node 必须有 id，没有就按顺序补一个（同一页多个字段不会撞号）；
+ * 有 help 时把说明挂成 aria-describedby，读屏读字段时会带上。 */
+var fieldSeq = 0;
+var dialogSeq = 0;
+function field(labelText, node, help) {
+ if (!node) return null;
+ if (!node.id) { fieldSeq += 1; node.id = 'as-f-' + fieldSeq; }
+ var label = E('label', { 'for': node.id, 'class': 'as-field-label' }, labelText);
+ var kids = [label, node];
+ if (help) {
+  var helpId = node.id + '-help';
+  node.setAttribute('aria-describedby', helpId);
+  kids.push(E('p', { 'class': 'as-caption', 'id': helpId }, help));
+ }
+ return E('div', { 'class': 'as-setting' }, kids);
 }
 
 /* 确认框：替代 vendor 模块的 confirmBox，样式走 ui.css 的 .as-modal。
@@ -155,11 +173,13 @@ function dialog(title, message, opts) {
  opts = opts || {};
  return new Promise(function(resolve) {
   var settled = false;
+  /* 对话框得有个名字：读屏进弹层时先念标题，否则只说「对话框」，不知道弹出的是什么。 */
+  var titleId = 'as-dlg-title-' + (dialogSeq += 1);
   var ok = E('button', { 'type': 'button', 'class': 'as-button' + (opts.danger ? ' as-danger' : '') }, opts.okText || '确定');
   var cancel = E('button', { 'type': 'button', 'class': 'as-button' }, opts.cancelText || '取消');
   var mask = E('div', { 'class': 'as-modal-mask' }, [
-   E('div', { 'class': 'as-modal', 'role': 'dialog', 'aria-modal': 'true' }, [
-    E('h3', {}, title),
+   E('div', { 'class': 'as-modal', 'role': 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId }, [
+    E('h3', { 'id': titleId }, title),
     E('p', { 'class': 'as-copy as-modal-copy' }, message || ''),
     E('div', { 'class': 'as-modal-actions' }, opts.okOnly ? [ok] : [cancel, ok])
    ])
@@ -231,9 +251,16 @@ function stampEpoch(epoch) {
 function latestChecker(o) {
  var ver = E('span', { 'class': 'as-ver' }, o.opt + ' v' + (o.current || '—'));
  var glyph = E('span', { 'class': 'as-glyph' }, '↻');
- var btn = E('button', { 'type': 'button', 'class': 'as-icon-btn', 'title': '检查更新（6 小时内不重复联网）' }, [glyph]);
+ var btn = E('button', { 'type': 'button', 'class': 'as-icon-btn', 'title': '检查更新（6 小时内不重复联网）', 'aria-label': '检查更新（6 小时内不重复联网）' }, [glyph]);
  var mini = E('p', { 'class': 'as-caption as-opt-mini' }, '');
  var busy = false, painted = false;
+
+ /* 图标按钮里只有符号没有文字，title 只能给鼠标看，读屏要的是 aria-label。
+  * 两个一起改，免得状态换了名称还是老的。 */
+ function setHint(text) {
+  btn.title = text;
+  btn.setAttribute('aria-label', text);
+ }
 
  function paint(res, forced) {
   painted = true;
@@ -243,7 +270,7 @@ function latestChecker(o) {
    ver.textContent = o.opt + ' v' + cur + ' → v' + latest;
    glyph.textContent = '↑';
    btn.className = 'as-icon-btn as-icon-on';
-   btn.title = '有新版本 ' + (res.latest_tag || '') + '：点下面的按钮会直接拉新版';
+   setHint('有新版本 ' + (res.latest_tag || '') + '：点下面的按钮会直接拉新版');
    mini.className = 'as-caption as-opt-mini as-mini-green';
    mini.textContent = '有新版本 ' + (res.latest_tag || ('v' + latest)) + '，点「' + o.installLabel + '」会直接装这个新版。';
    return;
@@ -298,6 +325,7 @@ return baseclass.extend({
  stylesheet: stylesheet,
  menu: menu,
  dialog: dialog,
+ field: field,
  toast: toast,
  busy: busy,
  getMode: function() { return parse().mode; },

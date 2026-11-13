@@ -71,7 +71,7 @@ return view.extend({
   var channelLine = E('p', { 'class': 'as-caption' }, '—');
   var sourceNote = E('p', { 'class': 'as-caption' }, '');
   var history = E('div', { 'class': 'as-history', 'tabindex': '0', 'aria-label': '最近投递记录' });
-  var savedHint = E('p', { 'class': 'as-caption' }, '');
+  var savedHint = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '');
 
   var sourceSelect = select('source', [['sms', '跟随短信转发（推荐）'], ['own', '本页单独配置']]);
   var presetSelect = select('preset', [['', '自定义 / 兼容旧版'], ['json', 'JSON Webhook'], ['bark', 'Bark'], ['pushplus', 'PushPlus'], ['serverchan', 'ServerChan'], ['telegram', 'Telegram'], ['wecom', '企业微信'], ['dingtalk', '钉钉 Webhook']]);
@@ -91,7 +91,7 @@ return view.extend({
    enabled.checked = next;
    glass.switchSet(enabledSwitch, next);
    enabled.dispatchEvent(new Event('change'));
-  });
+  }, '启用来电通知');
   var notifyRinging = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_ringing' });
   var notifyAnswered = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_answered' });
   var notifyEnded = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_ended' });
