@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -377,49 +376,6 @@ func (d *daemon) agentHealth() any {
 	json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&v)
 	return map[string]any{"reachable": resp.StatusCode == 200, "runtime_profile": v["runtime_profile"], "version": v["version"], "voice_backend": v["voice_backend"]}
 }
-
-// lanEndpoints 列出本机所有「UP 且带私有 IPv4」的接口，配置里的管理接口排第一。
-// 设备可能同时挂在两种网络上：Wi-Fi STA（wlan0，连着上游路由，如 192.168.50.x）
-// 和热点桥（br-lan，自己发网，如 192.168.77.x）。配对广播只发其中一个，另一边
-// 的手机就永远发现不了 —— 这里把能用的接口全给出去，并把所有地址都塞进 A 记录，
-// 手机拿到哪个能连上就用哪个。
-func lanEndpoints(preferred string) ([]net.Interface, []string) {
-	all, err := net.Interfaces()
-	if err != nil {
-		return nil, nil
-	}
-	var ordered []net.Interface
-	var ips []string
-	push := func(i net.Interface, ip string) {
-		ordered = append(ordered, i)
-		ips = append(ips, ip)
-	}
-	for _, pass := range []bool{true, false} {
-		for _, i := range all {
-			isPreferred := i.Name == preferred
-			if pass != isPreferred {
-				continue
-			}
-			if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 || i.Flags&net.FlagMulticast == 0 {
-				continue
-			}
-			addrs, err := i.Addrs()
-			if err != nil {
-				continue
-			}
-			for _, a := range addrs {
-				ip, _, err := net.ParseCIDR(a.String())
-				if err != nil || ip.To4() == nil || !ip.IsPrivate() {
-					continue
-				}
-				push(i, ip.String())
-				break
-			}
-		}
-	}
-	return ordered, ips
-}
-
 func (d *daemon) startPair(w http.ResponseWriter, r *http.Request) {
 	if !method(w, r, "POST") {
 		return
@@ -431,17 +387,8 @@ func (d *daemon) startPair(w http.ResponseWriter, r *http.Request) {
 	}
 	d.adMu.Lock()
 	var ad *zeroconf.Server
-	ifaces, ips := lanEndpoints(d.ifname)
-	if len(ifaces) == 0 {
-		if i, err := net.InterfaceByName(d.ifname); err == nil {
-			ifaces, ips = []net.Interface{*i}, []string{d.lan}
-		}
-	}
-	if len(ips) == 0 {
-		ips = []string{d.lan}
-	}
-	if len(ifaces) > 0 {
-		ad, _ = zeroconf.RegisterProxy("AirSIM-MU300-"+s.ID[:8], "_airsim-pair._tcp", "local.", d.settings.PairPort, "airsim-"+s.ID[:8], ips, []string{"v=1", "session=" + s.ID, "key=" + s.Public, fmt.Sprintf("expires=%d", s.Expires)}, ifaces)
+	if i, err := net.InterfaceByName(d.ifname); err == nil {
+		ad, _ = zeroconf.RegisterProxy("AirSIM-MU300-"+s.ID[:8], "_airsim-pair._tcp", "local.", d.settings.PairPort, "airsim-"+s.ID[:8], []string{d.lan}, []string{"v=1", "session=" + s.ID, "key=" + s.Public, fmt.Sprintf("expires=%d", s.Expires)}, []net.Interface{*i})
 		if ad != nil {
 			ad.TTL(30)
 		}
@@ -527,10 +474,6 @@ func (d *daemon) claim(w http.ResponseWriter, r *http.Request) {
 		write(w, 400, map[string]string{"error": "invalid_registration"})
 		return
 	}
-	// 诊断用：配对页只能显示密钥尾号，iOS 端不显示密钥，用户对不上是哪台设备。
-	// 这里只打「有哪些 key」，绝不打值 —— reg 里有 vowlan_secret，打值就是泄
-	// 露密钥。看到名字类的键就研究怎么存进客户端表；没有就维持现状，不硬塞。
-	logRegistrationKeys(reg)
 	localSecret, _ := reg["vowlan_secret"].(string)
 	if d.gateway == nil || d.gateway.CheckAdd(localSecret) != nil {
 		write(w, 500, map[string]string{"error": "gateway_key_storage_failed"})
@@ -596,17 +539,6 @@ func (d *daemon) claim(w http.ResponseWriter, r *http.Request) {
 	d.mu.Unlock()
 	d.closePair(s.ID)
 	write(w, 200, result)
-}
-
-// logRegistrationKeys 只记录配对登记录载荷里的键名，用于判断 iOS 端有没有
-// 带设备名。值一律不打：vowlan_secret 就在这个 map 里。
-func logRegistrationKeys(reg map[string]any) {
-	names := make([]string, 0, len(reg))
-	for k := range reg {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	log.Printf("pair claim registration keys: %v", names)
 }
 
 // These fields belong to the phone-side gateway, not the Go Agent's strict
