@@ -261,12 +261,33 @@ btopt_probe() {
 	# 「配件已装」要按整条链判定，不能只看两个客户端二进制 —— bluetoothd/btattach
 	# 有些固件本来就自带，光凭它们存在就说「已安装」，页面会骗人去点扫描，实际扫不出东西。
 	# 必须有服务脚本和 attach 脚本，链路才算闭合。
-	installed=0
+	files_ok=0
 	if [ -x /usr/bin/bluetoothd ] && [ -x /usr/bin/btattach ] \
 	   && [ -x /usr/sbin/sprd-bt-attach.sh ] && [ -x /etc/init.d/sprdbluetooth ]; then
-		installed=1
+		files_ok=1
 	fi
+
+	installed=0
+	[ "$files_ok" = 1 ] && installed=1
 	[ "$native_bt" = 1 ] && [ -d /sys/class/bluetooth/hci0 ] && installed=1
+
+	# 适配器到底出没出来。装齐了但 hci0 不在，页面点扫描必然报不出来，
+	# 这时候不能显示「已安装」，得说「缺件」。
+	adapter_ok=0
+	[ -d /sys/class/bluetooth/hci0 ] && adapter_ok=1
+
+	service_ok=0
+	/etc/init.d/sprdbluetooth status 2>/dev/null | grep -q 'running' && service_ok=1
+	[ "$native_bt" = 1 ] && service_ok=1
+
+	missing=""
+	[ "$installed" = 1 ] || [ "$files_ok" = 1 ] || missing="$missing 配件文件"
+	[ "$adapter_ok" = 1 ] || missing="$missing 适配器"
+	[ "$service_ok" = 1 ] || missing="$missing 服务"
+
+	# ready = 真能扫。装了多少不算数，适配器在、服务跑着才算数。
+	ready=0
+	[ "$installed" = 1 ] && [ "$adapter_ok" = 1 ] && ready=1
 
 	busy=0
 	case "$(btopt_state)" in
@@ -283,6 +304,11 @@ btopt_probe() {
 	json_init
 	json_add_string action probe
 	json_add_boolean installed "$installed"
+	json_add_boolean files_ok "$files_ok"
+	json_add_boolean adapter_ok "$adapter_ok"
+	json_add_boolean service_ok "$service_ok"
+	json_add_boolean ready "$ready"
+	json_add_string missing "$(printf '%s' "$missing" | sed 's/^ *//; s/ *$//')"
 	json_add_boolean busy "$busy"
 	json_add_string state "$(btopt_state)"
 	json_add_string message "$(btopt_msg)"
