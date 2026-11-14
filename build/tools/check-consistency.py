@@ -65,15 +65,20 @@ btopt = read('parts/bluetooth/BT-OPT-VERSION') or ''
 btrpcd = read('overlay/f50/files/usr/libexec/rpcd/airsim-bt') or ''
 btag = re.search(r'^BT_OPT_TAG=bt-opt-v(\d+\.\d+\.\d+)', btrpcd, re.M)
 bfle = re.search(r'^BT_OPT_FILE=airsim-f50-bt-opt-(\d+\.\d+\.\d+)-', btrpcd, re.M)
+# 文件名两种合法写法：静态常量 BT_OPT_FILE=...-X.Y.Z-k<krel>.tar.gz，
+# 或按内核动态拼（BW 侧写的是 airsim-f50-bt-opt-$BT_OPT_VER-k$kver.tar.gz），
+# 动态那种没有静态 FILE，就用 BT_OPT_VER 当版本真值来比。
+bver = re.search(r'^BT_OPT_VER=(\d+\.\d+\.\d+)', btrpcd, re.M)
+bfile_ver = bfle.group(1) if bfle else (bver.group(1) if bver else None)
 if not btopt:
     problems.append('parts/bluetooth/BT-OPT-VERSION 不存在或为空')
-if not btag or not bfle:
-    problems.append('rpcd/airsim-bt 里没找到 BT_OPT_TAG=bt-opt-vX.Y.Z 或 BT_OPT_FILE=...-X.Y.Z-...')
+if not btag or not bfile_ver:
+    problems.append('rpcd/airsim-bt 里没找到 BT_OPT_TAG=bt-opt-vX.Y.Z，也没找到 BT_OPT_FILE 或 BT_OPT_VER')
 else:
     if btag.group(1) != btopt:
         problems.append(f'蓝牙配件包版本打架：BT-OPT-VERSION={btopt}，但 rpcd TAG 指向 {btag.group(1)}')
-    if bfle.group(1) != btopt:
-        problems.append(f'蓝牙配件包版本打架：BT-OPT-VERSION={btopt}，但 rpcd FILE 指向 {bfle.group(1)}')
+    if bfile_ver != btopt:
+        problems.append(f'蓝牙配件包版本打架：BT-OPT-VERSION={btopt}，但 rpcd 文件名版本是 {bfile_ver}')
 
 # 3c) 音频件数：设备侧 WANT_KO 必须等于 module-list.txt 里的 .ko 行数
 modlist = read('parts/audio/module-list.txt') or ''
