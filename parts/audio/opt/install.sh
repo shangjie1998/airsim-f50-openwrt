@@ -29,7 +29,7 @@ say() { echo "装音频模块: $*"; }
 # 上游官方镜像出于授权考虑剔掉了（make-release.sh 里有审计闸），作者另存了一份
 # 带 NOTICE 与 sources.json 的归档。我们把它镜像到自己的 Release，安装时按需取，
 # 不依赖任何第三方仓库是否还在。
-TOOLS_TAG=${AIRSIM_AUDIO_TOOLS_TAG:-audio-opt-v1.0.3}
+TOOLS_TAG=${AIRSIM_AUDIO_TOOLS_TAG:-audio-opt-v1.0.4}
 TOOLS_FILE=${AIRSIM_AUDIO_TOOLS_FILE:-mu300-audio-5.4.tar.gz}
 TOOLS_SHA=${AIRSIM_AUDIO_TOOLS_SHA:-8e2eb2774c485a2df4e28e4e77592a457ffbb626f1dace3b6d1cdc338b786e2b}
 TOOLS_API=${AIRSIM_AUDIO_TOOLS_API:-https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/$TOOLS_TAG}

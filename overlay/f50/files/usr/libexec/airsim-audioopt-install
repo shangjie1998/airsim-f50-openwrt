@@ -7,8 +7,8 @@
 # 为什么走 api.github.com：这台设备上 github.com 不可达（curl 000 超时），
 # api.github.com 通，附件 API 配 Accept: application/octet-stream 能直接下二进制。
 set -eu
-TAG=${AIRSIM_OPT_TAG:-audio-opt-v1.0.3}
-FILE=${AIRSIM_OPT_FILE:-airsim-f50-audio-opt-1.0.3-k6.18.60+7.3.1.tar.gz}
+TAG=${AIRSIM_OPT_TAG:-audio-opt-v1.0.4}
+FILE=${AIRSIM_OPT_FILE:-airsim-f50-audio-opt-1.0.4-k6.18.60+7.3.1.tar.gz}
 API=https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/$TAG
 DIR=/tmp/airsim-audioopt
 MSG=$DIR/msg
