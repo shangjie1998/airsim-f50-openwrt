@@ -12,8 +12,8 @@
 
 . /usr/share/libubox/jshn.sh
 
-TAG=audio-opt-v1.0.3
-FILE=airsim-f50-audio-opt-1.0.3-k6.18.60+7.3.1.tar.gz
+TAG=audio-opt-v1.0.4
+FILE=airsim-f50-audio-opt-1.0.4-k6.18.60+7.3.1.tar.gz
 OPT_KERNELS="6.18.60 7.3.1"
 EXT=/mnt/mu300-disk/extra/airsim-audio
 DIR=/tmp/airsim-audioopt
@@ -118,8 +118,10 @@ aud_probe() {
 	kver=$(uname -r)
 	md=$(match_dir "$kver" 2>/dev/null || true)
 	n=$(ko_count "$kver")
-	optver=$(status_field version)
-	[ -n "$optver" ] || optver=$(cat "$EXT/audio-opt-version" 2>/dev/null || true)
+	# 已装版本以扩展目录里的实时文件为准：安装器每次装完都会写它。
+	# /tmp/airsim-audio-status 是开机脚本留下的快照，装完新包不刷新，拿它当首选会一直报旧版本。
+	optver=$(cat "$EXT/audio-opt-version" 2>/dev/null || true)
+	[ -n "$optver" ] || optver=$(status_field version)
 	in_opt=0
 	case " $OPT_KERNELS " in *" $kver "*) in_opt=1 ;; esac
 
