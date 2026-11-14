@@ -221,14 +221,25 @@ wifi_connect() {
 		psk2|sae|none) ;;
 		*) jerr '加密方式不支持（只支持 WPA2 / WPA3 / 开放）'; return 0 ;;
 	esac
+	sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0
 	if [ "$enc" != none ]; then
-		[ -n "$key" ] || { jerr '缺少密码'; return 0; }
+		# 本次没带密码时，先看这个 SSID 是不是已经存过、且存了 key：
+		# 是就用存的那份，让"点已保存的网络"不必再输一遍密码。
+		# 只认同一个 SSID —— 换网络时不拿旧密码去试，免得把旧 key 写进新段。
+		if [ -z "$key" ]; then
+			if [ "$(uci -q get "wireless.$sta.ssid" 2>/dev/null)" = "$ssid" ] &&
+			   [ -n "$(uci -q get "wireless.$sta.key" 2>/dev/null)" ]; then
+				key=$(uci -q get "wireless.$sta.key")
+			else
+				jerr '缺少密码'
+				return 0
+			fi
+		fi
 		if [ "${#key}" -lt 8 ] || [ "${#key}" -gt 63 ]; then
 			jerr '密码长度不对（WPA2/WPA3 要 8~63 个字符）'
 			return 0
 		fi
 	fi
-	sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0
 	# 关掉其它 wifi-iface 的 SSID 冲突：不碰，只写 STA 自己的段
 	uci -q set "wireless.$sta.ssid=$ssid"
 	uci -q set "wireless.$sta.encryption=$enc"
@@ -240,14 +251,29 @@ wifi_connect() {
 	uci -q set "wireless.$sta.disabled=0"
 	uci -q commit wireless || { jerr '写配置失败'; return 0; }
 
-	# 已经在 Wi-Fi 模式：只要 reload 重连即可，不必再走整套切换
-	if "$NETMODE" status --json 2>/dev/null | grep -q '"mode":"wifi"'; then
-		/etc/init.d/network reload >/dev/null 2>&1 || true
-		ifup wwan >/dev/null 2>&1 || true
-		out=$("$NETMODE" wifi 2>&1); rc=$?
-	else
-		out=$("$NETMODE" wifi 2>&1); rc=$?
+	# 1) 已经在 Wi-Fi 模式、用的就是这个 SSID、而且有地址 → 直接算成功。
+	#    这种情况再 reload 会把网断几秒，用户看到的就是「点了连接反而掉线」。
+	local _st _st_mode _st_ssid _st_ip sta_net
+	sta_net=$(uci -q get "wireless.$sta.network" 2>/dev/null); [ -n "$sta_net" ] || sta_net=wwan
+	_st=$("$NETMODE" status --json 2>/dev/null)
+	_st_mode=$(printf '%s' "$_st" | sed -n 's/.*"mode":"\([^"]*\)".*/\1/p')
+	_st_ssid=$(printf '%s' "$_st" | sed -n 's/.*"sta_ssid":"\([^"]*\)".*/\1/p')
+	_st_ip=$(printf '%s' "$_st" | sed -n 's/.*"sta_ip":"\([^"]*\)".*/\1/p')
+	if [ "$_st_mode" = wifi ] && [ "$_st_ssid" = "$ssid" ] && [ -n "$_st_ip" ]; then
+		json_init
+		json_add_boolean ok 1
+		json_add_int code 0
+		json_add_string message "已经连着 ${ssid}（${_st_ip}），无需重连"
+		json_dump
+		return 0
 	fi
+
+	# 2) 已经在 Wi-Fi 模式但换了网络：reload 让 STA 按新的 uci 重新关联
+	if [ "$_st_mode" = wifi ]; then
+		/etc/init.d/network reload >/dev/null 2>&1 || true
+		ifup "$sta_net" >/dev/null 2>&1 || true
+	fi
+	out=$("$NETMODE" wifi 2>&1); rc=$?
 	json_init
 	json_add_boolean ok "$([ "$rc" = 0 ] && echo 1 || echo 0)"
 	json_add_int code "$rc"

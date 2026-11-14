@@ -194,6 +194,7 @@
 | `luci-overlay-modal-style-outside-root-scope.md` |  |
 | `luci-rpcd-acl-object-method-map.md` |  |
 | `luci-self-drawn-sticky-nav-under-theme-bar.md` |  |
+| `luci-wifi-saved-key-and-wwan-split.md` |  |
 | `luci-self-update-link-fork-repo.md` |  |
 | `luci-shared-design-system-rollout.md` |  |
 | `luci-theme-menu-cache-stale-tab.md` |  |
