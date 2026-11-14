@@ -155,30 +155,44 @@ return view.extend({
   var apSeq = 0;
   function apRow(ap) {
    apSeq += 1;
+   /* 这个热点就是已保存的那个、而且密码还存着 —— 就不用再让人输一遍。
+    * 只认同一个 SSID；开放网络本来就不用密码，不算这条。 */
+   var known = !!(saved && saved.ssid && ap.ssid === saved.ssid && saved.has_key
+                  && ap.encryption && ap.encryption !== 'NONE');
    var keyInput = E('input', { 'id': 'as-net-key-' + apSeq, 'class': 'as-input', 'type': 'password', 'placeholder': '这个 Wi-Fi 的密码' });
-   var panel = E('div', { 'class': 'as-details', 'style': 'display:none' }, [
-    ui.field(showSsid(ap.ssid) + ' 的密码', keyInput),
-    E('div', { 'class': 'as-actions' }, [
-     E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
-      var k = (keyInput.value || '').trim();
-      if (!k && ap.encryption !== 'NONE') { keyInput.focus(); return; }
-      connect(ap.ssid, ap.encryption === 'NONE' ? 'none' : 'psk2', k);
-     } }, '连接')
-    ])
-   ]);
+   var panel = known
+    ? E('div', { 'class': 'as-details', 'style': 'display:none' }, [
+       E('p', { 'class': 'as-caption' }, '这个 Wi-Fi 之前连过，密码已保存，直接连就行。'),
+       E('div', { 'class': 'as-actions' }, [
+        E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
+         connect(ap.ssid, ap.encryption === 'NONE' ? 'none' : 'psk2', '');
+        } }, '直接连接')
+       ])
+      ])
+    : E('div', { 'class': 'as-details', 'style': 'display:none' }, [
+       ui.field(showSsid(ap.ssid) + ' 的密码', keyInput),
+       E('div', { 'class': 'as-actions' }, [
+        E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
+         var k = (keyInput.value || '').trim();
+         if (!k && ap.encryption !== 'NONE') { keyInput.focus(); return; }
+         connect(ap.ssid, ap.encryption === 'NONE' ? 'none' : 'psk2', k);
+        } }, '连接')
+       ])
+      ]);
    var open = function() {
     var visible = panel.style.display !== 'none';
     panel.style.display = visible ? 'none' : '';
-    if (!visible && ap.encryption !== 'NONE') keyInput.focus();
+    if (!visible && !known && ap.encryption !== 'NONE') keyInput.focus();
    };
    var locked = ap.encryption && ap.encryption !== 'NONE';
    return E('div', { 'class': 'as-dev-item as-dev-stack', 'click': function(ev) { if (ev.target === keyInput || ev.target.tagName === 'BUTTON') return; open(); } }, [
     E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
      E('div', {}, [
       E('strong', {}, showSsid(ap.ssid)),
-      E('div', { 'class': 'as-caption' }, (ap.band || '') + ' · 信道 ' + ap.channel + ' · ' + ap.signal + (locked ? ' · 加密' : ' · 开放'))
+      E('div', { 'class': 'as-caption' }, (ap.band || '') + ' · 信道 ' + ap.channel + ' · ' + ap.signal + (locked ? ' · 加密' : ' · 开放') + (known ? ' · 密码已保存' : ''))
      ]),
-     ap.supported === false ? pill('不支持', 'red') : (locked ? pill('加密', 'neutral') : pill('开放', 'green'))
+     known ? pill('已保存', 'green')
+           : (ap.supported === false ? pill('不支持', 'red') : (locked ? pill('加密', 'neutral') : pill('开放', 'green')))
     ]),
     panel
    ]);
@@ -229,6 +243,10 @@ return view.extend({
      pill('当前' , 'green')
     ]),
     E('div', { 'class': 'as-actions' }, [
+     E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
+      /* 空密码交给后端：它会复用已经存下的那份 key（只认同一个 SSID）。 */
+      connect(saved.ssid, saved.encryption || 'psk2', '');
+     } }, '连接'),
      E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
       if (!window.confirm('删除保存的「' + showSsid(saved.ssid) + '」？删完要重新输密码。')) return;
       netForget().then(function(res) {
@@ -328,8 +346,21 @@ return view.extend({
       E('div', { 'class': 'as-actions' }, [
        E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
         var s = (manualSsid.value || '').trim();
+        var k = (manualKey.value || '').trim();
         if (!s) { manualSsid.focus(); return; }
-        connect(s, (manualKey.value || '').trim() ? 'psk2' : 'none', (manualKey.value || '').trim());
+        if (!k) {
+         /* 空密码不要瞎猜成「开放网络」—— 只有已保存的那个才允许空着走，
+          * 别的网络直接让人补密码，别把 uci 里存着的 psk2 配置改成 none。 */
+         if (!(saved && saved.ssid === s && saved.has_key)) {
+          manualKey.focus();
+          feed.className = 'as-feedback as-feedback-error';
+          feed.textContent = '这个网络需要密码，请填写。';
+          return;
+         }
+         connect(s, saved.encryption || 'psk2', '');
+         return;
+        }
+        connect(s, 'psk2', k);
        } }, '连接这个网络')
       ])
      ])

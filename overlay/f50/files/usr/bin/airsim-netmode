@@ -68,6 +68,12 @@ EOF
 [ -n "${AP:-}" ] || AP=ap0
 [ -n "${AP_IF:-}" ] || AP_IF=wlan0
 [ -n "${CELL_IF:-}" ] || CELL_IF=sipa_eth0
+# STA 段绑到哪个 network 接口（默认 wwan）。开关 STA 时必须连着它一起开关：
+# netifd 只认 network 段的 disabled，两边不一致就会出现
+# wireless.wwan0.disabled=0 / network.wwan.disabled=1 的分裂状态，
+# 结果 ifup 静默无效、DHCP 永远不来（2026-11-14 真机踩的就是这个）。
+STA_NET=$(uci -q get "wireless.$STA.network" 2>/dev/null)
+[ -n "${STA_NET:-}" ] || STA_NET=wwan
 
 wan_dis()  { uci -q get network.wan.disabled 2>/dev/null; }
 ap_dis()   { uci -q get wireless.$AP.disabled 2>/dev/null; }
@@ -127,6 +133,11 @@ set_ap() {
 set_sta() {
 	uci -q set wireless.$STA.disabled="$1"
 	uci -q commit wireless
+	# 同步 network 段（$STA_NET，默认 wwan）。只改 wireless 不改 network 时，
+	# netifd 根本不建这个接口，后续 ifup 无效、DHCP 不来 → 关联成功却没 IP，
+	# check_wifi 超时回滚，页面停在 wifi-pending。
+	uci -q set "network.$STA_NET.disabled=$1"
+	uci -q commit network
 }
 
 wifi_reload() { wifi reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true; }
@@ -202,7 +213,7 @@ rollback() {
 	[ -n "$ps" ] || ps=1
 	err "自检没过，正在回滚到切换前（wan=$pw ap=$pa sta=$ps）"
 	set_ap "$pa"; set_sta "$ps"; wifi_reload
-	[ "$ps" = 0 ] && ifup wwan >/dev/null 2>&1
+	[ "$ps" = 0 ] && ifup "$STA_NET" >/dev/null 2>&1
 	set_wan "$pw"
 	# 回滚本身也要等，别刚发完 ifup 就退出，留下「没有默认路由」的空档
 	ok=0
@@ -270,7 +281,7 @@ do_wifi() {
 	set_sta 0
 	set_ap 1
 	wifi_reload
-	ifup wwan >/dev/null 2>&1 || true   # 催一下 DHCP，别干等
+	ifup "$STA_NET" >/dev/null 2>&1 || true   # 催一下 DHCP，别干等
 	if ! check_wifi; then
 		err '外部 Wi-Fi 没连上（无 IP 或默认路由没落到无线口）'
 		rollback
