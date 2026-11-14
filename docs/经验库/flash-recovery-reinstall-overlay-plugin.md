@@ -32,6 +32,9 @@ rsync -a "$REPO/overlay/<board>/files/"          "$STAGE/files/"
 ## 踩过的坑
 - **只打 overlay 包会得到"文件都在、服务起不来、`ubus list` 无对象"**：`ubus` 对象、`/etc/init.d` 主脚本、启动前置脚本都在上游打包层，正常设备靠上游 apk 包装好，刷机后那层没了。必须先补基础层。
 - **vendor CLI 的调用契约会在固件更新里变**：业务程序用 `mu300-at -t N -`（`-` 从 stdin 喂命令，为了一次送 AT+CMGS+PDU+Ctrl-Z），新版脚本只接受 argv，`-` 被当成一条 AT 命令发出去，回 `+CME ERROR: 0`。表现是手工跑正常、程序里读不到号码。定位方法：把程序里的调用原样复现，再和参数模式对比。恢复：换回旧镜像里兼容版脚本（新版留 `.fw-new` 备查），长期正解是探测 stdin 支持再回退 argv。
+  - **2026-11-14 复发，已按「长期正解」落地**：刷机把 `/opt/mu300/bin/mu300-at` 重置成不认 `-` 的厂商版，症状是概览页「等待号码」、「SIM 卡未就绪」、「移动网络等待检测」、电话打不通；而 `AT+CPIN?`/`AT+CFUN?`/`AT+CNUM`/`AT+COPS?` 手动全正常，`ubus call mu300.modem at '{"cmd":"AT+CNUM"}'` 也能拿到号——说明基带、atd 通道都没坏，坏在包装脚本。
+  - **固化位置**：`overlay/f50/files/usr/bin/mu300-at`（兼容层，进包）。它先看真脚本 `/opt/mu300/bin/mu300-at` 里有没有 `if [ "$cmd" = - ]`：有就原样转交，没有就替它把 stdin 那一行读出来按 argv 传过去。这样无论厂商脚本是哪个版本都能工作，刷机后靠装我们自己的包自愈，不用再手改设备。
+  - **验收三条路径**：`printf 'AT+CNUM\n' | mu300-at -t 6 -`、`mu300-at 'AT+CPIN?'`、`mu300-at 'AT+COPS?'` 都要返回 `OK`；再重启服务看 `/api/sim/identity` 是否给出号码、`/api/calls/status` 的 `last_poll_error` 是否为空。
 - **模块版本不能看目录名**：同名 release 串下也可能是不同 ABI，跨版本 `insmod` 报 `struct module size must match` 绕不过去，必须用 `strings x.ko | grep vermagic` 比对。
 - **音频装好后必须重启一次**：占页模块只抢一次固定物理窗口，重试脚本抢不回来只能重启；不要在旧会话里反复 `start`。
 - **过渡手段**：给启动前置脚本加显式开关文件（如 `/etc/airsim/no-audio`），存在就跳过 DSP，让插件本体先起来（页面/短信/推送可用、通话无声），且升级不自动清除，等模块对齐后手工删。

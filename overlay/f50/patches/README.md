@@ -41,10 +41,24 @@ AirSIM-pair-clients.patch          干净           未合并        都在
 
 ## 现有补丁
 
+九个 active，全部"干净"。按文件名**字母序**打（`apply.py` 就是这么排的），
+所以改名会改顺序：`AirSIM-f50-vnic-audio-host.patch` 当初叫
+`...-audio-host-follows-nic.patch`，`a` 排在 `sta-` 前面，把 `main.go` 先改了，
+于是 `AirSIM-f50-sta-reachability.patch` 的 hunk 上下文对不上
+（`1 out of 11 hunks failed`）。改成 `v` 开头、排到 `sta`/`tar` 之后，
+并在 sta 打完的树上重生成 main.go 那段 hunk，冲突才消失。
+
 | 补丁 | 动哪里 | 干什么 |
 |---|---|---|
-| `AirSIM-e164-cnum.patch` | `AirSIM/module/module-agent/sms.go` | 本机号码统一成 E.164（`8613…`/`0086…` → `+8613…`） |
-| `AirSIM-pair-clients.patch` | `plugin/internal/gateway/gateway.go`、`plugin/cmd/airsim-mu300d/main.go` | 加 `GET /pair/clients`：逐客户端"上次使用 / 在线"（鉴权成功时记时间戳，120 秒窗口判定在线） |
+| `AirSIM-e164-cnum.patch` | `module-agent/sms.go` | 本机号码统一成 E.164（`8613…`/`0086…` → `+8613…`） |
+| `AirSIM-f50-release-source.patch` | 更新链路 | 发布源指向本仓库 |
+| `AirSIM-f50-sta-reachability.patch` | `plugin/cmd/airsim-mu300d/direct.go`、`main.go` | 直连端口/mDNS 跟着当前上行网卡走（`directAddresses`/`adHostFor`/`interfaceForHost`/`rebind`/`serveEndpoint`）。**明确否掉了"双接口同时广播"方案** |
+| `AirSIM-f50-tar-update.patch` | 更新包校验 | `apk --keys-dir` + `SHA256SUMS` |
+| `AirSIM-f50-vnic-audio-host.patch` | `module-agent/calls.go` | `/api/calls/audio/host/config` 的 `host` 从死值 `192.168.225.1` 改成跟着网卡走（`audioAdvertiseHost`）。**别误读成修音频的手段**：iOS 实际走 8582 连 PCM，音频不通的真因在设备侧 DSP（见 `docs/经验库/mu300-call-audio-dsp.md`） |
+| `AirSIM-mu300-keytable-lru.patch` | 键盘映射 | LRU |
+| `AirSIM-mu300-number-early-retry.patch` | `module-agent/mu300.go` | 开机早期重试 `AT+CNUM`，别让本机号码一直"等待号码" |
+| `AirSIM-mu300-signal-operator.patch` | `module-agent/mu300.go` | 信号/运营商读取 |
+| `AirSIM-mu300-sms-send.patch` | `module-agent/mu300_sms.go` | 短信发送 |
 
 ## 状态列：active / merged（防"功能静默消失"）
 

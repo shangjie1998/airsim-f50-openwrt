@@ -144,6 +144,31 @@ else:
     if payloads and sorted(payloads) != dl:
         problems.append(f'音频档位打架：白名单 {" ".join(dl)}，但 parts/audio/payload 里只有 {" ".join(payloads)}')
 
+# 6) 厂商 CLI 契约：源码里 exec 的厂商脚本（/opt/mu300/bin/*、/usr/bin/mu300-at）
+#    必须登记在 docs/厂商CLI契约.md。这类脚本刷机就被厂商换回新版，调用契约会无声改变
+#    （典型：`-` / `--stdin` 从 stdin 读，新版只认 argv，命令被原样发给基带、退出码还是 0）。
+#    没登记就等于没人检查过它，一旦刷机就可能整块功能静默消失。
+contract = read('docs/厂商CLI契约.md')
+if contract is None:
+    problems.append('docs/厂商CLI契约.md 不存在 —— 厂商 CLI 契约清单丢了，刷机后静默失效无从预防')
+else:
+    registered = set(re.findall(r'\| `(/[^`]+)` \|', contract))
+    called = set()
+    for sub in ('src/AirSIM/module/module-agent', 'src/plugin/cmd/airsim-mu300d'):
+        d = os.path.join(ROOT, sub)
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith('.go') or fn.endswith('_test.go'):
+                continue
+            text = read(os.path.join(sub, fn)) or ''
+            called |= set(re.findall(r'"(/(?:opt/mu300/bin|usr/bin)/[A-Za-z0-9._/-]+)"', text))
+    vendor = {p for p in called if not p.endswith('/')}
+    unregistered = sorted(vendor - registered)
+    if unregistered:
+        problems.append('这些厂商 CLI 调用没登记契约：' + '、'.join(unregistered)
+                        + ' —— 在 docs/厂商CLI契约.md 表格里补一行，说明契约和保护方式')
+
 if problems:
     print('!! 一致性检查没过：', file=sys.stderr)
     for p in problems:

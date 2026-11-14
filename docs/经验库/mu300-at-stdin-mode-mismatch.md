@@ -32,3 +32,24 @@ if [ "$cmd" = - ]; then
 fi
 ```
 原文件备份 `mu300-at.bak-20261107`。
+
+## 已固化（2026-11-14）
+上面那个「改设备上的脚本」是治标：2026-11-14 刷机之后又原样复发，因为固件把 `/opt/mu300/bin/mu300-at` 重置回了不认 `-` 的版本。
+
+现在改成**兼容层进包**，位置 `overlay/f50/files/usr/bin/mu300-at`：
+
+- `/usr/bin/mu300-at` 原本是 `-> /opt/mu300/bin/mu300-at` 的软链，包里的真实文件会盖掉这个软链，厂商脚本本身不动。
+- 兼容层不判定版本，只 `grep` 真脚本里有没有 `if [ "$cmd" = - ]`：有就 `exec` 原样带 `-` 转交；没有就自己 `IFS= read -r` 读 stdin 那一行，按 argv 形式传过去。
+- 这样厂商脚本将来自己支持 `-` 了也不会打架，刷机也不需要再手改设备，装我们自己的包就自愈。
+
+验证要三条路径全绿（缺一条都说明只修了一半）：
+
+```sh
+printf 'AT+CNUM\n' | /usr/bin/mu300-at -t 6 -    # agent 走这条
+/usr/bin/mu300-at 'AT+CPIN?'                    # 人工排查走这条
+/usr/bin/mu300-at 'AT+COPS?'                    # 默认超时那条
+```
+
+再重启服务复核：`curl -s http://127.0.0.1:8575/api/sim/identity` 有号码、`/api/calls/status` 的 `last_poll_error` 为空。
+
+**注意别被假象带偏**：`mu300-at 'AT+XXX'`（argv 路径）成功**不能**证明通道正常，它和 agent 走的压根不是同一条路。也不能拿 `ubus call mu300.modem at` 的结果下结论——那条是 ubus 直连，同样绕过了包装脚本。

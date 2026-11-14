@@ -1,0 +1,72 @@
+diff --git a/AirSIM/module/module-agent/calls.go b/AirSIM/module/module-agent/calls.go
+index 9fe50d4..ccd443e 100644
+--- a/AirSIM/module/module-agent/calls.go
++++ b/AirSIM/module/module-agent/calls.go
+@@ -6,7 +6,9 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"net"
+ 	"net/http"
++	"os"
+ 	"regexp"
+ 	"strconv"
+ 	"strings"
+@@ -1166,7 +1168,7 @@ func (a *agent) audioHostConfig(response http.ResponseWriter, request *http.Requ
+ 	}
+ 	writeJSON(response, http.StatusOK, map[string]any{
+ 		"vendor_id": 0x2c7c, "product_id": 0x0125, "location_id": 0,
+-		"transport": "tcp_pcm_s16le", "host": "192.168.225.1", "port": 7580,
++		"transport": "tcp_pcm_s16le", "host": a.audioAdvertiseHost(), "port": 7580,
+ 		"sample_rate": 8000, "channels": 1,
+ 		"route_ready": routeReady, "route_listening": snapshot.Listening,
+ 		"route_error":   routeError,
+@@ -1178,3 +1180,48 @@ func (a *agent) audioHostConfig(response http.ResponseWriter, request *http.Requ
+ 		"diagnostic_log": voiceRouteLogFile, "log_tail": logTail,
+ 	})
+ }
++
++// audioAdvertiseHost 返回音频 host 模式该让客户端连哪个地址。
++//
++// 原来这里是死值 192.168.225.1（F50 出厂 USB 网段）。机器换成 Wi-Fi STA 或热点
++// 部署以后，这个地址在设备上根本不存在，客户端按它连 PCM 永远连不上，
++// 表现就是"通话能接通、但一点声音都没有"。这跟直连端口、mDNS 广告是同一类问题：
++// 都要跟着当前上行网卡走。见 overlay/f50/patches/ 里 STA 可达性那份补丁。
++//
++// 取值顺序：
++//  1. /tmp/airsim-direct-host —— plugin 切网时写的、它确认在监听的那个地址；
++//  2. 默认路由所在网卡的私有 IPv4（Wi-Fi 模式就是 wlan0，热点模式就是 br-lan）；
++//  3. 本机任意一个私有 IPv4；
++//  4. 实在没有才退回回环，不给客户端一个假地址。
++//
++// 说明：实测 iOS 端并不是按这个地址连 7580，而是走配对时拿到的 8582 网关端口
++// 连 PCM（/status 里 pcm_connection 一直在涨的就是它）。所以这条只是把"死地址"
++// 改成"跟着网卡走"，不是修音频的手段；音频不通的真因是设备侧 DSP 没起来。
++func (a *agent) audioAdvertiseHost() string {
++	if b, err := os.ReadFile("/tmp/airsim-direct-host"); err == nil {
++		if h := strings.TrimSpace(string(b)); net.ParseIP(h) != nil {
++			return h
++		}
++	}
++	readRoute := a.defaultRoute
++	if readRoute == nil {
++		readRoute = readDefaultRoute
++	}
++	if name := strings.TrimSpace(readRoute()["interface"]); name != "" {
++		if dev, err := net.InterfaceByName(name); err == nil {
++			if addrs, err := dev.Addrs(); err == nil {
++				for _, addr := range addrs {
++					if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && ipnet.IP.IsPrivate() {
++						return ipnet.IP.String()
++					}
++				}
++			}
++		}
++	}
++	for _, ipnet := range localIPv4Networks() {
++		if ipnet.IP.To4() != nil && ipnet.IP.IsPrivate() {
++			return ipnet.IP.String()
++		}
++	}
++	return "127.0.0.1"
++}

@@ -1,0 +1,32 @@
+#!/bin/sh
+# mu300-sms 兼容层。
+#
+# Agent 的调用形式是 mu300-sms send --stdin ，stdin 上是两行：号码、正文。
+# 新版厂商脚本只认 argv（send NUM TEXT...），不认识 --stdin，于是直接报
+# "send needs a phone number and a text"，短信永远发不出去。
+# 与 mu300-at 是同一类问题，见 docs/经验库/mu300-at-stdin-mode-mismatch.md。
+#
+# 注意：agent 写死的就是 /opt/mu300/bin/mu300-sms 这个绝对路径，所以兼容层必须
+# 顶在这个位置，真脚本另存为同目录的 mu300-sms.fw-real（由 install.sh 在解包前
+# 备份，见那份脚本里的注释）。指向自己会无限递归，绝不能 fallback 回原路径。
+# 老脚本自己认 --stdin 时，fw-real 是原版，原样转交即可。
+REAL=${MU300_SMS_REAL:-/opt/mu300/bin/mu300-sms.fw-real}
+if [ ! -x "$REAL" ]; then
+    echo "mu300-sms: vendor original missing ($REAL); reinstall the AirSIM package" >&2
+    exit 3
+fi
+if [ "${1:-}" = "send" ] && [ "${2:-}" = "--stdin" ]; then
+    if grep -q -- '--stdin' "$REAL" 2>/dev/null; then
+        exec "$REAL" "$@"
+    fi
+    phone=
+    text=
+    IFS= read -r phone || true
+    IFS= read -r text || true
+    if [ -z "$phone" ] || [ -z "$text" ]; then
+        echo "mu300-sms: incomplete stdin payload (want number then text)" >&2
+        exit 2
+    fi
+    exec "$REAL" send "$phone" "$text"
+fi
+exec "$REAL" "$@"

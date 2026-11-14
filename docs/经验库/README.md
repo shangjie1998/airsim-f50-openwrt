@@ -223,6 +223,7 @@
 | 文件 | 一句话 |
 |---|---|
 | `mu300-at-stdin-mode-mismatch.md` |  |
+| `mu300-call-audio-dsp.md` |  |
 | `mu300-voice-choppy-exclude-local-chain.md` |  |
 
 ## multi

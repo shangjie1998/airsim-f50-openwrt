@@ -90,6 +90,35 @@ for f in /etc/config/airsim /etc/config/airsim-call-forward /etc/config/f50-bt; 
 done
 fi
 
+# --- 厂商 CLI 备份 ---
+# /opt/mu300/bin/mu300-sms 必须被兼容层顶掉（agent 写死这个绝对路径），原版另存为
+# 同目录的 mu300-sms.fw-real 供兼容层调用。幂等：已经是兼容层就不再覆盖，避免新版
+# 装包把 shim 当成原版存下来。详见 docs/经验库/mu300-at-stdin-mode-mismatch.md。
+if [ -f /opt/mu300/bin/mu300-sms ] &&
+   ! grep -q 'mu300-sms 兼容层' /opt/mu300/bin/mu300-sms 2>/dev/null; then
+	cp -p /opt/mu300/bin/mu300-sms /opt/mu300/bin/mu300-sms.fw-real 2>/dev/null || true
+fi
+# 同理：音频配件包的 mu300-voice 要 . /opt/mu300/lib/run-dir.sh，固件旧版没有这个库。
+# 我们补一份兼容实现；将来固件自己带上（可能更完善），先把原版留一份。
+if [ -f /opt/mu300/lib/run-dir.sh ] &&
+   ! grep -q 'run-dir.sh 兼容实现' /opt/mu300/lib/run-dir.sh 2>/dev/null; then
+	cp -p /opt/mu300/lib/run-dir.sh /opt/mu300/lib/run-dir.sh.fw-real 2>/dev/null || true
+fi
+
+# /usr/bin/mu300-at 在厂商固件里是个 symlink（指向 /opt/mu300/bin/mu300-at）。
+# 本包用实体文件顶掉它，symlink 就没了。原脚本本身还在 /opt/mu300/bin/ 没动，
+# 但"它原本是条链接"这件事只有这里能记下来 —— uninstall.sh 靠这份记录恢复原状。
+# 只记第一次看到的形态：已经是我们的实体文件时不再写，避免把链接记丢。
+mkdir -p "$BK" 2>/dev/null || true
+if [ -L /usr/bin/mu300-at ] &&
+   ! grep -q 'mu300-at 兼容层' /usr/bin/mu300-at 2>/dev/null; then
+	readlink /usr/bin/mu300-at > "$BK/mu300-at.symlink" 2>/dev/null || true
+elif [ -f /usr/bin/mu300-at ] &&
+      ! grep -q 'mu300-at 兼容层' /usr/bin/mu300-at 2>/dev/null; then
+	# 少数固件里它是实体脚本，那也留一份，卸载时放回去
+	cp -p /usr/bin/mu300-at "$BK/mu300-at" 2>/dev/null || true
+fi
+
 # --- 停服务 ---
 /etc/init.d/airsim stop >/dev/null 2>&1 || true
 /etc/init.d/airsim-call-forward stop >/dev/null 2>&1 || true
@@ -201,4 +230,14 @@ cat <<EOF
     wget -qO- http://127.0.0.1:8575/api/status | grep phone_number
   装完 LuCI 请开新标签页重登（rpcd 重启会把旧会话踢掉）。
 EOF
+fi
+
+# 通话音频的 DSP 只有在开机 boot 阶段才能抢到那块内存
+# （/etc/init.d/airsim-audio-reserve 的 reserve 只跑在 boot()，start() 是空的）。
+# 装完包如果只 restart 服务，DSP 会停在半死状态，而 /run/airsim-dsp-prepared
+# 这个标记又会拦住后续所有重试 —— 表现就是"电话接通、全程静音"。
+if /usr/bin/mu300-audio-dsp status 2>/dev/null | grep -q '^dsp:[[:space:]]*running'; then
+	echo "  DSP: running"
+else
+	echo "  DSP 尚未运行 —— 请整机重启一次（reboot），只 restart 服务不够。"
 fi
