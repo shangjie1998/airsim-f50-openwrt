@@ -16,10 +16,13 @@ SW=/usr/sbin/f50-bt-switch.sh
 CONF=/etc/config/f50-bt
 HCI=/sys/class/bluetooth/hci0
 
-# 可选件（bt-opt）：固定 tag + 固定 sha256，跟主包版本解耦
+# 可选件（bt-opt）：固定 tag，跟主包版本解耦；内核不固定 —— 配件包里是编译好的 .ko，
+# 每个内核出一份，装错内核等于把蓝牙装死。所以这里只记版本号，内核按 uname -r 现算。
 BT_OPT_TAG=bt-opt-v1.0.3
-BT_OPT_FILE=airsim-f50-bt-opt-1.0.3-k6.18.60.tar.gz
-BT_OPT_KVER=6.18.60
+BT_OPT_VER=1.0.3
+# 出过包的内核清单：页面拿它跟当前内核比对，对不上就提示「内核不匹配」而不是硬装。
+# 新出的包也会从 Release 检查结果和本地缓存里自动补进来，见 bt_opt_avail_krels。
+BT_OPT_KERNELS='6.18.60 7.3.1'
 BT_OPT_DIR=/tmp/airsim-btopt
 BT_OPT_RUN=/usr/libexec/airsim-btopt-install
 
@@ -27,8 +30,20 @@ bt_state() {
 	en=$(uci -q get f50-bt.settings.enabled 2>/dev/null)
 	[ -n "$en" ] || en=unset
 
+	# 配件链路是否闭合：bluetoothd/btattach 不少固件本来就自带，光看它们会误报可用。
+	# 必须有服务脚本和挂控制器的脚本，链路才走得通。
+	chain_ok=0
+	if [ -x /usr/bin/bluetoothd ] && [ -x /usr/bin/btattach ] \
+	   && [ -x /usr/sbin/sprd-bt-attach.sh ] && [ -x /etc/init.d/sprdbluetooth ]; then
+		chain_ok=1
+	fi
+	# 原生驱动自带、控制器已经在，也算能用（7.3.1 这类镜像就是这情况）。
+	# 注意这只补"固件没脚本但硬件能用"，不能拿它当"配件装没装"的依据：
+	# 开关一关 hci0 就没了，用它兜底会让 supported 跟着开关一起翻，页面就整块消失了。
+	[ -d "$HCI" ] && chain_ok=1
+
 	json_init
-	json_add_boolean supported 1
+	json_add_boolean supported "$chain_ok"
 	json_add_string label '蓝牙'
 	json_add_string service 'sprdbluetooth'
 	json_add_string adapter 'hci0'
@@ -43,17 +58,24 @@ bt_state() {
 
 	# 这个 6.18 内核的 /sys/class/bluetooth/hci0 下没有 address 节点，
 	# 地址只能从 hciconfig 的 BD Address 里取；两处都试一次。
-	addr=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
-	if [ -z "$addr" ] && command -v hciconfig >/dev/null 2>&1; then
-		addr=$(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: *\([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)
+	# 注意：没有 hci0 的时候别去碰 hciconfig/bluetoothctl —— 后者等 D-Bus 能等满 30 秒，
+	# ubus 那边就表现为「整页卡住」。
+	addr=
+	if [ -d "$HCI" ]; then
+		addr=$(cat "$HCI/address" 2>/dev/null | tr -d '\n')
+		if [ -z "$addr" ] && command -v hciconfig >/dev/null 2>&1; then
+			addr=$(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: *\([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)
+		fi
 	fi
 	[ -n "$addr" ] && json_add_string address "$addr"
 
 	up=0
-	if command -v hciconfig >/dev/null 2>&1; then
-		hciconfig hci0 2>/dev/null | grep -qi 'UP RUNNING' && up=1
-	else
-		[ -d "$HCI" ] && up=1
+	if [ -d "$HCI" ]; then
+		if command -v hciconfig >/dev/null 2>&1; then
+			hciconfig hci0 2>/dev/null | grep -qi 'UP RUNNING' && up=1
+		else
+			up=1
+		fi
 	fi
 	json_add_boolean up "$up"
 
@@ -63,11 +85,15 @@ bt_state() {
 
 	# 显示名：手机蓝牙列表里看到的就是它（attach 脚本算的 F50-<地址后6位>）
 	# hciconfig 不带 -a 不打印名字，必须 -a；手机端看到的是这个名字
-	nm=$(hciconfig -a hci0 2>/dev/null | sed -n "s/.*Name: *'\(.*\)'.*/\1/p" | head -n 1)
-	# hciconfig 读本地名偶尔会 HCI 超时（尤其刚重启 bluetoothd 之后），
-	# 这时退回 bluetoothctl：它读的是 bluetoothd 的 alias，也正是手机端看到的名字。
-	if [ -z "$nm" ] && command -v bluetoothctl >/dev/null 2>&1; then
-		nm=$(bluetoothctl show 2>/dev/null | sed -n 's/^[[:space:]]*Name:[[:space:]]*//p' | head -n 1)
+	nm=
+	if [ -d "$HCI" ]; then
+		nm=$(hciconfig -a hci0 2>/dev/null | sed -n "s/.*Name: *'\(.*\)'.*/\1/p" | head -n 1)
+		# hciconfig 读本地名偶尔会 HCI 超时（尤其刚重启 bluetoothd 之后），
+		# 这时退回 bluetoothctl：它读的是 bluetoothd 的 alias。但 bluetoothctl 在
+		# 没有 bluetoothd 时会死等 D-Bus，所以必须先确认 bluetoothd 在跑，再套 timeout。
+		if [ -z "$nm" ] && [ "$bluetoothd" = 1 ] && command -v bluetoothctl >/dev/null 2>&1; then
+			nm=$(timeout 3 bluetoothctl show 2>/dev/null | sed -n 's/^[[:space:]]*Name:[[:space:]]*//p' | head -n 1)
+		fi
 	fi
 	[ -n "$nm" ] && json_add_string name "$nm"
 
@@ -188,6 +214,28 @@ bt_set() {
 btopt_state() { cat "$BT_OPT_DIR/state" 2>/dev/null | head -1; }
 btopt_msg() { cat "$BT_OPT_DIR/msg" 2>/dev/null | head -1; }
 
+# 现有配件包覆盖哪些内核：已知清单 + Release 检查结果里记的文件名 + 本地躺着的包。
+# 用途是给出「为什么装不上」的准确答案，而不是笼统说一句版本不对。
+bt_opt_avail_krels() {
+	_l=$BT_OPT_KERNELS
+	_c=/usr/lib/airsim/opt-latest-bt-opt
+	if [ -f "$_c" ]; then
+		_f=$(. "$_c" 2>/dev/null; printf '%s' "${file:-}")
+		case "$_f" in
+			*-k*.tar.gz)
+				_k=${_f##*-k}
+				_l="$_l ${_k%.tar.gz}"
+				;;
+		esac
+	fi
+	for _p in /mnt/mu300-disk/extra/airsim-bt-opt-*.tar.gz; do
+		[ -f "$_p" ] || continue
+		_k=${_p##*-k}
+		_l="$_l ${_k%.tar.gz}"
+	done
+	printf '%s\n' $_l | sort -u | tr '\n' ' '
+}
+
 btopt_probe() {
 	kver=$(uname -r)
 	# 当前内核是否自带蓝牙驱动：7.3.1 这类镜像自带 wcn_bsp/sprdbt_tty，
@@ -210,14 +258,27 @@ btopt_probe() {
 			esac
 		fi
 	done
+	# 「配件已装」要按整条链判定，不能只看两个客户端二进制 —— bluetoothd/btattach
+	# 有些固件本来就自带，光凭它们存在就说「已安装」，页面会骗人去点扫描，实际扫不出东西。
+	# 必须有服务脚本和 attach 脚本，链路才算闭合。
 	installed=0
-	[ -x /usr/bin/bluetoothd ] && [ -x /usr/bin/btattach ] && installed=1
+	if [ -x /usr/bin/bluetoothd ] && [ -x /usr/bin/btattach ] \
+	   && [ -x /usr/sbin/sprd-bt-attach.sh ] && [ -x /etc/init.d/sprdbluetooth ]; then
+		installed=1
+	fi
 	[ "$native_bt" = 1 ] && [ -d /sys/class/bluetooth/hci0 ] && installed=1
 
 	busy=0
 	case "$(btopt_state)" in
 		download|verify|extract|install) busy=1 ;;
 	esac
+
+	avail=$(bt_opt_avail_krels)
+	# 只问一件事：有没有对着这个内核编的配件包。别掺 native_bt ——
+	# 驱动自带只说明「不装也行」，不等于「这个内核的包存在」，两码事。
+	kernel_ok=0
+	case " $avail " in *" $kver "*) kernel_ok=1 ;; esac
+	opt_file="airsim-f50-bt-opt-$BT_OPT_VER-k$kver.tar.gz"
 
 	json_init
 	json_add_string action probe
@@ -226,14 +287,13 @@ btopt_probe() {
 	json_add_string state "$(btopt_state)"
 	json_add_string message "$(btopt_msg)"
 	json_add_string kernel "$kver"
-	json_add_string want_kernel "$BT_OPT_KVER"
+	json_add_string want_kernel "$(printf '%s' "$avail" | sed 's/^ *//; s/ *$//')"
 	json_add_boolean native_bt "$native_bt"
-	# 原生自带驱动就算 OK，别让"内核版本不等于配件包版本"误报成不能装
-	json_add_boolean kernel_ok "$([ "$native_bt" = 1 ] || [ "$kver" = "$BT_OPT_KVER" ] && echo 1 || echo 0)"
+	json_add_boolean kernel_ok "$kernel_ok"
 	json_add_boolean hci_present "$([ -d /sys/class/bluetooth ] || [ -e /dev/ttyBT0 ] && echo 1 || echo 0)"
 	json_add_string version "$BT_OPT_TAG"
-	json_add_string file "$BT_OPT_FILE"
-	json_add_string url "https://github.com/shangjie1998/airsim-f50-openwrt/releases/download/$BT_OPT_TAG/$BT_OPT_FILE"
+	json_add_string file "$opt_file"
+	json_add_string url "https://github.com/shangjie1998/airsim-f50-openwrt/releases/download/$BT_OPT_TAG/$opt_file"
 	json_add_string label '蓝牙（可选配件）'
 	json_dump
 }
@@ -274,18 +334,33 @@ btopt_install() {
 			return 0
 			;;
 	esac
-	# 检查更新查到了更新的配件包，就让这次安装直接去拉新版（缓存里没有就用本机写死的 tag）
+	# 配件包里是编好的 .ko，跟内核版本绑死。本机内核不在覆盖范围内就直说，不硬装。
+	kver=$(uname -r)
+	avail=$(bt_opt_avail_krels)
+	case " $avail " in
+		*" $kver "*) ;;
+		*)
+			json_init
+			json_add_boolean ok 0
+			json_add_string error "本机内核 $kver，现有配件包只对 $(printf '%s' "$avail" | sed 's/^ *//; s/ *$//') 出过；驱动对不上，硬装只会把蓝牙装死。等这个内核的包出来，或者把系统切到上面列出的内核。"
+			json_dump
+			return 0
+			;;
+	esac
+	# 检查更新查到了更新的配件包，就让这次安装直接去拉新版（缓存里没有就按内核算文件名）
 	opt_override bt-opt
 	BT_LATEST_TAG=$BT_OPT_TAG
-	BT_LATEST_FILE=$BT_OPT_FILE
+	BT_LATEST_FILE="airsim-f50-bt-opt-$BT_OPT_VER-k$kver.tar.gz"
 	if [ -n "$OPT_NEW_TAG" ] && ver_gt "$OPT_NEW_VER" "${BT_OPT_TAG#bt-opt-v}"; then
 		BT_LATEST_TAG=$OPT_NEW_TAG
 		BT_LATEST_FILE=$OPT_NEW_FILE
 	fi
 	mkdir -p "$BT_OPT_DIR"
 	rm -f "$BT_OPT_DIR/state" "$BT_OPT_DIR/msg"
+	# rpcd 是 procd 管的：ubus 这次调用一结束，nohup & 起的子进程会被一起收掉，
+	# 页面点了「安装」就永远卡在 download、连日志都留不下。setsid 另开会话才活得下来。
 	AIRSIM_OPT_TAG=$BT_LATEST_TAG AIRSIM_OPT_FILE=$BT_LATEST_FILE \
-		nohup sh "$BT_OPT_RUN" >/dev/null 2>&1 &
+		setsid sh "$BT_OPT_RUN" >/dev/null 2>&1 &
 	json_init
 	json_add_boolean ok 1
 	json_add_string state 'download'
@@ -467,6 +542,13 @@ bt_scan() {
 		return 0
 		;;
 	esac
+	# 开关没开就别假装在扫：控制器都不在，扫也扫不出东西，页面还会一直显示「扫描中」骗人
+	[ -d "$HCI" ] || {
+		json_init; json_add_boolean ok 0
+		json_add_string error '蓝牙开关没开。先把开关打开，等控制器挂上再扫。'
+		json_dump
+		return 0
+	}
 	if ! agt_send scan_on; then
 		json_init; json_add_boolean ok 0
 		json_add_string error '蓝牙执行器没起来（机器上缺 python3 或 agent 脚本）'

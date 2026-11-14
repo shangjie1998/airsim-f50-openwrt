@@ -89,7 +89,9 @@ ko_count() {
 	ls "$_d"/*.ko 2>/dev/null | wc -l | tr -d ' '
 }
 
-avail_krels() { ls "$EXT/modules" 2>/dev/null | tr '\n' ' '; }
+# 扩展目录里的内核集合。装过一次就会留 <krel>.bak.<时间戳> 备份，
+# 那些不算"可用内核"，过滤掉，否则页面会列一串 6.18.60.bak.2026… 出来。
+avail_krels() { ls "$EXT/modules" 2>/dev/null | grep -v '.bak.' | tr '\n' ' '; }
 
 aud_state() {
 	if [ -f "$DIR/state" ]; then
@@ -141,6 +143,21 @@ aud_probe() {
 	fi
 	installed=$ok
 
+	# 光有 .ko 不算「能用」：主服务 prepare 还要求工具链在 PATH、amixer 在。
+	# 只报模块齐会让页面显示「已装齐」，人一看就以为好了，点了却起不来——分开判。
+	tools_missing=''
+	for t in mu300-audio-dsp mu300-voice mu300-hfp ctlset pcmhost; do
+		[ -x "$EXT/bin/$t" ] || tools_missing="$tools_missing $t"
+	done
+	links_missing=''
+	for t in mu300-audio-dsp mu300-voice mu300-hfp ctlset pcmhost; do
+		[ -L "/usr/bin/$t" ] && [ -e "/usr/bin/$t" ] || links_missing="$links_missing $t"
+	done
+	amixer_ok=0
+	command -v amixer >/dev/null 2>&1 && amixer_ok=1
+	ready=0
+	[ "$installed" = 1 ] && [ -z "$tools_missing" ] && [ -z "$links_missing" ] && [ "$amixer_ok" = 1 ] && ready=1
+
 	busy=0
 	case "$(aud_state)" in
 		download|verify|install) busy=1 ;;
@@ -165,6 +182,11 @@ aud_probe() {
 	json_add_int ko_count "$n"
 	json_add_int want_ko "$([ "$vendor" = 1 ] && echo 0 || echo "$WANT_KO")"
 	json_add_boolean modules_ok "$ok"
+	json_add_boolean tools_ok "$([ -z "$tools_missing" ] && echo 1 || echo 0)"
+	json_add_string tools_missing "${tools_missing# }"
+	json_add_boolean links_ok "$([ -z "$links_missing" ] && echo 1 || echo 0)"
+	json_add_boolean amixer_ok "$amixer_ok"
+	json_add_boolean ready "$ready"
 	json_add_int ko_missing "$([ "$ok" = 1 ] && echo 0 || echo $((WANT_KO > n ? WANT_KO - n : 0)))"
 	json_add_string opt_version "$optver"
 	json_add_boolean dsp_present "$([ -x "$EXT/bin/mu300-audio-dsp" ] && echo 1 || echo 0)"
@@ -268,12 +290,17 @@ kernel_bundles() {
 	for k in 5.4 6.18 7.3; do json_add_string "" "$k"; done
 	json_close_array
 	json_add_array bundles
-	for f in "$PKGDIR"/*kernel*.tar.gz /tmp/*kernel*.tar.gz; do
+	# 除了 pkg 目录，也扫上游归档目录 —— 刷机之后老包常被挪到那儿，
+	# 只扫 pkg 会出现「明明有 6.18 的包，下拉里却只有 7.3」，拼出来的命令拿错包。
+	for f in "$PKGDIR"/*kernel*.tar.gz /tmp/*kernel*.tar.gz /mnt/mu300-disk/extra/upstream-archive/*kernel*.tar.gz; do
 		[ -f "$f" ] || continue
+		# 包里 kernel.release 才是这个包真正对应的内核版本，光看文件名不可靠
+		_kv=$(tar xzOf "$f" ./kernel.release 2>/dev/null | head -1 | tr -d ' \n')
 		json_add_object ""
 		json_add_string path "$f"
 		json_add_string name "$(basename "$f")"
-		json_add_int size "$(stat -c %s "$f" 2>/dev/null || echo 0)"
+		json_add_string kver "$_kv"
+		json_add_int size "$(wc -c < "$f" 2>/dev/null | tr -d " ")"
 		json_close_object
 	done
 	json_close_array

@@ -44,7 +44,7 @@ idx2=$(grep -nx "$FILE.sha256" "$names" | head -1 | cut -d: -f1)
 [ -n "$idx2" ] || die "这个 Release 里没有 $FILE.sha256"
 surl=$(sed -n "${idx2}p" "$urls")
 
-say '正在下载安装包（约 420KB）'
+say '正在下载安装包（约 1MB）'
 curl -sfL -H 'Accept: application/octet-stream' -A 'AirSIM-F50-audioopt' -o "$DIR/$FILE" "$aurl" || die '下载失败'
 curl -sfL -H 'Accept: application/octet-stream' -A 'AirSIM-F50-audioopt' -o "$DIR/$FILE.sha256" "$surl" || die '下载校验和失败'
 

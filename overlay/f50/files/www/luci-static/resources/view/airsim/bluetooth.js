@@ -133,7 +133,28 @@ function btCard(bt) {
   });
  }
 
+ /* 本机那几个字段（状态/名称/地址/可见性）得跟着刷：以前只在打开页面时拉一次 bt_get，
+  * 打开那一瞬间 bluetoothctl 还没就绪的话名称就是「—」、可见性永远停在旧值，
+  * 只能手动刷新整个页面。这里每轮轮询顺手重拉一遍，只改文字不动设备列表，不会闪。 */
+ function refreshStats() {
+  btGet().then(function(s) {
+   if (!s) return;
+   stateValue.textContent = stateText(s);
+   info.textContent = summary(s);
+   nameValue.textContent = (s && s.name) || '—';
+   addrValue.textContent = (s && s.address) || '—';
+   visValue.textContent = visText(s);
+   paint(!!s.enabled);
+   if (scanBtn && !busy) {
+    scanBtn.disabled = !(s.enabled && s.attached);
+    if (!scanBtn.disabled && scanBtn.textContent === '先打开蓝牙') scanBtn.textContent = '扫描附近的设备';
+    if (scanBtn.disabled) scanBtn.textContent = '先打开蓝牙';
+   }
+  }).catch(function() { /* 拉不到就保持现状，别弹错 */ });
+ }
+
  function pollPending() {
+  refreshStats();
   btPairPending().then(function(p) {
    renderPending(p || {});
   }).catch(function() { /* 读不到就当没有请求，别弹报错 */ });
@@ -144,6 +165,11 @@ function btCard(bt) {
   * 内容由 renderNearby 填，没扫过就是空着。*/
  var nearBox = E('div', {});
  var scanBtn = E('button', { 'type': 'button', 'class': 'as-btn', 'click': function() { startScan(); } }, '扫描附近的设备');
+ /* 首次渲染就按当前状态定按钮：开关关着（控制器没挂）时直接置灰 */
+ if (!(bt && bt.enabled && bt.attached)) {
+  scanBtn.disabled = true;
+  scanBtn.textContent = '先打开蓝牙';
+ }
 
  function renderNearby(n) {
   var list = (n && n.nearby) || [];
@@ -289,6 +315,11 @@ function btCard(bt) {
   visValue.textContent = visText(s);
   devValue.textContent = '';
   devValue.appendChild(devList(s, removeDev));
+  /* 开关关着的时候控制器不在，扫描点了也扫不到东西——按钮直接置灰，别让人白点 */
+  if (scanBtn) {
+   scanBtn.disabled = !(s && s.enabled && s.attached);
+   scanBtn.textContent = scanBtn.disabled ? '先打开蓝牙' : '扫描附近的设备';
+  }
  }
 
  /* 删一台已配对设备：后端先断开再 remove，删完重拉一遍整页状态 */
@@ -386,7 +417,7 @@ return view.extend({
   if (bt.supported === false) {
    cards.push(E('section', { 'class': 'as-card as-wide' }, [
     E('h3', {}, '蓝牙'),
-    E('p', { 'class': 'as-caption as-lead' }, '这台设备没有蓝牙服务（/usr/libexec/rpcd/airsim-bt 不在位），装好蓝牙那一套再回来看。')
+    E('p', { 'class': 'as-caption as-lead' }, '蓝牙配件还没装：这版固件里没有蓝牙服务和挂控制器的脚本，所以这页暂时没有开关。去「维护 → 可选配件 → 蓝牙配件包」，点「重新安装蓝牙」装上，几十秒就好，装完回这页刷新即可。')
    ]));
   }
   else {
