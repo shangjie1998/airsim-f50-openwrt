@@ -1,0 +1,84 @@
+#!/bin/sh
+# 音频配件包无人值守自测：清空模块 → 从 GitHub 装回来 → 验证 ready
+#
+# 为什么要有这个：页面「点安装」这条路只能在浏览器里验，而 LuCI 登录态会中途过期，
+# 自动化跑不通。把「按钮背后的行为」单独拎出来，用 ubus 直接走一遍，
+# 页面只负责渲染，行为由这里保证。
+#
+# 用法：
+#   /usr/libexec/airsim-audioopt-selftest            # 全流程
+#   /usr/libexec/airsim-audioopt-selftest --keep     # 不清模块，只验当前状态
+#
+# 退出码：0 装完 ready=true；1 没到 ready；2 前置条件不满足（没网/没安装器）
+
+set -u
+EXT=/mnt/mu300-disk/extra/airsim-audio
+INSTALLER=/usr/libexec/airsim-audioopt-install
+START=$(date +%s)
+
+fail() {
+	echo "!! $1" >&2
+	exit "${2:-1}"
+}
+
+[ -x "$INSTALLER" ] || fail "没有 $INSTALLER（主包没装全？）" 2
+[ -d "$EXT" ] || fail "扩展目录 $EXT 不存在" 2
+
+# 能不能连上 GitHub（设备只通 api.github.com，这个探测用同一个域名）
+if ! curl -sf -m 8 -o /dev/null 'https://api.github.com/zen' 2>/dev/null; then
+	echo "!! 连不上 api.github.com，装不了" >&2
+	curl -s -m 8 -o /dev/null -w '  api.github.com -> HTTP %{http_code}\n' 'https://api.github.com/zen' || true
+	exit 2
+fi
+
+probe_field() {
+	ubus call airsim-audio audio_opt_probe 2>/dev/null | jsonfilter -e "@.$1" 2>/dev/null
+}
+
+if [ "${1:-}" != "--keep" ]; then
+	echo "[1/4] 清掉模块目录（模拟刷机后缺件）"
+	rm -rf "$EXT/modules/6.18.60" "$EXT/modules/7.3.1" 2>/dev/null
+	rm -rf "$EXT"/modules/*.bak.* 2>/dev/null
+	echo "  剩余内核目录: $(ls "$EXT/modules" 2>/dev/null | tr '\n' ' ')"
+else
+	echo "[1/4] --keep：不动现有模块"
+fi
+
+echo "[2/4] 装前状态"
+echo "  installed=$(probe_field installed) ready=$(probe_field ready) opt_version=$(probe_field opt_version)"
+
+echo "[3/4] 跑安装器"
+# ash 的 PIPESTATUS 不可靠，先落盘再取退出码
+"$INSTALLER" > /tmp/airsim-audioopt-selftest.log 2>&1
+IRC=$?
+sed 's/^/  /' /tmp/airsim-audioopt-selftest.log
+echo "  安装器退出码: $IRC"
+
+echo "[4/4] 装后核对"
+INST=$(probe_field installed)
+READY=$(probe_field ready)
+KO=$(probe_field ko_count)
+TOOLS=$(probe_field tools_ok)
+LINKS=$(probe_field links_ok)
+AMIX=$(probe_field amixer_ok)
+VER=$(probe_field opt_version)
+MISS=$(probe_field tools_missing)
+LMISS=$(probe_field links_missing)
+END=$(date +%s)
+
+echo "  installed=$INST  ready=$READY  ko_count=$KO"
+echo "  tools_ok=$TOOLS  links_ok=$LINKS  amixer_ok=$AMIX"
+echo "  opt_version=$VER"
+[ -n "$MISS" ] && echo "  缺工具: $MISS"
+[ -n "$LMISS" ] && echo "  缺链接: $LMISS"
+echo "  耗时: $((END-START))s"
+
+if [ "$READY" = "true" ] || [ "$READY" = "1" ]; then
+	echo "自测通过：ready=true"
+	exit 0
+fi
+
+echo "!! 自测没过：ready=${READY:-空}" >&2
+[ -n "$MISS" ] && echo "!! 缺工具: $MISS" >&2
+[ -n "$LMISS" ] && echo "!! 缺链接: $LMISS" >&2
+exit 1
