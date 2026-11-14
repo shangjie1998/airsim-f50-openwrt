@@ -72,7 +72,10 @@ fi
 
 say "== 5/6 开服务 + 开机自启"
 chmod 0755 /etc/init.d/bluetoothd /etc/init.d/dbus /etc/init.d/sprdbluetooth /etc/init.d/airsim-bt-boot 2>/dev/null || true
-chmod 0755 /usr/sbin/sprd-bt-attach.sh /usr/sbin/f50-bt-switch.sh /usr/libexec/rpcd/airsim-bt 2>/dev/null || true
+chmod 0755 /usr/sbin/sprd-bt-attach.sh /usr/sbin/f50-bt-switch.sh 2>/dev/null || true
+# 注意：/usr/libexec/rpcd/airsim-bt、bluetooth.js、luci-app-airsim-bt.json 都属于主包，
+# 可选件不再带、也不再 chmod。以前带了一份，装一次就把主包装的盖成旧版
+# （页面点按钮没反应、acl 被改成 600 页面直接 403），这就是 v1.0.3 重打的原因。
 /etc/init.d/dbus enable >/dev/null 2>&1 || true
 /etc/init.d/bluetoothd enable >/dev/null 2>&1 || true
 /etc/init.d/sprdbluetooth enable >/dev/null 2>&1 || true

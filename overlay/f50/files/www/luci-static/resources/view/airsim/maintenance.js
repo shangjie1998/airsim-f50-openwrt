@@ -313,10 +313,13 @@ return view.extend({
   function syncOpt(info) {
    info = info || {};
    var installed = info.installed === true, busy = info.busy === true;
+   var kernelOk = info.kernel_ok === true;
    optBusy = busy;
    btLc.setCurrent(info.ver || (info.version || '').replace(/^bt-opt-v/, ''));
-   optChip.textContent = busy ? '正在装' : (installed ? '已安装' : '未安装');
-   optChip.className = 'as-pill ' + (installed || busy ? 'as-pill-green' : 'as-pill-neutral');
+   /* 三种状态别混：装好了绿、正在装中性、内核对不上红。
+    * 配件包是编好的 .ko，内核不对这套根本用不了，跟「还没装」不是一回事。 */
+   optChip.textContent = busy ? '正在装' : (installed ? '已安装' : (kernelOk ? '未安装' : '内核不匹配'));
+   optChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (installed ? 'as-pill-green' : (kernelOk ? 'as-pill-neutral' : 'as-pill-red')));
    optBtn.textContent = installed ? '重新安装蓝牙' : '安装蓝牙';
 
    if (busy) {
@@ -324,9 +327,9 @@ return view.extend({
     optMsg.textContent = info.message || '正在装，别断电。';
     return;
    }
-   optBtn.disabled = info.kernel_ok !== true;
-   if (info.kernel_ok !== true) {
-    optMsg.textContent = '本机内核 ' + (info.kernel || '未知') + '，可选件是给 ' + (info.want_kernel || '—') + ' 打的，对不上装不上（驱动模块必须跟内核一致）。';
+   optBtn.disabled = !kernelOk;
+   if (!kernelOk) {
+    optMsg.textContent = '本机内核 ' + (info.kernel || '未知') + '，现有配件包只对 ' + (info.want_kernel || '—') + ' 出过。驱动模块必须跟内核一致，对不上装不了；等这个内核的包出来，或者把系统切到上面列出的内核。';
    }
    else if (info.state === 'done') optMsg.textContent = info.message || '装好了。';
    else if (info.state === 'failed') {
@@ -370,13 +373,14 @@ return view.extend({
   function syncAud(info) {
    info = info || {};
    var installed = info.installed === true, busy = info.busy === true;
+   var ready = info.ready === true, toolsOk = info.tools_ok === true;
    audLc.setCurrent(info.ver || (info.version || '').replace(/^audio-opt-v/, ''));
    var matched = info.matched === true, kOk = info.kernel_ok === true, extOk = info.ext_present === true;
    var kern = info.kernel || '未知', avail = String(info.available || '').replace(/\s+/g, ' ').trim();
    audBusy = busy;
-   audChip.textContent = busy ? '正在装' : (installed ? '已安装' : (matched ? ((info.ko_count || 0) + '/' + (info.want_ko || 25)) : '内核不匹配'));
-   audChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (installed ? 'as-pill-green' : (matched ? 'as-pill-neutral' : 'as-pill-red')));
-   audBtn.textContent = installed ? '重新安装音频模块' : '安装音频模块';
+   audChip.textContent = busy ? '正在装' : (ready ? '已装齐' : (installed ? '缺件' : (matched ? ((info.ko_count || 0) + '/' + (info.want_ko || 25)) : '内核不匹配')));
+   audChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (ready ? 'as-pill-green' : (installed ? 'as-pill-red' : (matched ? 'as-pill-neutral' : 'as-pill-red'))));
+   audBtn.textContent = ready ? '重新安装音频模块' : (installed ? '补齐缺件' : '安装音频模块');
 
    if (busy) {
     audBtn.disabled = true;
@@ -394,12 +398,20 @@ return view.extend({
     audMsg.textContent = info.message || '这次没成。';
     setNotice(audNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
    }
+   else if (ready) {
+    audMsg.textContent = kern + ' 的模块 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + ' 齐了' + (info.opt_version ? '（可选件 ' + info.opt_version + '）' : '') + '；页面出问题可以重装一遍，旧目录会先备份（只留最近两份）。';
+   }
    else if (installed) {
-    audMsg.textContent = kern + ' 的模块 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + ' 齐了' + (info.opt_version ? '（可选件 ' + info.opt_version + '）' : '') + '；页面出问题可以重装一遍，旧目录会先备份。';
+    var lack2 = [];
+    if (!toolsOk) lack2.push('工具链' + (info.tools_missing ? '（' + info.tools_missing + '）' : ''));
+    if (info.links_ok === false) lack2.push('/usr/bin 链接');
+    if (info.amixer_ok === false) lack2.push('amixer');
+    if ((info.ko_count || 0) < (info.want_ko || 0)) lack2.push('模块 ' + ((info.want_ko || 0) - (info.ko_count || 0)) + ' 个');
+    audMsg.textContent = '模块在但还不能用，缺 ' + (lack2.join('、') || '未知') + '。点「补齐缺件」会自动下载补上。';
    }
    else {
     var lack = info.ko_missing || 0;
-    audMsg.textContent = kern + ' 的音频驱动缺 ' + lack + ' 个（现 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + '）。从这里补：约 420KB，走固定 tag ' + (info.version || 'audio-opt') + '，装前核对 sha256。';
+    audMsg.textContent = kern + ' 的音频驱动缺 ' + lack + ' 个（现 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + '）。从这里补：约 1MB，走固定 tag ' + (info.version || 'audio-opt') + '，装前核对 sha256。';
    }
    if (matched && extOk && info.dsp_present === false) audMsg.textContent += ' 注意：本机没有 mu300-audio-dsp，光补模块也放不出声。';
    audBtn.title = audBtn.disabled ? ('没有可用于 ' + kern + ' 的驱动包（可选件里是 ' + (info.opt_kernels || '—') + '）') : '从 GitHub 拉可选件并安装';

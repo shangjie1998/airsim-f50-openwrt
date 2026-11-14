@@ -42,11 +42,15 @@ function optCard(lc) {
  function sync(info) {
   info = info || {};
   var installed = info.installed === true, working = info.busy === true;
+  var ready = info.ready === true, toolsOk = info.tools_ok === true;
+  var linksOk = info.links_ok !== false, amixerOk = info.amixer_ok !== false;
   busy = working;
   lc.setCurrent(info.opt_version || (info.version || '').replace(/^audio-opt-v/, ''));
 
-  if (installed) { chip.textContent = '已安装'; chip.className = 'as-pill as-pill-green'; }
-  else { chip.textContent = working ? '安装中' : '未安装'; chip.className = 'as-pill ' + (working ? 'as-pill-neutral' : 'as-pill-red'); }
+  if (working) { chip.textContent = '安装中'; chip.className = 'as-pill as-pill-neutral'; }
+  else if (ready) { chip.textContent = '已装齐'; chip.className = 'as-pill as-pill-green'; }
+  else if (installed) { chip.textContent = '缺件'; chip.className = 'as-pill as-pill-red'; }
+  else { chip.textContent = '未安装'; chip.className = 'as-pill as-pill-red'; }
 
   rowKernel.textContent = (info.kernel || '—') + (info.vendor_kernel ? '（厂商内核）' : '');
   rowMode.textContent = info.vendor_kernel ? '厂商自带，不用装配件包'
@@ -58,14 +62,22 @@ function optCard(lc) {
 
   if (working) setNotice(msg, 'info', '正在装', (info.message || info.state || ''));
   else if (installed && info.vendor_kernel) setNotice(msg, 'ok', '这台是厂商内核', '自带语音模块，页面这边不用再装配件包');
-  else if (installed && info.modules_ok) setNotice(msg, 'ok', '已装齐', '语音那套就位');
-  else if (installed) setNotice(msg, 'error', '装了但没齐', '缺 ' + ((info.want_ko || 0) - (info.ko_count || 0)) + ' 件，点重装');
+  else if (ready) setNotice(msg, 'ok', '已装齐', '模块、工具链、amixer 都在，主服务能起');
+  else if (installed) {
+   var lack = [];
+   if (!toolsOk) lack.push('工具链' + (info.tools_missing ? '（' + info.tools_missing + '）' : ''));
+   if (!linksOk) lack.push('/usr/bin 链接');
+   if (!amixerOk) lack.push('amixer');
+   if ((info.ko_count || 0) < (info.want_ko || 0)) lack.push('模块 ' + ((info.want_ko || 0) - (info.ko_count || 0)) + ' 件');
+   setNotice(msg, 'error', '装了但还不能用', '缺 ' + (lack.join('、') || '未知') + '，点「补齐缺件」会自动下载');
+  }
   else setNotice(msg, 'info', info.message || '未安装', info.hint || '需要的话点下面的按钮装');
 
   var inopt = info.kernel_ok === true;
   installBtn.disabled = working || !inopt;
+  installBtn.textContent = ready ? '重装' : (installed ? '补齐缺件' : '安装 / 重装');
   installBtn.title = inopt ? '' : '当前内核不在这个配件包的覆盖范围（' + (info.opt_kernels || '') + '），装了也起不来';
-  note.textContent = '配件包按内核编二进制：' + (info.opt_kernels || '—') + '。内核对不上的要换配件包，不是硬装。';
+  note.textContent = '配件包按内核编二进制：' + (info.opt_kernels || '—') + '。内核对不上的要换配件包，不是硬装。缺工具链时按钮会自动从配件包仓库补。';
  }
 
  var installBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true, 'click': function() {
@@ -82,7 +94,8 @@ function optCard(lc) {
  function poll() {
   audProbe().then(function(r) { sync(r && r[0] ? r[0] : r); }).catch(function() {
    chip.textContent = '不可用'; chip.className = 'as-pill as-pill-red';
-   setNotice(msg, 'error', '这台机器没有音频接口', '主包版本较旧，或 airsim-audio 没装上');
+   setNotice(msg, 'error', '这台机器没有音频接口', '主包版本较旧，或 airsim-audio 没装上；按钮仍可点，会再试一次');
+   installBtn.disabled = false;
   });
  }
  setTimeout(poll, 0);
@@ -158,7 +171,10 @@ function selfCheckCard() {
   E('p', { 'class': 'as-copy' }, '刷机丢的往往不是主包，是散在配件包里的那几件。这里一次查完，缺什么、归谁、能不能就地补，都写清楚。'),
   E('div', { 'class': 'as-row' }, [E('dt', {}, '体检结果'), E('dd', {}, [chip])]),
   msg, list,
-  E('div', { 'class': 'as-buttons' }, [runBtn, fixBtn])
+  E('div', { 'class': 'as-buttons' }, [runBtn, fixBtn]),
+  /* 这页最容易把人带沟里的一步：补齐当场看还以为没补上。补的是模块和脚本，
+   * 内核不会自己去加载，得重启才生效——不写清楚就会以为补失败了。 */
+  E('p', { 'class': 'as-caption' }, '补齐之后先别拿这一屏当结论：补进去的是驱动模块和脚本，内核不会自己去加载，得重启一次才生效。重启前这里照样报缺是正常的，不是又坏了。重启回来刷新这页，再点一次自检，八项都绿了才算真齐。'),
  ], true);
 }
 
@@ -170,6 +186,34 @@ function kernelCard() {
  var rel = E('input', { 'id': 'as-audio-release', 'type': 'text', 'class': 'as-input', 'placeholder': 'v2026.11.02.1' });
  var bundleSel = E('select', { 'id': 'as-audio-bundle', 'class': 'as-input' });
  var cmd = E('pre', { 'class': 'as-out' }, '（选好内核和包，命令会显示在这里）');
+ /* 这个系列一个包都没有时，光说「没有」没意义 —— 得把下载命令直接摆出来，
+  * 不然新人拿到干净机器根本不知道去哪儿找包。本地有包就整条藏起来。 */
+ var dlBox = E('pre', { 'class': 'as-out' }, '');
+ dlBox.style.display = 'none';
+ /* 没包时那句话的落点：只在下包场景出现，有包就清空 */
+ var warn = E('p', { 'class': 'as-caption' }, '');
+
+ /* 下拉只列跟目标内核同系列的包。全平铺看着「选择多」，实际只会让人拿错包——
+  * 这个下拉的作用就是给 mu300-update 指「拿哪个包」，系列不对等于装错内核。 */
+ var allBundles = [];
+ function refill(k) {
+  bundleSel.textContent = '';
+  var hits = allBundles.filter(function(b) { return (b.kver || '').indexOf(k + '.') === 0; });
+  if (!hits.length) {
+   bundleSel.appendChild(E('option', { 'value': '' }, '（这台机器上没有 ' + k + ' 系列的内核包）'));
+   bundleSel.disabled = true;
+  } else {
+   bundleSel.disabled = false;
+   hits.forEach(function(b) {
+    var mb = b.size ? (Math.round(b.size / 104857.6) / 10) + ' MB' : '';
+    var o = E('option', { 'value': b.path }, b.name + (b.kver ? '（内核 ' + b.kver + '）' : '') + (mb ? '（' + mb + '）' : ''));
+    /* 把包的内核版本挂在 option 上，paint 靠它比对 */
+    o.dataset.kver = b.kver || '';
+    bundleSel.appendChild(o);
+   });
+  }
+  paint();
+ }
  var tip = E('p', { 'class': 'as-caption' }, '只给命令，不代跑：切内核要写 boot 分区并重启，重启这步必须你自己来。');
  /* 复制结果单独一行播报：原来直接改写上面那句常驻说明，复制一次说明就永久没了，回不来。 */
  var copyFeed = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '');
@@ -183,7 +227,8 @@ function kernelCard() {
     /* 选中态要能被读屏认出来：光换颜色等于只给眼睛看。 */
     x.setAttribute('aria-pressed', x.dataset.k === k ? 'true' : 'false');
    });
-   paint();
+   /* 换目标内核就重填下拉：只留同系列的包，别让人拿 7.3 的包去装 6.18 */
+   refill(k);
   } }, k);
   b.dataset.k = k;
   if (k === pick) b.classList.add('is-on');
@@ -193,16 +238,31 @@ function kernelCard() {
 
  function paint() {
   var bundle = (bundleSel.value || '').trim();
-  var release = (rel.value || '').trim() || '<上游 release 号>';
-  var bundlePart = bundle || '<内核包路径>';
-  cmd.textContent = 'MU300_RELEASE=' + release + ' MU300_KERNEL_BUNDLE=' + bundlePart + ' mu300-update kernel ' + pick;
+  var rv = (rel.value || '').trim() || 'v2026.11.02.1';
+  /* 这个系列本地有没有包，决定给「切换命令」还是「下载命令」 */
+  var has = allBundles.some(function(b) { return (b.kver || '').indexOf(pick + '.') === 0; });
+  if (!has) {
+   cmd.textContent = '（这台机器上没有 ' + pick + ' 系列的内核包，先下包）';
+   dlBox.textContent = 'curl -L -o /mnt/mu300-disk/pkg/mu300-kernel-' + pick + '.tar.gz https://github.com/dikeckaan/mu300-linux/releases/download/' + rv + '/mu300-kernel-' + pick + '.tar.gz';
+   dlBox.style.display = '';
+   cmd.classList.remove('is-bad');
+   cmd.style.color = '';
+   warn.textContent = '下到 pkg 目录之后回这页刷新一次，下拉里就会多出这个包，再复制切换命令去跑。';
+   return;
+  }
+  cmd.textContent = 'MU300_RELEASE=' + rv + ' MU300_KERNEL_BUNDLE=' + bundle + ' mu300-update kernel ' + pick;
+  cmd.classList.remove('is-bad');
+  cmd.style.color = '';
+  dlBox.style.display = 'none';
+  warn.textContent = '';
  }
 
  bundleSel.addEventListener('change', paint);
  rel.addEventListener('input', paint);
 
  var copyBtn = E('button', { 'type': 'button', 'class': 'as-button', 'click': function() {
-  var t = cmd.textContent || '';
+  /* 没包的时候该复制的是下载那条，不是「先下包」这句提示 */
+  var t = (dlBox.style.display !== 'none' && dlBox.textContent) ? dlBox.textContent : (cmd.textContent || '');
   if (!t) return;
   if (navigator.clipboard && navigator.clipboard.writeText) {
    navigator.clipboard.writeText(t).then(function() { copyFeed.textContent = '已复制，去 SSH 里粘。'; })
@@ -219,16 +279,17 @@ function kernelCard() {
    instRow.textContent = (d.installed ? 'boot 里记的是 ' + d.installed : 'boot 里没记（' + (d.kernel_short || '?') + '）')
     + (d.installed_tag ? '，tag ' + d.installed_tag : '');
    if (d.installed_tag && !rel.value) rel.value = d.installed_tag;
-   var bs = d.bundles || [];
-   if (!bs.length) {
-    bundleSel.appendChild(E('option', { 'value': '' }, '（这台机器上没有现成的内核包）'));
-   } else {
-    bs.forEach(function(b) {
-     var mb = b.size ? (Math.round(b.size / 104857.6) / 10) + ' MB' : '';
-     bundleSel.appendChild(E('option', { 'value': b.path }, b.name + (mb ? '（' + mb + '）' : '')));
+   allBundles = d.bundles || [];
+   /* 默认目标跟着 boot 里记的那一档走：本机跑的就是 6.18，一上来指着 5.4 等于给错方向 */
+   var short = d.kernel_short || '';
+   if (short && KERNEL_CHOICES.indexOf(short) >= 0) {
+    pick = short;
+    Array.prototype.forEach.call(group.children, function(x) {
+     x.classList.toggle('is-on', x.dataset.k === pick);
+     x.setAttribute('aria-pressed', x.dataset.k === pick ? 'true' : 'false');
     });
    }
-   paint();
+   refill(pick);
   }).catch(function() { kernRow.textContent = '读不到（主包较旧）'; });
  }, 0);
 
@@ -240,7 +301,9 @@ function kernelCard() {
   group,
   ui.field('上游 release 号', rel),
   ui.field('本机现成的内核包', bundleSel),
+  dlBox,
   cmd,
+  warn,
   E('div', { 'class': 'as-buttons' }, [copyBtn]),
   tip,
   copyFeed,

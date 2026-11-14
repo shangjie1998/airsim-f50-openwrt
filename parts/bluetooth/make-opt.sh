@@ -70,7 +70,11 @@ R="$REPO_DIR/overlay/f50/files/usr/libexec/rpcd/airsim-bt"
 I="$REPO_DIR/overlay/f50/files/usr/libexec/airsim-btopt-install"
 bad=0
 grep -q "bt-opt-v$VER" "$R" || { echo "!! rpcd 里的 tag 不是 bt-opt-v$VER" >&2; bad=1; }
-grep -q "$(basename "$OUT")" "$R" || { echo "!! rpcd 里的文件名对不上 $(basename "$OUT")" >&2; bad=1; }
+# 文件名现在按内核现拼（airsim-f50-bt-opt-$BT_OPT_VER-k$kver.tar.gz），不再有字面全名可对，
+# 只校"前缀对不对"和"版本号跟本次 VER 一致"。
+grep -q 'airsim-f50-bt-opt-' "$R" || { echo "!! rpcd 里没有 airsim-f50-bt-opt- 前缀" >&2; bad=1; }
+grep -q "BT_OPT_VER=$VER\b" "$R" || { echo "!! rpcd 里的 BT_OPT_VER 不是 $VER" >&2; bad=1; }
 grep -q "bt-opt-v$VER" "$I" || { echo "!! 安装器里的 tag 不是 bt-opt-v$VER" >&2; bad=1; }
+grep -q "airsim-f50-bt-opt-$VER-k" "$I" || { echo "!! 安装器里的文件名模板不是 $VER" >&2; bad=1; }
 [ "$bad" = 0 ] || { echo "== 守卫拦住：先把 rpcd / 安装器的 pin 改到这次的包里再发" >&2; exit 2; }
 echo "== 守卫通过：rpcd 与安装器的 pin 与本次包一致"

@@ -9,7 +9,10 @@
 set -u
 
 TAG=${AIRSIM_OPT_TAG:-bt-opt-v1.0.3}
-FILE=${AIRSIM_OPT_FILE:-airsim-f50-bt-opt-1.0.3-k6.18.60.tar.gz}
+# 配件包按内核出，文件名带 -k<内核>。不写死内核：本机是哪个就拉哪个，
+# 对不上的情况在 rpcd 那层就拦掉了，走不到这里。
+KVER=$(uname -r)
+FILE=${AIRSIM_OPT_FILE:-airsim-f50-bt-opt-1.0.3-k$KVER.tar.gz}
 REPO=shangjie1998/airsim-f50-openwrt
 BASE=https://github.com/$REPO/releases/download
 API=https://api.github.com/repos/$REPO

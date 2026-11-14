@@ -57,11 +57,21 @@ cp "$HERE/opt/install.sh" "$ROOT/install.sh"
 chmod 755 "$ROOT/install.sh"
 echo "$VER" > "$ROOT/VERSION"
 
+# 工具链（bin/）不进包：那五个可执行由厂商音频扩展提供（$EXT/bin），
+# install.sh 里按「外部依赖」判断——有就用、没有就停下来说清楚，不在这里复制。
+# 公开 Release 里也没有这套（上游 release 只有面板 mu300-extra-panel 与内核包），
+# 所以不把外部依赖混进发布物，避免以后再出现「包里带一半」的糊涂账。
+BIN_N=0
+if [ -d "$HERE/opt/bin" ] && [ -n "$(ls -A "$HERE/opt/bin" 2>/dev/null)" ]; then
+	echo "注意：opt/bin 里有文件，但工具链按外部依赖处理，不会打进包；如需随包带，先改这条设计再动" >&2
+fi
+
 {
 	echo "name: airsim-f50-audio-opt"
 	echo "version: $VER"
 	echo "arch: aarch64"
 	echo "kernels: $(printf '%s ' $KRELS)"
+	echo "depends: audio-extra(/mnt/mu300-disk/extra/airsim-audio) tools: mu300-audio-dsp mu300-voice mu300-hfp ctlset pcmhost"
 	for k in $KRELS; do
 		n=$(ls "$PAY/$k"/*.ko 2>/dev/null | wc -l | tr -d ' ')
 		echo "kernel[$(printf '%s' $k)]: $n modules, vermagic=$(vermagic_of "$PAY/$k/audio_reserve.ko")"
