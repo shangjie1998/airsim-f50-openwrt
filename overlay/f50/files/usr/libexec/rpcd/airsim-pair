@@ -84,13 +84,18 @@ remove_clients() {
 	keys=$(mktemp /tmp/airsim-pair-k.XXXXXX 2>/dev/null || echo /tmp/airsim-pair-k.$$)
 	keep=$(mktemp /tmp/airsim-pair-keep.XXXXXX 2>/dev/null || echo /tmp/airsim-pair-keep.$$)
 	jsonfilter -e '@[*]' < "$CLIENTS" > "$keys" 2>/dev/null
-	total=$(grep -c . "$keys" 2>/dev/null || echo 0)
+	# 别写成 `grep -c . file || echo 0`：文件为空时 grep 照样打印 0，但退出码是 1，
+	# 于是 `|| echo 0` 再补一个 0，变量变成 "0\n0"，下一行算术直接崩
+	# （arithmetic syntax error），ubus 侧就表现为 «No response» —— 全选删除必踩。
+	total=$(grep -c . "$keys" 2>/dev/null)
+	total=${total:-0}
 	awk -v drop="$indexes" '
 		BEGIN { n = split(drop, a, ","); for (i = 1; i <= n; i++) d[a[i]] = 1 }
 		/^[[:space:]]*$/ { next }
 		{ if (!(NR in d)) print }
 	' "$keys" > "$keep" 2>/dev/null
-	left=$(grep -c . "$keep" 2>/dev/null || echo 0)
+	left=$(grep -c . "$keep" 2>/dev/null)
+	left=${left:-0}
 	removed=$((total - left))
 	if [ "$removed" -eq 0 ]; then
 		rm -f "$keys" "$keep"
