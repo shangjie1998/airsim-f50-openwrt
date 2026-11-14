@@ -134,8 +134,21 @@ function pairStepConfirm(box, clients, chosen) {
 
 function pairStepDone(box, result) {
  box.textContent = '';
- box.appendChild(E('h3', {}, '已删除 ' + (result.removed || 0) + ' 个客户端'));
- box.appendChild(E('p', { 'class': 'as-copy as-modal-copy' }, '现在还有 ' + (result.total || 0) + ' 个已配对客户端。'));
+ // 后端拒绝时得把原因说出来。以前不看 ok，一律显示「已删除 0 个 / 现在还有 0 个」，
+ // 明明列表里还有四个，人一看以为删干净了 —— 这就是「功能有却点不了」最坑的一种：
+ // 点了没反应，还给你个看起来成功的回执。
+ if (result && result.ok === false) {
+  box.appendChild(E('h3', {}, '没有删除'));
+  box.appendChild(E('p', { 'class': 'as-copy as-modal-copy as-modal-warn' },
+   result.error || '设备没有接受这次操作。'));
+  box.appendChild(E('div', { 'class': 'as-modal-actions' }, [pairButton('返回列表', 'as-secondary', pairClose)]));
+  return;
+ }
+ var removed = (result && result.removed) || 0;
+ var left = (result && typeof result.total === 'number') ? result.total : null;
+ box.appendChild(E('h3', {}, '已删除 ' + removed + ' 个客户端'));
+ box.appendChild(E('p', { 'class': 'as-copy as-modal-copy' },
+  left === null ? '删除已提交。' : ('现在还有 ' + left + ' 个已配对客户端。')));
  box.appendChild(E('div', { 'class': 'as-modal-actions' }, [pairButton('完成', 'as-secondary', pairClose)]));
 }
 

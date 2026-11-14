@@ -18,8 +18,12 @@ CLIENTS="$DATA_DIR/vowlan-clients.json"
 AGENT=http://127.0.0.1:7581
 
 call_active() {
+	# 不能拿 /status 的 call_active 字段当判据：那个字段的语义是「正在通话 **或**
+	# 通话状态查不到」（Go 侧写成 !calls.Available || len(calls.Calls) > 0），
+	# modem 一抽风就恒为 true，删除配对被永久锁死，页面还显示「已删除 0 个」。
+	# 这里只认「确实有正在进行的通话」：calls 数组里真的有元素。
 	curl -s -m 4 "$AGENT/status" 2>/dev/null \
-		| jsonfilter -e '@.call_active' 2>/dev/null | grep -q true
+		| jsonfilter -e '@.calls.calls[*]' 2>/dev/null | grep -q .
 }
 
 # 优先问 Go（新二进制才有 /pair/clients，能给逐客户端 online / last_used）；
