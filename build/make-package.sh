@@ -86,3 +86,11 @@ rm -rf "$HERE/dist/stage"
 cd "$HERE/dist" && shasum -a 256 "$NAME.tar.gz" | awk '{print $1"  "$2}' | tee "$NAME.tar.gz.sha256"
 echo "== 打好 =="
 ls -l "$OUT"
+
+# 闸二：拆开包看一遍，确认装的确实是刚改的那份源码（TAG/FILE/ready/1MB 文案）
+python3 "$HERE/build/tools/check-package.py" "$OUT" || {
+	echo "!! 闸二没过，包不能发" >&2
+	exit 1
+}
+echo "提示：上传后请跑闸三核对线上内容 ——"
+echo "  python3 build/tools/check-release.py --tag <tag> $OUT"

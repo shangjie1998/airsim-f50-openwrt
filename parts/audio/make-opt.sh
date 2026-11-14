@@ -85,9 +85,19 @@ for k in $KRELS; do
 done
 
 mkdir -p "$OUT"
-tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" "$NAME"
-( cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
+# 跟主包一样关掉 macOS 的扩展属性与 AppleDouble：bsdtar 默认会把每个人文件都塞一个
+# ._影子进来，包里多一层噪音，校验脚本也会被 ._VERSION 这种东西骗到。
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "$STAGE" -czf "$OUT/$NAME.tar.gz" "$NAME"
+( cd "$OUT" && shasum -a 256 "$NAME.tar.gz" | awk '{print $1"  "$2}' > "$NAME.tar.gz.sha256" )
 
 echo "== 打好 =="
 ls -l "$OUT/$NAME.tar.gz"
 cat "$OUT/$NAME.tar.gz.sha256"
+
+# 闸二：确认包里的 VERSION / TOOLS_TAG / MANIFEST 跟源码一致
+python3 "$REPO/build/tools/check-package.py" "$OUT/$NAME.tar.gz" || {
+	echo "!! 闸二没过，包不能发" >&2
+	exit 1
+}
+echo "提示：上传后请跑闸三核对线上内容 ——"
+echo "  python3 build/tools/check-release.py --tag audio-opt-v$VER $OUT/$NAME.tar.gz parts/audio/thirdparty/mu300-audio-5.4.tar.gz"
