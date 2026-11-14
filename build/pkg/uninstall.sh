@@ -59,6 +59,28 @@ rm -f /etc/init.d/airsim-call-forward /usr/lib/airsim/call-forward
 /etc/init.d/airsim-audio-retry disable >/dev/null 2>&1 || true
 rm -f /etc/init.d/airsim-audio-retry /tmp/airsim-audio-claim.log
 
+# 厂商 CLI 兼容层：把原版放回去，别让卸载留下我们自己的 shim
+#   /usr/bin/mu300-at          —— 固件里原本是 symlink（指向 /opt/mu300/bin/mu300-at）
+#   /opt/mu300/bin/mu300-sms   —— 固件里是实体脚本，装包时备份成 .fw-real
+#   /opt/mu300/lib/run-dir.sh  —— 固件里本来没有，是我们补的
+if [ -f "$BK/mu300-at.symlink" ]; then
+	ln -sf "$(cat "$BK/mu300-at.symlink")" /usr/bin/mu300-at 2>/dev/null || true
+elif [ -f "$BK/mu300-at" ]; then
+	cp -p "$BK/mu300-at" /usr/bin/mu300-at 2>/dev/null || true
+else
+	rm -f /usr/bin/mu300-at
+fi
+if [ -f /opt/mu300/bin/mu300-sms.fw-real ]; then
+	mv -f /opt/mu300/bin/mu300-sms.fw-real /opt/mu300/bin/mu300-sms 2>/dev/null || true
+else
+	rm -f /opt/mu300/bin/mu300-sms
+fi
+if [ -f /opt/mu300/lib/run-dir.sh.fw-real ]; then
+	mv -f /opt/mu300/lib/run-dir.sh.fw-real /opt/mu300/lib/run-dir.sh 2>/dev/null || true
+else
+	rm -f /opt/mu300/lib/run-dir.sh
+fi
+
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
 /etc/init.d/airsim start >/dev/null 2>&1 || true

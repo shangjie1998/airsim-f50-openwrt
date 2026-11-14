@@ -16,3 +16,4 @@ AirSIM-f50-tar-update.patch	active	airsim-f50-	luci-app-airsim-;apk --keys-dir;S
 AirSIM-f50-sta-reachability.patch	active
 AirSIM-mu300-keytable-lru.patch	active
 AirSIM-mu300-number-early-retry.patch	active			mu300RefreshModem;AT+CNUM
+AirSIM-f50-vnic-audio-host.patch	active			audioAdvertiseHost
