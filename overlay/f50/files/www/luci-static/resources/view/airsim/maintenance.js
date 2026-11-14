@@ -313,14 +313,17 @@ return view.extend({
   function syncOpt(info) {
    info = info || {};
    var installed = info.installed === true, busy = info.busy === true;
+   var ready = info.ready === true;
+   var missing = (info.missing || '').replace(/^\s+|\s+$/g, '');
    var kernelOk = info.kernel_ok === true;
    optBusy = busy;
    btLc.setCurrent(info.ver || (info.version || '').replace(/^bt-opt-v/, ''));
-   /* 三种状态别混：装好了绿、正在装中性、内核对不上红。
-    * 配件包是编好的 .ko，内核不对这套根本用不了，跟「还没装」不是一回事。 */
-   optChip.textContent = busy ? '正在装' : (installed ? '已安装' : (kernelOk ? '未安装' : '内核不匹配'));
-   optChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (installed ? 'as-pill-green' : (kernelOk ? 'as-pill-neutral' : 'as-pill-red')));
-   optBtn.textContent = installed ? '重新安装蓝牙' : '安装蓝牙';
+   /* 四态：能扫了绿；装了一部分但适配器没出来红；压根没装中性；内核不对红。
+    * 装了多少件不算数，能扫才算数 —— 之前只看文件在不在，页面说已安装，
+    * 点扫描报 -32002，就是这里骗了人。 */
+   optChip.textContent = busy ? '正在装' : (ready ? '已装齐' : (installed ? '缺件' : (kernelOk ? '未安装' : '内核不匹配')));
+   optChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (ready ? 'as-pill-green' : (installed ? 'as-pill-red' : (kernelOk ? 'as-pill-neutral' : 'as-pill-red'))));
+   optBtn.textContent = ready ? '重新安装蓝牙' : (installed ? '补齐缺件' : '安装蓝牙');
 
    if (busy) {
     optBtn.disabled = true;
@@ -336,7 +339,8 @@ return view.extend({
     optMsg.textContent = info.message || '这次没成。';
     setNotice(optNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
    }
-   else if (installed) optMsg.textContent = '这台机器已经有蓝牙那一套了；页面出过问题可以重装一遍，不动已配对记录。';
+   else if (ready) optMsg.textContent = '蓝牙那套齐了，适配器也在，能扫能配。';
+   else if (installed) optMsg.textContent = (missing ? ('装了一部分，缺 ' + missing + '。点「补齐缺件」重装一遍。') : '装了配件，但适配器没出来。点「补齐缺件」重装一遍，还不行就看下面的输出。');
    else optMsg.textContent = '主包不带蓝牙驱动与 bluez。需要时从这里装回来：约 1.7MB，从项目 Release（' + (info.version || 'bt-opt') + '）拉，装前核对 sha256。';
    if (optBtn.disabled) optBtn.title = '内核或控制器条件不满足';
    else optBtn.title = '从 GitHub 拉可选件并安装';
