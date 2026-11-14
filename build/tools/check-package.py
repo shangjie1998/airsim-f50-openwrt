@@ -32,6 +32,26 @@ AUDIO_VER = (ROOT / 'parts/audio/AUDIO-OPT-VERSION').read_text(encoding='utf-8')
 problems = []
 checked = []
 
+# 主包里允许出现在 usr/libexec/ 的脚本（相对路径）。加新功能脚本要顺手加到这里，
+# 但测试、调试、一次性排查用的东西不进包，放 build/tools/ 或 build/tools/remote/。
+LIBEXEC_ALLOWED = {
+    'airsim-audioopt-install',
+    'airsim-bt-agent',
+    'airsim-btopt-install',
+    'airsim-flowfix',
+    'airsim-net-probe',
+    'airsim-opt-latest',
+    'airsim-postflash-check',
+    'rpcd/airsim',
+    'rpcd/airsim-audio',
+    'rpcd/airsim-backup',
+    'rpcd/airsim-bt',
+    'rpcd/airsim-call',
+    'rpcd/airsim-net',
+    'rpcd/airsim-pair',
+    'rpcd/airsim-sms',
+}
+
 
 def read_member(tf, member):
     """取包内某个文件的内容。跳过 macOS 打的 ._ 影子文件——它们名字以 ._ 开头，
@@ -46,7 +66,7 @@ def read_member(tf, member):
     return None
 
 
-def check_main(tf):
+def check_main(tf, names):
     rpcd = read_member(tf, 'usr/libexec/rpcd/airsim-audio')
     if rpcd is None:
         problems.append('主包里没有 rpcd/airsim-audio')
@@ -79,8 +99,24 @@ def check_main(tf):
     else:
         checked.append('安装器提示为 1MB 档')
 
+    # 白名单：usr/libexec 下只许这些脚本进包。
+    # 起因是 airsim-audioopt-selftest 那种自测脚本一度放在 overlay 里，
+    # 打包就跟着进去了 —— 它第一件事是 rm -rf 模块目录，误跑等于自毁。
+    # 测试/调试工具一律放 build/tools/，不参与打包；这里多出一个就拦住。
+    present = set()
+    for m in tf.getmembers():
+        if '/usr/libexec/' not in m.name or not m.isfile():
+            continue
+        rel = m.name.split('/usr/libexec/', 1)[1]
+        if rel and not rel.rsplit('/', 1)[-1].startswith('._'):
+            present.add(rel)
+    for extra in sorted(present - LIBEXEC_ALLOWED):
+        problems.append(f'usr/libexec/{extra} 不在白名单里（测试/调试脚本不许进包，放 build/tools/）')
+    if not (present - LIBEXEC_ALLOWED):
+        checked.append(f'usr/libexec 只有白名单内 {len(present)} 个脚本')
 
-def check_audio(tf):
+
+def check_audio(tf, names):
     ver = read_member(tf, 'VERSION')
     if ver is None:
         problems.append('配件包里没有 VERSION')
@@ -132,10 +168,10 @@ def main():
         # 主包才是 files/... 那套结构。用「有 install.sh 且有 modules/」认配件包。
         is_audio = any(n.endswith('/install.sh') for n in names) and any('/modules/' in n for n in names)
         if is_audio:
-            check_audio(tf)
+            check_audio(tf, names)
             kind = '音频配件包'
         else:
-            check_main(tf)
+            check_main(tf, names)
             kind = '主包'
 
     if problems:
