@@ -1,6 +1,13 @@
 #!/bin/sh
 # 音频配件包无人值守自测：清空模块 → 从 GitHub 装回来 → 验证 ready
 #
+# 【开发调试工具，不进主包、不随 Release 发布】
+# 第一件事就是 rm -rf 掉设备的模块目录，发给终端用户等于留了个自毁按钮。
+# 用之前手工传上去：
+#   expect ~/Desktop/f50scp.exp build/tools/remote/airsim-audioopt-selftest /usr/libexec/airsim-audioopt-selftest
+#   expect ~/Desktop/f50ssh.exp "chmod 755 /usr/libexec/airsim-audioopt-selftest"
+# 或者直接跑本地包装（会自动传）：sh build/tools/selftest-audio.sh
+#
 # 为什么要有这个：页面「点安装」这条路只能在浏览器里验，而 LuCI 登录态会中途过期，
 # 自动化跑不通。把「按钮背后的行为」单独拎出来，用 ubus 直接走一遍，
 # 页面只负责渲染，行为由这里保证。
