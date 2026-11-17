@@ -200,6 +200,10 @@
 | `luci-theme-menu-cache-stale-tab.md` |  |
 | `luci-view-e-nested-array-render.md` |  |
 | `luci-view-links-build-with-l-url.md` |  |
+| `boot-window-state-refresh-cadence.md` | 开机空窗期刷新节奏 |
+| `single-radio-ap-mode-wifi-scan-empty.md` | AP 模式扫描空 → 换 managed 接口 |
+| `ssid-missing-on-band-limited-radio.md` | 频段过滤掉的 SSID 不是扫描坏了 |
+| `wifi-scan-misses-ssid-use-targeted-channel-scan.md` | 定向信道扫描提高命中率 |
 
 ## macos
 
@@ -275,6 +279,7 @@
 | 文件 | 一句话 |
 |---|---|
 | `patch-bundle-for-upstream-replay.md` | 枚举可用基线 |
+| `patch-layer-dual-truth-state-column.md` | 改源码还是补丁，机器要分得清 |
 
 ## probe
 
