@@ -14,7 +14,7 @@ for f in airsim-mu300d airsim-agent VERSION; do
 done
 rm -f /usr/lib/airsim/MANIFEST
 
-# 页面：备份里有的还原，本包新加的直接删掉
+# 页面：备份里有的还原，本包新加的直接删掉（动态遍历，不硬编码名单）
 for f in "$BK"/view/*; do
 	[ -f "$f" ] || continue
 	b=$(basename "$f")
@@ -23,31 +23,28 @@ for f in "$BK"/view/*; do
 	*)      cp -p "$f" "/www/luci-static/resources/view/airsim/$b" || true ;;
 	esac
 done
-for f in /www/luci-static/resources/view/airsim/call.js \
-         /www/luci-static/resources/view/airsim/maintenance.js \
-         /www/luci-static/resources/view/airsim/settings.js \
-         /www/luci-static/resources/view/airsim/connect.js \
-         /www/luci-static/resources/view/airsim/ui.css \
-         /www/luci-static/resources/view/airsim/ui.js; do
+for f in /www/luci-static/resources/view/airsim/*.js /www/luci-static/resources/view/airsim/*.css; do
+	[ -e "$f" ] || continue
 	[ -f "$BK/view/$(basename "$f")" ] || rm -f "$f"
 done
 [ -f "$BK/view/luci-app-airsim.json" ] && cp -p "$BK/view/luci-app-airsim.json" /usr/share/luci/menu.d/
 
-# rpcd 后端：还原旧文件，删掉本包新加的
+# rpcd 后端：还原旧文件，删掉本包新加的（动态遍历，不硬编码名单，以后加新后端不用改这里）
 for f in "$BK"/rpcd/*; do
 	[ -f "$f" ] && cp -p "$f" "/usr/libexec/rpcd/$(basename "$f")" || true
 done
-for f in airsim-backup airsim-bt airsim-pair airsim-sms airsim-call; do
-	[ -f "$BK/rpcd/$f" ] || rm -f "/usr/libexec/rpcd/$f"
+for f in /usr/libexec/rpcd/airsim-*; do
+	[ -e "$f" ] || continue
+	[ -f "$BK/rpcd/$(basename "$f")" ] || rm -f "$f"
 done
 
-# ACL：备份里有就还原，新加的删掉
+# ACL：备份里有就还原，新加的删掉（同上，动态遍历 luci-app-airsim*.json）
 for f in "$BK"/acl/*; do
 	[ -f "$f" ] && cp -p "$f" "/usr/share/rpcd/acl.d/$(basename "$f")" || true
 done
-for f in luci-app-airsim-backup.json luci-app-airsim-bt.json luci-app-airsim-pair.json \
-         luci-app-airsim-sms.json luci-app-airsim-call.json luci-app-airsim-f50-extra.json; do
-	[ -f "$BK/acl/$f" ] || rm -f "/usr/share/rpcd/acl.d/$f"
+for f in /usr/share/rpcd/acl.d/luci-app-airsim*.json; do
+	[ -e "$f" ] || continue
+	[ -f "$BK/acl/$(basename "$f")" ] || rm -f "$f"
 done
 
 # 来电转发：撤自启、撤脚本、撤 uci

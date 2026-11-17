@@ -253,13 +253,15 @@ wifi_connect() {
 
 	# 1) 已经在 Wi-Fi 模式、用的就是这个 SSID、而且有地址 → 直接算成功。
 	#    这种情况再 reload 会把网断几秒，用户看到的就是「点了连接反而掉线」。
+	#    但传了 key 的不短路 —— 那是用户主动输密码（可能是改密码），必须 reload 让新密码生效，
+	#    不然 uci 里写了新 key 但 wpa_supplicant 还在用旧密码，当前连接不断，下次重连才发现连不上。
 	local _st _st_mode _st_ssid _st_ip sta_net
 	sta_net=$(uci -q get "wireless.$sta.network" 2>/dev/null); [ -n "$sta_net" ] || sta_net=wwan
 	_st=$("$NETMODE" status --json 2>/dev/null)
 	_st_mode=$(printf '%s' "$_st" | sed -n 's/.*"mode":"\([^"]*\)".*/\1/p')
 	_st_ssid=$(printf '%s' "$_st" | sed -n 's/.*"sta_ssid":"\([^"]*\)".*/\1/p')
 	_st_ip=$(printf '%s' "$_st" | sed -n 's/.*"sta_ip":"\([^"]*\)".*/\1/p')
-	if [ "$_st_mode" = wifi ] && [ "$_st_ssid" = "$ssid" ] && [ -n "$_st_ip" ]; then
+	if [ -z "$key" ] && [ "$_st_mode" = wifi ] && [ "$_st_ssid" = "$ssid" ] && [ -n "$_st_ip" ]; then
 		json_init
 		json_add_boolean ok 1
 		json_add_int code 0

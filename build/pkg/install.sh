@@ -144,9 +144,7 @@ fi
 rm -f /usr/share/luci/menu.d/luci-app-airsim-maintenance.json \
       /usr/share/luci/menu.d/luci-app-airsim-pages.json 2>/dev/null || true
 
-chmod 755 /usr/libexec/rpcd/airsim-backup /usr/libexec/rpcd/airsim-bt \
-          /usr/libexec/rpcd/airsim-pair /usr/libexec/rpcd/airsim-sms \
-          /usr/libexec/rpcd/airsim-call 2>/dev/null || true
+chmod 755 /usr/libexec/rpcd/airsim-* 2>/dev/null || true
 chmod 755 /usr/lib/airsim/call-forward /etc/init.d/airsim-call-forward 2>/dev/null || true
 
 # --- 开机自启 ---
