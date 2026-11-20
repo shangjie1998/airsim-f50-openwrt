@@ -40,7 +40,35 @@ wifi_devs() {
 		[ -z "$_d" ] && continue
 		case " $_out " in *" $_d "*) ;; *) _out="$_out $_d" ;; esac
 	done
-	echo "$_out"
+	echo "${_out# }"
+}
+
+# STA 接口对应的 network 段名（默认 wwan）。防火墙归属按这个 network 收敛，
+# 跟下面 wifi_connect 取同一个来源，避免脚本两处各写一份默认值。
+sta_net_name() {
+	local _sta _n
+	_sta=$(cfg_sta)
+	_n=$(uci -q get "wireless.$_sta.network" 2>/dev/null)
+	[ -n "$_n" ] || _n=wwan
+	echo "$_n"
+}
+
+# 按 zone 名定位 firewall uci 段（取不到回空）。
+zone_section_by_name() {
+	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='$1'\$/\1/p" | head -1
+}
+
+# 把指定 network 从 wan zone 摘出，保留其余成员。这版 uci 没有 delete_list（单条
+# 删除静默失败），只能整项 list 删掉再重建。蜂窝口 wan/wan6（mu300cell）不在此列。
+net_off_wan() {
+	local _net=$1 _wn _keep='' _n
+	_wn=$(zone_section_by_name wan)
+	[ -n "$_wn" ] || return 0
+	for _n in $(uci -q get "firewall.$_wn.network" 2>/dev/null); do
+		[ "$_n" = "$_net" ] || _keep="$_keep $_n"
+	done
+	uci -q delete "firewall.$_wn.network" 2>/dev/null || true
+	for _n in $_keep; do uci -q add_list "firewall.$_wn.network=$_n" 2>/dev/null || true; done
 }
 
 # 当前真正在跑的那个无线口：sysfs 探到的 live_if 优先，其次 STA 段配置名，再回退 AP 口。
@@ -392,15 +420,23 @@ admin_zone_sections() {
 
 admin_zone_ensure() {
 	_s=$(admin_zone_sections | head -1)
+	_net=$(sta_net_name)
 	if [ -n "$_s" ]; then
-		# 接口名会随模式变（wlan0 / phy0-sta0）：把当前探到的无线口补齐进区，
-		# 先清旧 device list 再重列，避免反复 add_list 堆出重复项。
-		for _d in $(uci -q get firewall.$_s.device 2>/dev/null); do
-			uci -q delete_list "firewall.$_s.device=$_d" 2>/dev/null || true
-		done
+		# 接口名会随模式变（wlan0 / phy0-sta0）：整项 device 列表清掉重列去重。
+		# 这版 uci 没有 delete_list（逐条删静默失败），沿用旧写法会反复 add 堆出重复项。
+		uci -q delete "firewall.$_s.device" 2>/dev/null || true
 		for _d in $(wifi_devs); do
 			uci -q add_list "firewall.$_s.device=$_d" 2>/dev/null || true
 		done
+		# 归属收敛（2026-11-20 真机踩到）：fw4 里 network 归属优先于 device 归属，
+		# STA 上行口若仍挂在 wan zone，input 先跳 input_wan（REJECT），本区放行规则
+		# 根本够不到。把 STA net 从 wan 摘出、挂到本区，直连端口规则才在 input 侧命中。
+		net_off_wan "$_net"
+		_has=0
+		for _n in $(uci -q get "firewall.$_s.network" 2>/dev/null); do
+			[ "$_n" = "$_net" ] && _has=1
+		done
+		[ "$_has" = 0 ] && uci -q add_list "firewall.$_s.network=$_net" 2>/dev/null || true
 		return 0
 	fi
 	uci -q add firewall zone >/dev/null || return 1
@@ -408,6 +444,8 @@ admin_zone_ensure() {
 	for _d in $(wifi_devs); do
 		uci -q add_list "firewall.@zone[-1].device=$_d" 2>/dev/null || true
 	done
+	uci -q add_list "firewall.@zone[-1].network=$_net" 2>/dev/null || true
+	net_off_wan "$_net"
 	uci -q set "firewall.@zone[-1].input=REJECT"
 	uci -q set "firewall.@zone[-1].output=ACCEPT"
 	uci -q set "firewall.@zone[-1].forward=REJECT"

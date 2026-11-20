@@ -53,6 +53,10 @@ AP_IF=$(u wireless.$AP.ifname)
 STA_IF=$(u wireless.$STA.ifname)
 STA_DEV=$(u wireless.$STA.device)
 AP_DEV=$(u wireless.$AP.device)
+# STA 段绑到哪个 network 接口（默认 wwan）。后面读 proto/metric/disabled、判断
+# 防火墙归属都按这个名，不写死 —— 哪天 STA 改绑别的 network 段，这里跟着变。
+STA_NET=$(u wireless.$STA.network)
+[ -n "$STA_NET" ] || STA_NET=wwan
 [ -n "$AP_IF" ] || AP_IF=wlan0
 
 # 同一个 ifname 或同一个 device => 单射频，AP 与 STA 物理互斥
@@ -85,9 +89,9 @@ BAND_COUNT=$(iw phy phy0 info 2>/dev/null | grep -c 'Band ')
 # ---- 4. 网络接口 ----
 WAN_PROTO=$(u network.wan.proto)
 WAN_DIS=$(u network.wan.disabled)
-WWAN_PROTO=$(u network.wwan.proto)
-WWAN_METRIC=$(u network.wwan.metric)
-WWAN_DIS=$(u network.wwan.disabled)
+WWAN_PROTO=$(u network.$STA_NET.proto)
+WWAN_METRIC=$(u network.$STA_NET.metric)
+WWAN_DIS=$(u network.$STA_NET.disabled)
 AP_DIS=$(u wireless.$AP.disabled)
 STA_DIS=$(u wireless.$STA.disabled)
 
@@ -99,7 +103,7 @@ for z in $(uci show firewall 2>/dev/null | grep '=zone' | sed 's/firewall\.//;s/
 		*) continue ;;
 	esac
 	for n in $(uci -q get firewall.$z.network 2>/dev/null); do
-		[ "$n" = wwan ] && EGRESS=1
+		[ "$n" = "$STA_NET" ] && EGRESS=1
 	done
 done
 NFT_HIT=$(nft list ruleset 2>/dev/null | grep -c "$AP_IF")
@@ -122,7 +126,7 @@ fi
 T_IWINFO=0; T_AT=0; T_NETMODE=0
 command -v iwinfo >/dev/null 2>&1 && T_IWINFO=1
 command -v mu300-at >/dev/null 2>&1 && T_AT=1
-[ -x /usr/bin/netmode ] && T_NETMODE=1
+[ -x /usr/bin/airsim-netmode ] && T_NETMODE=1
 
 # ---- 8. 蜂窝出口网卡名 ----
 CELL_IF=''

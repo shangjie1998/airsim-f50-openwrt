@@ -60,14 +60,20 @@ p_many() {
 }
 trap '[ -n "$_PCACHE_MINE" ] && [ "$_PCACHE_MINE" = 1 ] && rm -f "$_PCACHE"' EXIT INT TERM HUP
 
-{ IFS= read -r RADIO; IFS= read -r STA; IFS= read -r AP; IFS= read -r AP_IF; IFS= read -r CELL_IF; } <<EOF
-$(p_many 'radio,sta_section,ap_section,ap_if,cell_if')
+{ IFS= read -r RADIO; IFS= read -r STA; IFS= read -r AP; IFS= read -r AP_IF; IFS= read -r CELL_IF; IFS= read -r LIVE_IF; IFS= read -r STA_CFG_IF; } <<EOF
+$(p_many 'radio,sta_section,ap_section,ap_if,cell_if,live_if,sta_if')
 EOF
 [ -n "${RADIO:-}" ] || RADIO=radio0
 [ -n "${STA:-}" ] || STA=wwan0
 [ -n "${AP:-}" ] || AP=ap0
 [ -n "${AP_IF:-}" ] || AP_IF=wlan0
 [ -n "${CELL_IF:-}" ] || CELL_IF=sipa_eth0
+# STA 实际口名：probe 从 sysfs 探到的在用无线口优先（STA 模式是 phy0-sta0，AP 模式
+# 是 wlan0），其次 uci 里配的 ifname，最后回退 AP_IF。早先这里一直拿 AP_IF（热点口
+# wlan0）去查 STA 关联 SSID / IP，STA 模式下 wlan0 根本不存在，页面就读成"未连接"。
+STA_IF=${LIVE_IF:-}
+[ -n "$STA_IF" ] || STA_IF=${STA_CFG_IF:-}
+[ -n "$STA_IF" ] || STA_IF=$AP_IF
 # STA 段绑到哪个 network 接口（默认 wwan）。开关 STA 时必须连着它一起开关：
 # netifd 只认 network 段的 disabled，两边不一致就会出现
 # wireless.wwan0.disabled=0 / network.wwan.disabled=1 的分裂状态，
@@ -154,7 +160,7 @@ if_ip() {
 
 # STA 当前关联的 SSID（可能含空格，按到行尾取）
 sta_ssid() {
-	iw dev "$AP_IF" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | head -1
+	iw dev "$STA_IF" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | head -1
 }
 
 # ---- 自检：Wi-Fi 模式要求「有 IP + 默认路由在 STA 口」 ----
@@ -171,11 +177,11 @@ check_wifi() {
 	local i ip ssid
 	i=0
 	while [ "$i" -lt 30 ]; do
-		ip=$(if_ip "$AP_IF")
+		ip=$(if_ip "$STA_IF")
 		ssid=$(sta_ssid)
 		# 判「Wi-Fi 有默认路由」时不能看全局第一条 default —— 切换过程中蜂窝那条还在，
 		# 2026-11-11 真机就栽在这：Wi-Fi 明明连上并拿到 192.168.50.230，自检却判失败回滚。
-		if [ -n "$ip" ] && has_default_on "$AP_IF"; then return 0; fi
+		if [ -n "$ip" ] && has_default_on "$STA_IF"; then return 0; fi
 		# 关联已建立但还没拿到地址/路由，再等，别急着判死
 		if [ -n "$ssid" ] && [ "$i" -lt 25 ]; then sleep 1; i=$((i + 1)); continue; fi
 		sleep 1; i=$((i + 1))
@@ -345,7 +351,13 @@ do_status() {
 	m=$(cur_mode)
 	dev=$(route_dev)
 	ssid=$(sta_ssid)
-	ip=$(if_ip "$AP_IF")
+	ip=$(if_ip "$STA_IF")
+	# 开关指纹停在 wifi-pending（蜂窝开关没拨、热点关、STA 开），但 STA 口已关联并拿到
+	# 地址、默认路由也落在 STA 口 —— 实际就在用 Wi-Fi 上网，展示成 wifi，别报"待配置"。
+	# 只改展示态，cur_mode 切换守门仍按开关指纹，不受影响。
+	if [ "$m" = wifi-pending ] && [ -n "$ip" ] && has_default_on "$STA_IF"; then
+		m=wifi
+	fi
 	if [ "${1:-}" = '--json' ]; then
 		_J() { [ "$1" = 1 ] && printf true || printf false; }
 		printf '{"mode":"%s","wan_disabled":"%s","ap_disabled":"%s","sta_disabled":"%s","route_dev":"%s","sta_ssid":"%s","sta_ip":"%s","has_base":%s,"single_radio":%s}\n' \
