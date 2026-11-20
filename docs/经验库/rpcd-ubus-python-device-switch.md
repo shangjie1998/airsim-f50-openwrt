@@ -1,6 +1,6 @@
 ---
 name: rpcd-ubus-python-device-switch
-description: 用 rpcd/ubus 包一层 python 脚本给设备做开关（如蓝牙、射频）时，避开 uci 匿名节静默取不到值、ubus 30 秒超时和 sysfs 无状态节点的三个坑
+description: 用 rpcd/ubus 包一层 python 脚本给设备做开关（如射频、网络开关）时，避开 uci 匿名节静默取不到值、ubus 30 秒超时和 sysfs 无状态节点的三个坑
 metadata:
  type: work_experience
  source: harness
@@ -17,7 +17,7 @@ metadata:
 1. uci 配置写成匿名节 `config main`，`uci get 包.main.选项` 取不到，后端把“读不到配置”当成“本机不支持”，前端静默整张卡不显示——配置节必须写成具名节 `config main 'main'`。先用 `uci show` 确认节名再联调。
 2. ubus 调用有 30 秒上限：后端里串行 `sleep` 等硬件上线（20 s + 10 s）直接把整次开关拖成 `Request timed out`，而设备侧其实已经生效。等待总预算压到 10 秒以内，没就绪就返回“正在初始化”让前端自己再查。
 3. `uci set` 必须写全 `包.节.选项=值`，写成 `包.节=值` 会把节名改掉。
-4. 别假设 sysfs 有状态节点：某些平台 `/sys/class/bluetooth/hci0/` 下没有 `address`，只能从 `hciconfig` 输出里解析；判断“在不在”用目录存在即可。
+4. 别假设 sysfs 有状态节点：某些平台某类 `/sys/class/<类>/<节点>/` 下没有 `address` 之类属性，只能从对应 CLI 输出里解析；判断“在不在”用目录存在即可。
 ## 可复用的产物或模板
 ```
 case "$1" in

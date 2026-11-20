@@ -102,13 +102,12 @@ var PAGES = [
  { id: 'sms',         title: '短信' },
  { id: 'maintenance', title: '维护' },
  { id: 'settings',    title: '外观与设置' },
- { id: 'bluetooth',   title: '蓝牙' },
  { id: 'audio',       title: '音频' }
 ];
 
 /* 链接一律交给 L.url 生成：它知道 /cgi-bin/luci 这层前缀和实际脚本名。
  * 早先自己从 pathname 截一段，遇到 /admin/services/airsim（不带页名）就截成
- * /admin/services/，于是点蓝牙直接 404 —— 别再自己拼。 */
+ * /admin/services/，于是点页面直接 404 —— 别再自己拼。 */
 function menu(current) {
  current = current || '';
  var base = L.url('admin/services/airsim');
@@ -139,7 +138,7 @@ function menu(current) {
  return E('nav', { 'class': 'as-menu', 'aria-label': 'AirSIM 页面' }, [
   E('div', { 'class': 'as-menu-strip' }, items),
   /* 窄屏只保留下拉。以前这里还摆了一个 .as-menu-current 显示当前页名，
-   * 加上下拉里选中的也是同一页，屏幕上就是「蓝牙 蓝牙」两遍。
+   * 加上下拉里选中的也是同一页，屏幕上就是「页名 页名」两遍。
    * 下拉自带 aria-label 和选中项，够用了。*/
   E('div', { 'class': 'as-menu-narrow' }, [
    picker
@@ -235,7 +234,7 @@ function busy(button, flag) {
  else button.classList.remove('is-busy');
 }
 
-/* ---------------- 配件包「检查更新」小部件（音频/蓝牙两个页面共用） ----------------
+/* ---------------- 配件包「检查更新」小部件（音频页用） ----------------
  * 卡片右上角一组：左边版本号，右边圆形图标按钮。图标随状态变：
  * ↻ 可查（灰） / 旋转 正在查 / ✓ 已是最新 / ↑ 有新版本（绿） / ⚠ 查不到（红）。
  * 不挂常亮箭头：常亮箭头等于承诺"随时能升"，会误导。

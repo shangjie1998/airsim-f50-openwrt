@@ -106,20 +106,6 @@
    ]
   }
  },
- "admin/services/airsim/bluetooth": {
-  "title": "蓝牙",
-  "order": 55,
-  "action": {
-   "type": "view",
-   "path": "airsim/bluetooth"
-  },
-  "depends": {
-   "acl": [
-    "luci-app-airsim",
-    "luci-app-airsim-bt"
-   ]
-  }
- },
  "admin/services/airsim/audio": {
   "title": "音频",
   "order": 56,

@@ -85,7 +85,7 @@ cp -p /usr/share/luci/menu.d/luci-app-airsim*.json "$BK/view/" 2>/dev/null || tr
 for f in airsim-call-forward airsim-audio-retry; do
 	[ -f "/etc/init.d/$f" ] && cp -p "/etc/init.d/$f" "$BK/initd/" || true
 done
-for f in /etc/config/airsim /etc/config/airsim-call-forward /etc/config/f50-bt; do
+for f in /etc/config/airsim /etc/config/airsim-call-forward; do
 	[ -f "$f" ] && cp -p "$f" "$BK/config/" || true
 done
 fi
@@ -148,31 +148,11 @@ chmod 755 /usr/libexec/rpcd/airsim-* 2>/dev/null || true
 chmod 755 /usr/lib/airsim/call-forward /etc/init.d/airsim-call-forward 2>/dev/null || true
 
 # --- 开机自启 ---
-# 蓝牙默认可见：main.conf 里两个超时置 0，否则 180 秒后手机就搜不到了。
-# 只在文件存在时改，别的机型没蓝牙配置也不报错。
-if [ -f /etc/bluetooth/main.conf ]; then
-	sed -i 's/^#DiscoverableTimeout = 0/DiscoverableTimeout = 0/' /etc/bluetooth/main.conf 2>/dev/null || true
-	sed -i 's/^#PairableTimeout = 0/PairableTimeout = 0/' /etc/bluetooth/main.conf 2>/dev/null || true
-
-fi
 /etc/init.d/airsim-call-forward enable >/dev/null 2>&1 || true
 # 短信池路径对齐：厂商池在 /etc/mu300/sms，上游 agent 写死读 /etc/mu300/sms-pool/msg，
 # 不接上的话 agent 一直报「native SMS inbox unavailable」，手机端读不到短信。
 /etc/init.d/airsim-sms-pool-link enable >/dev/null 2>&1 || true
 /etc/init.d/airsim-sms-pool-link start >/dev/null 2>&1 || true
-
-# 蓝牙开机恢复：开关只在 rpcd 里被调用，重启后没人拉起 → hci0 一直不存在、页面显示「未挂载」。
-# 这个脚本按 /etc/config/f50-bt 的 enabled 在开机时补这一脚；值为 0 时什么都不做。
-/etc/init.d/airsim-bt-boot enable >/dev/null 2>&1 || true
-
-# 蓝牙页只在真装了蓝牙栈的机器上露头：btattach 与 bluetoothd 都在才算有。
-# 没装的话把菜单、视图、acl 一起撤掉 —— 页面列表里根本不出现「蓝牙」这一项。
-# 菜单项本身依赖 luci-app-airsim-bt 这个 acl：acl 一撤，菜单和 tab 就自动不出现，
-# 所以这里只需要撤 acl 和视图，不用去改菜单文件。
-if ! command -v btattach >/dev/null 2>&1 || ! command -v bluetoothd >/dev/null 2>&1; then
-	rm -f /usr/share/rpcd/acl.d/luci-app-airsim-bt.json
-	rm -f /www/luci-static/resources/view/airsim/bluetooth.js
-fi
 
 # 音频保留页抢占重试（独立 rc 脚本，不覆盖上游的 airsim-audio-reserve）。
 # kano 那套 6.18 内核关了 COMPACTION / CONTIG_ALLOC，audio_reserve 只会「一次性」抢页，

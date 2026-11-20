@@ -1,8 +1,8 @@
 #!/bin/sh
-# AirSIM for F50 —— 配件包"检查更新"的唯一实现（音频、蓝牙共用）
+# AirSIM for F50 —— 配件包"检查更新"的唯一实现（音频）
 #
 # 用法：airsim-opt-latest <前缀> [force]
-#   <前缀>  audio-opt | bt-opt
+#   <前缀>  audio-opt
 #   force   忽略 6 小时缓存，强制联网查一次
 # 输出（KEY=value，一行一个，方便 rpcd 用 jshn 转 JSON，也方便人直接看）：
 #   ok=1|0   tag=…  ver=1.0.4  file=…  checked_at=<epoch>  cooldown=0|1  err=…

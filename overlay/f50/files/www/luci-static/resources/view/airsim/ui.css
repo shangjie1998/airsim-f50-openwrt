@@ -136,7 +136,7 @@ body.as-menu-on footer{display:none!important}
 .as-layout{display:grid;gap:var(--as-gap);align-items:start;
  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--as-card-min)),1fr))}
 .as-layout>*{margin:0;width:auto}
-/* 空容器（比如蓝牙页那个等到扫描才填提示的 pending 盒子）不要占格子，否则会多出一条 18px 缝 */
+/* 空容器（比如等到探测结果才填提示的 pending 盒子）不要占格子，否则会多出一条 18px 缝 */
 .as-layout>*:empty{display:none}
 .as-wide{grid-column:1/-1}
 /* 整页只有一张卡时直接占满 */

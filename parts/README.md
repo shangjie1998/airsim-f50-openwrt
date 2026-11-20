@@ -5,7 +5,6 @@
 | 目录 | 是什么 | 产物 |
 |---|---|---|
 | `audio/` | 语音驱动模块：要编哪 25 个、怎么编、按内核分目录落 payload | `airsim-f50-audio-opt-<ver>-k<KREL>[+…].tar.gz` |
-| `bluetooth/` | 展锐 WCN 蓝牙的启用件（`payload/root/` 被 `.gitignore` 挡着，需现生成） | `airsim-f50-bt-opt-<ver>-k<KREL>.tar.gz` |
 
 ## audio/ 里有什么
 

@@ -13,11 +13,8 @@ var updatePolicy = rpc.declare({ object: 'airsim', method: 'updates_policy', par
 var installUpdate = rpc.declare({ object: 'airsim', method: 'update_install', params: ['tag'], expect: {}, reject: true, nobatch: true });
 var backupMake = rpc.declare({ object: 'airsim-backup', method: 'make', expect: {}, reject: true, nobatch: true });
 var backupRestore = rpc.declare({ object: 'airsim-backup', method: 'restore', params: ['payload'], expect: {}, reject: true, nobatch: true });
-var btProbe = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_probe', expect: {}, reject: true });
-var btInstall = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_install', expect: {}, reject: true, nobatch: true });
 var audioProbe = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_probe', expect: {}, reject: true });
 var audioInstall = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_install', expect: {}, reject: true, nobatch: true });
-var btLatest = rpc.declare({ object: 'airsim-bt', method: 'bt_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
 var audioLatest = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
 var flowCheck = rpc.declare({ object: 'airsim-net', method: 'flowfix_check', expect: {}, reject: true, nobatch: true });
 var flowFix = rpc.declare({ object: 'airsim-net', method: 'flowfix_fix', expect: {}, reject: true, nobatch: true });
@@ -302,70 +299,6 @@ return view.extend({
 
   /* 检查更新小部件在 ui.js（ui.latestChecker / ui.stampEpoch），两个页面共用一套。 */
 
-  /* ---------------- 可选配件：蓝牙 ---------------- */
-  var optNote = noticeBox();
-  var optChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '检查中');
-  var optMsg = E('p', { 'class': 'as-caption' }, '正在问本机装没装。');
-  var optBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装蓝牙');
-  var optBusy = false;
-  var btLc = ui.latestChecker({ opt: 'bt-opt', current: '', installLabel: '重新安装蓝牙', check: btLatest });
-
-  function syncOpt(info) {
-   info = info || {};
-   var installed = info.installed === true, busy = info.busy === true;
-   var ready = info.ready === true;
-   var missing = (info.missing || '').replace(/^\s+|\s+$/g, '');
-   var kernelOk = info.kernel_ok === true;
-   optBusy = busy;
-   btLc.setCurrent(info.ver || (info.version || '').replace(/^bt-opt-v/, ''));
-   /* 四态：能扫了绿；装了一部分但适配器没出来红；压根没装中性；内核不对红。
-    * 装了多少件不算数，能扫才算数 —— 之前只看文件在不在，页面说已安装，
-    * 点扫描报 -32002，就是这里骗了人。 */
-   optChip.textContent = busy ? '正在装' : (ready ? '已装齐' : (installed ? '缺件' : (kernelOk ? '未安装' : '内核不匹配')));
-   optChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (ready ? 'as-pill-green' : (installed ? 'as-pill-red' : (kernelOk ? 'as-pill-neutral' : 'as-pill-red'))));
-   optBtn.textContent = ready ? '重新安装蓝牙' : (installed ? '补齐缺件' : '安装蓝牙');
-
-   if (busy) {
-    optBtn.disabled = true;
-    optMsg.textContent = info.message || '正在装，别断电。';
-    return;
-   }
-   optBtn.disabled = !kernelOk;
-   if (!kernelOk) {
-    optMsg.textContent = '本机内核 ' + (info.kernel || '未知') + '，现有配件包只对 ' + (info.want_kernel || '—') + ' 出过。驱动模块必须跟内核一致，对不上装不了；等这个内核的包出来，或者把系统切到上面列出的内核。';
-   }
-   else if (info.state === 'done') optMsg.textContent = info.message || '装好了。';
-   else if (info.state === 'failed') {
-    optMsg.textContent = info.message || '这次没成。';
-    setNotice(optNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
-   }
-   else if (ready) optMsg.textContent = '蓝牙那套齐了，适配器也在，能扫能配。';
-   else if (installed) optMsg.textContent = (missing ? ('装了一部分，缺 ' + missing + '。点「补齐缺件」重装一遍。') : '装了配件，但适配器没出来。点「补齐缺件」重装一遍，还不行就看下面的输出。');
-   else optMsg.textContent = '主包不带蓝牙驱动与 bluez。需要时从这里装回来：约 1.7MB，从项目 Release（' + (info.version || 'bt-opt') + '）拉，装前核对 sha256。';
-   if (optBtn.disabled) optBtn.title = '内核或控制器条件不满足';
-   else optBtn.title = '从 GitHub 拉可选件并安装';
-  }
-
-  optBtn.addEventListener('click', function() {
-   if (optBusy) return;
-   optBtn.disabled = true;
-   optMsg.textContent = '正在启动安装……';
-   btInstall().then(function(res) {
-    res = res || {};
-    if (res.ok !== true) {
-     optBtn.disabled = false;
-     setNotice(optNote, '没启动', res.error || '启动失败', 'error');
-     return;
-    }
-    setNotice(optNote, '开始装了', '下载 → 校验 → 解压 → 装驱动，几十秒。页面会自动刷新进度。', 'info');
-    optMsg.textContent = '正在下载……';
-   }).catch(function(e) {
-    optBtn.disabled = false;
-    setNotice(optNote, '没启动', String(e && e.message || e), 'error');
-   });
-  });
-
-
   /* ---------------- 可选配件：6.18 音频模块 ---------------- */
   var audNote = noticeBox();
   var audChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '检查中');
@@ -444,18 +377,7 @@ return view.extend({
 
   var optCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '可选配件'),
-   E('p', { 'class': 'as-copy' }, '这两样都不在主包里：刷机、升级之后如果对应页面没了或者放不出声，就是这一套缺了，从这里补回来。'),
-   E('div', { 'class': 'as-opt' }, [
-    E('div', { 'class': 'as-card-head' }, [
-     E('h4', {}, '蓝牙配件包'),
-     E('div', { 'class': 'as-head-meta' }, [btLc.ver, btLc.btn])
-    ]),
-    btLc.mini,
-    E('div', { 'class': 'as-row' }, [E('dt', {}, '状态'), E('dd', {}, [optChip])]),
-    optMsg,
-    E('div', { 'class': 'as-buttons' }, [optBtn]),
-    optNote
-   ]),
+   E('p', { 'class': 'as-copy' }, '音频模块不在主包里：刷机、升级之后如果放不出声，就是这一套缺了，从这里补回来。'),
    E('div', { 'class': 'as-opt' }, [
     E('div', { 'class': 'as-card-head' }, [
      E('h4', {}, '音频模块（可选配件）'),
@@ -467,7 +389,7 @@ return view.extend({
     E('div', { 'class': 'as-buttons' }, [audBtn]),
     audNote
    ]),
-   E('p', { 'class': 'as-caption' }, '只装可选件本身：蓝牙不动开关状态（/etc/config/f50-bt）和已配对记录；音频只补 6.18.60 的 .ko，不动 DSP 以外的程序。两者都走固定 tag，内核对不上会直接拒绝，不会装半截。')
+   E('p', { 'class': 'as-caption' }, '音频只补对应内核的 .ko，不动 DSP 以外的程序；走固定 tag，内核对不上会直接拒绝，不会装半截。')
   ]);
 
   /* 5.4 专用：连热点的客户端"无互联网"体检与修复（脚本 /usr/libexec/airsim-flowfix） */
@@ -520,12 +442,10 @@ return view.extend({
    ])
   ]);
 
-  btProbe().then(syncOpt).catch(function() { optMsg.textContent = '这台机器没有安装器接口（主包版本较旧）。'; });
   audioProbe().then(syncAud).catch(function() { audMsg.textContent = '这台机器没有音频可选件接口（主包版本较旧）。'; });
 
   poll.add(function() {
-   var jobs = [btProbe().then(syncOpt).catch(function() { return null; }),
-               audioProbe().then(syncAud).catch(function() { return null; })];
+   var jobs = [audioProbe().then(syncAud).catch(function() { return null; })];
    if (pending || busyFlag) return Promise.all(jobs);
    jobs.push(getStatus().catch(function() { return {}; }).then(function(r) { state = r[0] || state; }));
    jobs.push(updateStatus().catch(function() { return {}; }).then(function(r) { showUpdateStatus(r[1] || {}); }));

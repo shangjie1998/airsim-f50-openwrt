@@ -14,7 +14,7 @@ tags: [luci, openwrt, javascript, 页面链接, 路由, 静默失败]
 链接 base 交给 LuCI 自己算：`var base = L.url('admin/services/airsim');` 再拼 `base + '/' + pageId`。`L.url()` 知道 `/cgi-bin/luci` 这层脚本前缀和实际脚本名，两种地址下结果都一样。
 
 ## 踩过的坑
-用 `window.location.pathname` 去掉最后一段来当 base：具体页 `/admin/services/airsim/overview` 上正确，但落到组根页 `/admin/services/airsim` 时截出的是 `/admin/services/`，于是所有菜单项变成 `/admin/services/bluetooth`、`/admin/services/sms`，页面报 `No page is registered at ...`。从侧栏进插件、或直接在组根地址刷新，就会触发，看起来像"插件没装好"。
+用 `window.location.pathname` 去掉最后一段来当 base：具体页 `/admin/services/airsim/overview` 上正确，但落到组根页 `/admin/services/airsim` 时截出的是 `/admin/services/`，于是所有菜单项变成 `/admin/services/net`、`/admin/services/sms`，页面报 `No page is registered at ...`。从侧栏进插件、或直接在组根地址刷新，就会触发，看起来像"插件没装好"。
 确认做对的办法：读出各菜单项的 href，应同时包含脚本前缀和完整页名路径；再在组根页与某个具体页各点一次菜单项。
 
 ## 可复用的产物或模板

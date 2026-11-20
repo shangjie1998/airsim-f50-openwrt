@@ -73,7 +73,7 @@ return view.extend({
     ]),
     E('section', { 'class': 'as-card' }, [
      E('h3', {}, '关于'),
-     E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, 'AirSIM for F50 是装在中兴 UMS9620（展锐 marlin3，aarch64）这台随身 Wi-Fi 上的自编译插件。它把这台机器本来散在系统各处的东西收到一处：电话网关与客户端配对、上网通道切换、音频、蓝牙、短信，再加一个刷机后自检。界面层是一套统一的元件库，深浅两套玻璃材质跟着系统走。'),
+     E('p', { 'class': 'as-copy', style: 'margin-top:8px' }, 'AirSIM for F50 是装在中兴 UMS9620（展锐 marlin3，aarch64）这台随身 Wi-Fi 上的自编译插件。它把这台机器本来散在系统各处的东西收到一处：电话网关与客户端配对、上网通道切换、音频、短信，再加一个刷机后自检。界面层是一套统一的元件库，深浅两套玻璃材质跟着系统走。'),
      E('dl', { 'style': 'margin-top:10px' }, [
       E('div', { 'class': 'as-row' }, [E('dt', {}, '插件版本'), E('dd', {}, version)]),
       E('div', { 'class': 'as-row' }, [E('dt', {}, '产品'), E('dd', {}, 'AirSIM for F50')]),

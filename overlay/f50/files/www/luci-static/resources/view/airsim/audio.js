@@ -123,7 +123,7 @@ function optCard(lc) {
 /* ---------------- 刷机后自检 ---------------- */
 function selfCheckCard() {
  var chip = E('span', { 'class': 'as-pill as-pill-neutral' }, '没查');
- var msg = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '刷机、升级、换内核之后点一次：内核、模块树、DSP 内存预留、开机脚本、身份元数据、蓝牙三件、hci0、主服务，八项一起看。');
+ var msg = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '刷机、升级、换内核之后点一次：内核、模块树、DSP 内存预留、开机脚本、身份元数据、主服务，六项一起看。');
  var list = E('ul', { 'class': 'as-instructions' }, []);
  var runBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '运行自检');
  var fixBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '补齐能补的');
@@ -147,7 +147,7 @@ function selfCheckCard() {
   });
   runBtn.disabled = false;
   fixBtn.disabled = (res.fixable_count || 0) < 1;
-  fixBtn.title = fixBtn.disabled ? '没有能就地补的缺件（缺的多半属配件包，要装对应包）' : '补开机预留脚本、身份元数据、蓝牙三件（只用本机已有副本）';
+  fixBtn.title = fixBtn.disabled ? '没有能就地补的缺件（缺的多半属配件包，要装对应包）' : '补开机预留脚本、身份元数据（只用本机已有副本）';
  }
 
  function run(fix) {

@@ -14,7 +14,6 @@
 | 插件安装包 | [Release `v0.1.0.31-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.31-r23-any) · 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
 | 音频模块包 | `audio-opt 1.0.4`（带 `6.18.60` 与 `7.3.1` 两套）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
 | 接手说明 | [docs/接手说明.md](docs/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
-| 蓝牙（选装） | [docs/蓝牙.md](docs/蓝牙.md) —— WCN 蓝牙启用脚本 + 总开关口子，**不影响通话** |
 | 联网（Wi-Fi） | [docs/联网.md](docs/联网.md) —— 流量/Wi-Fi/热点三模式互斥 + Wi-Fi 搜索连接删除，**USB 口地址不变** |
 | 编译与复现 | [docs/音频/自编过程.md](docs/音频/自编过程.md) —— 自造 kit、四个编译坑 |
 | 与 M8 的差异 | [docs/跨机型/F50-vs-M8.md](docs/跨机型/F50-vs-M8.md) |
@@ -49,10 +48,10 @@
 | `overlay/f50/` | 本适配的全部个性化改动：`strings.tsv`（文案替换规则）、`files/`（LuCI 页面与 acl 整文件）、`apply.py`、`build.sh` |
 | `upstream/r23/` | 上游来源、校验锚点、r22→r23 差异文件清单 |
 | `build/` | **造包的地方**：`make-package.sh`、`bump-version.sh`、包内 `pkg/install.sh`、`tools/` |
-| `parts/audio/`、`parts/bluetooth/` | 可选配件的源码与 payload（`audio` 按内核分 `payload/<KREL>/`） |
+| `parts/audio/` | 可选配件的源码与 payload（按内核分 `payload/<KREL>/`） |
 | `ops/` | 设备上一次性的运维脚本（装音频、切内核、通话监控、历史遗留） |
 | `archive/5.4-pkg/` | **5.4 覆盖包归档，不删只挪**，主页与脚本都不再引用 |
-| `docs/` | 按**主题**分类：`内核矩阵` / `联网` / `音频/` / `蓝牙` / `打包发布` / `设计/` / `历史/` / `经验库/` |
+| `docs/` | 按**主题**分类：`内核矩阵` / `联网` / `音频/` / `打包发布` / `设计/` / `历史/` / `经验库/` |
 | `dist/` | 只放**当前这一版**产物；历史包在 `archive/` 与远端 Release |
 | `kbuild/` | 自编内核模块用的 kit 与源码树（`.gitignore`，不入库） |
 | `archive/` | 历史包与旧整包，只留档不参与构建 |
@@ -135,7 +134,6 @@ iPhone 端 AirSIM 添加设备时选 **`AirSIM-F50-…`**。
 | 来电转发 | 来电转发页 + `airsim-call-forward` 自启 | 来电/接通/挂断/漏接推 Webhook，6 个预设（Bark / PushPlus / ServerChan / Telegram / 企微 / 钉钉） |
 | 配对管理 | 概览页 | 列出已配对客户端、可单独删除（`airsim-pair`，走 `vowlan-clients.json`） |
 | 号码补 `+86` | 概览页 / `/api/status` | `AT+CNUM` 出来的 `8613…`、`0086…` 统一成 `+8613…`（E.164），走 `overlay/f50/patches/` 补丁层，`src/` 保持上游原样 |
-| 蓝牙开关 | 外观与设置页 | 只管开关，关了重启仍为关（`/usr/sbin/f50-bt-switch.sh`） |
 
 ### 双卡逻辑：代码全留，F50 上隐藏
 

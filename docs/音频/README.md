@@ -53,7 +53,7 @@ cat /proc/asound/cards                             # 期望：Loopback + sprdpho
 
 ## 六、独立页「音频」（2026-11-11）
 
-菜单 `admin/services/airsim/audio`，页面文件 `overlay/f50/files/www/luci-static/resources/view/airsim/audio.js`，跟「蓝牙」页同构，三件事放一起：
+菜单 `admin/services/airsim/audio`，页面文件 `overlay/f50/files/www/luci-static/resources/view/airsim/audio.js`，三件事放一起：
 
 | 卡片 | 内容 | 靠什么接口 |
 |---|---|---|

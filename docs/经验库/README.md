@@ -37,24 +37,11 @@
 |---|---|
 | `automate-oneshot-secret-display-capture.md` |  |
 
-## bluez
-
-| 文件 | 一句话 |
-|---|---|
-| `bluez-display-name-survives-service-restart.md` |  |
-| `bluez-keep-discoverable-pairable-on-openwrt.md` |  |
-
 ## browser
 
 | 文件 | 一句话 |
 |---|---|
 | `browser-automation-typed-value-scramble.md` |  |
-
-## bt
-
-| 文件 | 一句话 |
-|---|---|
-| `bt-unique-display-name-from-controller-address.md` |  |
 
 ## busybox
 
@@ -189,7 +176,6 @@
 | 文件 | 一句话 |
 |---|---|
 | `luci-card-layout-masonry-columns.md` |  |
-| `luci-field-missing-source-fallback-at.md` | 硬件真状态 |
 | `luci-fork-page-style-ownership-check.md` |  |
 | `luci-overlay-modal-style-outside-root-scope.md` |  |
 | `luci-rpcd-acl-object-method-map.md` |  |
@@ -381,7 +367,6 @@
 
 | 文件 | 一句话 |
 |---|---|
-| `unisoc-bt-enable-openwrt.md` |  |
 | `unisoc-dual-sim-incoming-call-slot-localization.md` |  |
 
 ## upstream

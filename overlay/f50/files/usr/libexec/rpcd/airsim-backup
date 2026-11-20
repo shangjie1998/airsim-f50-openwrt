@@ -11,7 +11,6 @@
 
 DATA_DIR=/mnt/mu300-disk/extra/airsim/data
 CONF_MAIN=/etc/config/airsim
-CONF_BT=/etc/config/f50-bt
 SERVICE=airsim
 FORMAT=airsim-f50-backup
 MAXSIZE=8388608
@@ -52,7 +51,6 @@ backup_make() {
 	mkdir -p "$work/backup/config" "$work/backup/data" 2>/dev/null || {
 		printf '%s\n' '{"ok":false,"error":"无法创建临时目录，检查 /tmp 空间"}'; return; }
 	[ -f "$CONF_MAIN" ] && cp -f "$CONF_MAIN" "$work/backup/config/airsim"
-	[ -f "$CONF_BT" ] && cp -f "$CONF_BT" "$work/backup/config/f50-bt"
 	if [ -d "$DATA_DIR" ]; then
 		cp -a "$DATA_DIR/." "$work/backup/data/" 2>/dev/null
 		# 日志与运行时锁不进备份：锁文件恢复回去会让服务以为还有人占着，起不来
@@ -118,7 +116,7 @@ backup_restore() {
 	fi
 	# 白名单：只放行本插件自己写出来的路径。注意必须同时放行根条目 ./ 和目录条目，
 	# 否则 tar 列表里的 ./config/ 会把合法备份也挡掉（这个坑踩过）。
-	if grep -Ev '^\./?$|^\./meta\.json$|^\./config/?$|^\./config/(airsim|f50-bt)$|^\./data/?$|^\./data/.+$' "$work/list" \
+	if grep -Ev '^\./?$|^\./meta\.json$|^\./config/?$|^\./config/airsim$|^\./data/?$|^\./data/.+$' "$work/list" \
 		| grep -q .; then
 		rm -rf "$work"
 		printf '%s\n' '{"ok":false,"error":"备份包内含不允许的路径，已拒绝导入"}'
@@ -163,13 +161,11 @@ backup_restore() {
 	keep=/tmp/airsim-before-restore-$(date +%Y%m%d-%H%M%S)
 	mkdir -p "$keep"
 	cp -f "$CONF_MAIN" "$keep/" 2>/dev/null
-	cp -f "$CONF_BT" "$keep/" 2>/dev/null
 	[ -d "$DATA_DIR" ] && cp -a "$DATA_DIR" "$keep/" 2>/dev/null
 	running=0
 	service_running && running=1
 	if [ "$running" -eq 1 ]; then /etc/init.d/$SERVICE stop >/dev/null 2>&1; fi
 	[ -f "$work/x/config/airsim" ] && cp -f "$work/x/config/airsim" "$CONF_MAIN"
-	[ -f "$work/x/config/f50-bt" ] && cp -f "$work/x/config/f50-bt" "$CONF_BT"
 	if [ -d "$work/x/data" ] && [ -n "$(ls -A "$work/x/data" 2>/dev/null)" ]; then
 		mkdir -p "$DATA_DIR"
 		cp -a "$work/x/data/." "$DATA_DIR/" 2>/dev/null

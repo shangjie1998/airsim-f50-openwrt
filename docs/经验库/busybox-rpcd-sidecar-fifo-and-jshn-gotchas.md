@@ -8,7 +8,7 @@ metadata:
  tags: [openwrt, rpcd, ubus, busybox, fifo, jshn, python3, 静默失败, 超时]
 ---
 ## 适用场景
-设备上没有 dbus 客户端、也没有 python 的 dbus 绑定，需要让 ubus/rpcd 拿到一个常驻外部进程（如 `bluetoothctl` 的 pty 会话）产出的实时数据，并把命令下给它。
+设备上没有 dbus 客户端、也没有 python 的 dbus 绑定，需要让 ubus/rpcd 拿到一个常驻外部进程（如一个常驻 CLI 的 pty 会话）产出的实时数据，并把命令下给它。
 
 ## 关键做法
 - 后台协进程由 rpcd 按需拉起：脚本自带 shebang、chmod 755，直接 `"$SCRIPT" >/dev/null 2>&1 &` 后台跑，再 `sleep 1` 用 `pgrep -f '[脚]本名'` 确认拉起。不要依赖 start-stop-daemon。

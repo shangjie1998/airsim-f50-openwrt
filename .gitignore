@@ -2,8 +2,6 @@ src/plugin/out/
 *.log
 .DS_Store
 out/
-out/
-parts/bluetooth/payload/root/
 
 # 历史产物只留本地与远端 Release，不入库（省仓库体积）
 archive/旧产物/*.tar.gz

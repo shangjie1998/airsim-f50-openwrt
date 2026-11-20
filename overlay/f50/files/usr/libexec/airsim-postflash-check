@@ -99,25 +99,7 @@ else
 	add '音频身份元数据' fail 1 "缺 $kf，工具会拒绝加载"
 fi
 
-# ---- 6. 蓝牙三件（属蓝牙配件包，不是主包）----
-miss=''
-[ -x /usr/sbin/f50-bt-switch.sh ] || miss="$miss f50-bt-switch.sh"
-[ -x /etc/init.d/sprdbluetooth ] || miss="$miss sprdbluetooth"
-[ -x /usr/sbin/sprd-bt-attach.sh ] || miss="$miss sprd-bt-attach.sh"
-if [ -z "$miss" ]; then
-	add '蓝牙支撑文件' ok 0 '三个文件都在'
-else
-	add '蓝牙支撑文件' fail 1 "缺：$miss（属蓝牙配件包）"
-fi
-
-# ---- 7. 蓝牙适配器 ----
-if [ -d /sys/class/bluetooth/hci0 ]; then
-	add '蓝牙适配器' ok 0 'hci0 在'
-else
-	add '蓝牙适配器' fail 0 'hci0 没起来（先补支撑文件，再开开关）'
-fi
-
-# ---- 8. 主服务与 ubus ----
+# ---- 6. 主服务与 ubus ----
 if pidof airsim-mu300d >/dev/null 2>&1; then
 	c=$(ubus list 2>/dev/null | grep -c '^airsim')
 	if [ "$c" -ge 7 ]; then
@@ -157,19 +139,6 @@ if [ "$FIX" = 1 ]; then
 			printf 'KEY=%s\nKREL=%s\nCONFIG=%s\nTAG=%s\n' "$key" "$KREL" "$cfg" "$tag" > "$kf"
 			fixed="$fixed 音频档位元数据"
 		fi
-	fi
-
-	# 3) 蓝牙三件：从上次保留的 rootfs 副本补（os 升级会留这一份）
-	if [ -d "$KEEP" ]; then
-		[ -x /usr/sbin/f50-bt-switch.sh ] || {
-			[ -f "$KEEP/usr/sbin/f50-bt-switch.sh" ] && cp -f "$KEEP/usr/sbin/f50-bt-switch.sh" /usr/sbin/f50-bt-switch.sh && chmod 755 /usr/sbin/f50-bt-switch.sh && fixed="$fixed f50-bt-switch.sh"
-		}
-		[ -x /usr/sbin/sprd-bt-attach.sh ] || {
-			[ -f "$KEEP/usr/sbin/sprd-bt-attach.sh" ] && cp -f "$KEEP/usr/sbin/sprd-bt-attach.sh" /usr/sbin/sprd-bt-attach.sh && chmod 755 /usr/sbin/sprd-bt-attach.sh && fixed="$fixed sprd-bt-attach.sh"
-		}
-		[ -x /etc/init.d/sprdbluetooth ] || {
-			[ -f "$KEEP/etc/init.d/sprdbluetooth" ] && cp -f "$KEEP/etc/init.d/sprdbluetooth" /etc/init.d/sprdbluetooth && chmod 755 /etc/init.d/sprdbluetooth && /etc/init.d/sprdbluetooth enable >/dev/null 2>&1 && fixed="$fixed sprdbluetooth"
-		}
 	fi
 fi
 

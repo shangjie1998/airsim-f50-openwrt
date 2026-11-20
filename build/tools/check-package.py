@@ -36,8 +36,6 @@ checked = []
 # 但测试、调试、一次性排查用的东西不进包，放 build/tools/ 或 build/tools/remote/。
 LIBEXEC_ALLOWED = {
     'airsim-audioopt-install',
-    'airsim-bt-agent',
-    'airsim-btopt-install',
     'airsim-flowfix',
     'airsim-net-probe',
     'airsim-opt-latest',
@@ -45,7 +43,6 @@ LIBEXEC_ALLOWED = {
     'rpcd/airsim',
     'rpcd/airsim-audio',
     'rpcd/airsim-backup',
-    'rpcd/airsim-bt',
     'rpcd/airsim-call',
     'rpcd/airsim-net',
     'rpcd/airsim-pair',
