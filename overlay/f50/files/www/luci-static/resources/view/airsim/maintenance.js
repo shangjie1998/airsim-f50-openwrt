@@ -13,9 +13,6 @@ var updatePolicy = rpc.declare({ object: 'airsim', method: 'updates_policy', par
 var installUpdate = rpc.declare({ object: 'airsim', method: 'update_install', params: ['tag'], expect: {}, reject: true, nobatch: true });
 var backupMake = rpc.declare({ object: 'airsim-backup', method: 'make', expect: {}, reject: true, nobatch: true });
 var backupRestore = rpc.declare({ object: 'airsim-backup', method: 'restore', params: ['payload'], expect: {}, reject: true, nobatch: true });
-var audioProbe = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_probe', expect: {}, reject: true });
-var audioInstall = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_install', expect: {}, reject: true, nobatch: true });
-var audioLatest = rpc.declare({ object: 'airsim-audio', method: 'audio_opt_latest', params: ['force'], expect: {}, reject: true, nobatch: true });
 var flowCheck = rpc.declare({ object: 'airsim-net', method: 'flowfix_check', expect: {}, reject: true, nobatch: true });
 var flowFix = rpc.declare({ object: 'airsim-net', method: 'flowfix_fix', expect: {}, reject: true, nobatch: true });
 
@@ -299,99 +296,6 @@ return view.extend({
 
   /* 检查更新小部件在 ui.js（ui.latestChecker / ui.stampEpoch），两个页面共用一套。 */
 
-  /* ---------------- 可选配件：6.18 音频模块 ---------------- */
-  var audNote = noticeBox();
-  var audChip = E('span', { 'class': 'as-pill as-pill-neutral' }, '检查中');
-  var audMsg = E('p', { 'class': 'as-caption' }, '正在问本机音频模块齐不齐。');
-  var audBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true }, '安装音频模块');
-  var audBusy = false;
-  var audLc = ui.latestChecker({ opt: 'audio-opt', current: '', installLabel: '安装音频模块', check: audioLatest });
-
-  function syncAud(info) {
-   info = info || {};
-   var installed = info.installed === true, busy = info.busy === true;
-   var ready = info.ready === true, toolsOk = info.tools_ok === true;
-   audLc.setCurrent(info.ver || (info.version || '').replace(/^audio-opt-v/, ''));
-   var matched = info.matched === true, kOk = info.kernel_ok === true, extOk = info.ext_present === true;
-   var kern = info.kernel || '未知', avail = String(info.available || '').replace(/\s+/g, ' ').trim();
-   audBusy = busy;
-   audChip.textContent = busy ? '正在装' : (ready ? '已装齐' : (installed ? '缺件' : (matched ? ((info.ko_count || 0) + '/' + (info.want_ko || 25)) : '内核不匹配')));
-   audChip.className = 'as-pill ' + (busy ? 'as-pill-neutral' : (ready ? 'as-pill-green' : (installed ? 'as-pill-red' : (matched ? 'as-pill-neutral' : 'as-pill-red'))));
-   audBtn.textContent = ready ? '重新安装音频模块' : (installed ? '补齐缺件' : '安装音频模块');
-
-   if (busy) {
-    audBtn.disabled = true;
-    audMsg.textContent = info.message || '正在装，别断电。';
-    return;
-   }
-   audBtn.disabled = !(extOk && (matched || kOk));
-   if (!extOk) {
-    audMsg.textContent = '本机没有厂商音频扩展目录（/mnt/mu300-disk/extra/airsim-audio），先有那一套才能补模块。';
-   }
-   else if (!matched) {
-    audMsg.textContent = '本机内核 ' + kern + '，扩展目录里现有的驱动是 ' + (avail ? avail.replace(/ /g, '、') : '（空）') + '，没有与当前内核 vermagic 对齐的一套：语音不会启动（服务、短信、来电通知照常）。等 ' + kern + ' 的驱动补进来会自动恢复，或者把系统切回上面任意一套内核。';
-   }
-   else if (info.state === 'failed') {
-    audMsg.textContent = info.message || '这次没成。';
-    setNotice(audNote, '安装没成', info.message || '看下面的输出再试一次。', 'error');
-   }
-   else if (ready) {
-    audMsg.textContent = kern + ' 的模块 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + ' 齐了' + (info.opt_version ? '（可选件 ' + info.opt_version + '）' : '') + '；页面出问题可以重装一遍，旧目录会先备份（只留最近两份）。';
-   }
-   else if (installed) {
-    var lack2 = [];
-    if (!toolsOk) lack2.push('工具链' + (info.tools_missing ? '（' + info.tools_missing + '）' : ''));
-    if (info.links_ok === false) lack2.push('/usr/bin 链接');
-    if (info.amixer_ok === false) lack2.push('amixer');
-    if ((info.ko_count || 0) < (info.want_ko || 0)) lack2.push('模块 ' + ((info.want_ko || 0) - (info.ko_count || 0)) + ' 个');
-    audMsg.textContent = '模块在但还不能用，缺 ' + (lack2.join('、') || '未知') + '。点「补齐缺件」会自动下载补上。';
-   }
-   else {
-    var lack = info.ko_missing || 0;
-    audMsg.textContent = kern + ' 的音频驱动缺 ' + lack + ' 个（现 ' + (info.ko_count || 0) + '/' + (info.want_ko || 25) + '）。从这里补：约 1MB，走固定 tag ' + (info.version || 'audio-opt') + '，装前核对 sha256。';
-   }
-   if (matched && extOk && info.dsp_present === false) audMsg.textContent += ' 注意：本机没有 mu300-audio-dsp，光补模块也放不出声。';
-   audBtn.title = audBtn.disabled ? ('没有可用于 ' + kern + ' 的驱动包（可选件里是 ' + (info.opt_kernels || '—') + '）') : '从 GitHub 拉可选件并安装';
-  }
-
-  audBtn.addEventListener('click', function() {
-   if (audBusy) return;
-   audBtn.disabled = true;
-   audMsg.textContent = '正在启动安装……';
-   audioInstall().then(function(res) {
-    res = res || {};
-    if (res.ok !== true) {
-     audBtn.disabled = false;
-     setNotice(audNote, '没启动', res.error || '启动失败', 'error');
-     return;
-    }
-    setNotice(audNote, '开始装了', '下载 → 核 sha256 → 解包 → 放模块，几秒到几十秒。页面会自动刷新进度。', 'info');
-    audMsg.textContent = '正在下载……';
-   }).catch(function(e) {
-    audBtn.disabled = false;
-    setNotice(audNote, '没启动', String(e && e.message || e), 'error');
-   });
-  });
-
-  /* 刷机后自检挪到「音频」独立页（admin/services/airsim/audio）。 */
-
-  var optCard = E('section', { 'class': 'as-card' }, [
-   E('h3', {}, '可选配件'),
-   E('p', { 'class': 'as-copy' }, '音频模块不在主包里：刷机、升级之后如果放不出声，就是这一套缺了，从这里补回来。'),
-   E('div', { 'class': 'as-opt' }, [
-    E('div', { 'class': 'as-card-head' }, [
-     E('h4', {}, '音频模块（可选配件）'),
-     E('div', { 'class': 'as-head-meta' }, [audLc.ver, audLc.btn])
-    ]),
-    audLc.mini,
-    E('div', { 'class': 'as-row' }, [E('dt', {}, '状态'), E('dd', {}, [audChip])]),
-    audMsg,
-    E('div', { 'class': 'as-buttons' }, [audBtn]),
-    audNote
-   ]),
-   E('p', { 'class': 'as-caption' }, '音频只补对应内核的 .ko，不动 DSP 以外的程序；走固定 tag，内核对不上会直接拒绝，不会装半截。')
-  ]);
-
   /* 5.4 专用：连热点的客户端"无互联网"体检与修复（脚本 /usr/libexec/airsim-flowfix） */
   var flowOut = E('pre', { 'class': 'as-out' }, '还没体检。');
   var flowMsg = E('p', { 'class': 'as-caption' }, '只在 5.4 厂商内核上出现这个问题；6.18 / 7.3 上点了会提示不需要。');
@@ -442,10 +346,8 @@ return view.extend({
    ])
   ]);
 
-  audioProbe().then(syncAud).catch(function() { audMsg.textContent = '这台机器没有音频可选件接口（主包版本较旧）。'; });
-
   poll.add(function() {
-   var jobs = [audioProbe().then(syncAud).catch(function() { return null; })];
+   var jobs = [];
    if (pending || busyFlag) return Promise.all(jobs);
    jobs.push(getStatus().catch(function() { return {}; }).then(function(r) { state = r[0] || state; }));
    jobs.push(updateStatus().catch(function() { return {}; }).then(function(r) { showUpdateStatus(r[1] || {}); }));
@@ -460,7 +362,7 @@ return view.extend({
     E('div', {}, [E('div', { 'class': 'as-eyebrow' }, 'AirSIM · 维护'), E('h2', {}, '备份、更新、诊断。'), E('p', {}, '折腾完想回退的时候，这里能救回来。')]),
     E('span', { 'class': 'as-version' }, 'v' + (state.version || '—'))
    ]),
-   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, optCard, flowCard, diagCard, versionCard]),
+   E('div', { 'class': 'as-layout' }, [backupCard, restoreCard, updateCard, flowCard, diagCard, versionCard]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 维护')
   ]);
  },

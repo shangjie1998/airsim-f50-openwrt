@@ -57,6 +57,13 @@ cp "$HERE/opt/install.sh" "$ROOT/install.sh"
 chmod 755 "$ROOT/install.sh"
 echo "$VER" > "$ROOT/VERSION"
 
+# 开机预留脚本（S10）随包自带：解到 integration/，install.sh 会同步到扩展目录并落到 /etc/init.d/
+if [ -d "$HERE/opt/integration" ]; then
+	mkdir -p "$ROOT/integration"
+	cp -f "$HERE/opt/integration/"* "$ROOT/integration/"
+	chmod 755 "$ROOT/integration/"*
+fi
+
 # 工具链（bin/）不进包：那五个可执行由厂商音频扩展提供（$EXT/bin），
 # install.sh 里按「外部依赖」判断——有就用、没有就停下来说清楚，不在这里复制。
 # 公开 Release 里也没有这套（上游 release 只有面板 mu300-extra-panel 与内核包），
@@ -72,6 +79,7 @@ fi
 	echo "arch: aarch64"
 	echo "kernels: $(printf '%s ' $KRELS)"
 	echo "depends: audio-extra(/mnt/mu300-disk/extra/airsim-audio) tools: mu300-audio-dsp mu300-voice mu300-hfp ctlset pcmhost"
+	echo "integration: airsim-audio-reserve (S10 开机预留)"
 	for k in $KRELS; do
 		n=$(ls "$PAY/$k"/*.ko 2>/dev/null | wc -l | tr -d ' ')
 		echo "kernel[$(printf '%s' $k)]: $n modules, vermagic=$(vermagic_of "$PAY/$k/audio_reserve.ko")"

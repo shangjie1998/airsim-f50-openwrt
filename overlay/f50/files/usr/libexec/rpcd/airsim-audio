@@ -12,8 +12,8 @@
 
 . /usr/share/libubox/jshn.sh
 
-TAG=audio-opt-v1.0.4
-FILE=airsim-f50-audio-opt-1.0.4-k6.18.60+7.3.1.tar.gz
+TAG=audio-opt-v1.0.5
+FILE=airsim-f50-audio-opt-1.0.5-k6.18.60+7.3.1.tar.gz
 OPT_KERNELS="6.18.60 7.3.1"
 EXT=/mnt/mu300-disk/extra/airsim-audio
 DIR=/tmp/airsim-audioopt
@@ -21,6 +21,17 @@ RUN=/usr/libexec/airsim-audioopt-install
 BOOT=/mnt/mu300-disk/boot
 PKGDIR=/mnt/mu300-disk/pkg
 WANT_KO=25
+
+# 校验持久数据分区真挂上且可写，再自建音频扩展目录。
+# 不能裸 mkdir -p：分区没挂上时会在根 overlay 上建同名空目录，重启即丢还占 overlay 空间。
+ensure_ext() {
+	_disk=/mnt/mu300-disk
+	awk '$2 == "'"$_disk"'" { f=1 } END { exit f?0:1 }' /proc/mounts 2>/dev/null || return 1
+	[ -d "$_disk" ] || return 1
+	touch "$_disk/.airsim-write-test" 2>/dev/null || return 1
+	rm -f "$_disk/.airsim-write-test" 2>/dev/null || true
+	mkdir -p "$EXT"
+}
 
 # 版本比较：a 比 b 新返回 0（awk 退出码），否则 1
 ver_gt() {
@@ -246,10 +257,10 @@ aud_install() {
 			return 0
 			;;
 	esac
-	if [ ! -d "$EXT" ]; then
+	if ! ensure_ext; then
 		json_init
 		json_add_boolean ok 0
-		json_add_string error "音频扩展目录不在：$EXT"
+		json_add_string error "音频数据分区未挂载或不可写，无法创建 $EXT"
 		json_dump
 		return 0
 	fi

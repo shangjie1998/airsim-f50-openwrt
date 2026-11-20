@@ -7,8 +7,8 @@
 # 为什么走 api.github.com：这台设备上 github.com 不可达（curl 000 超时），
 # api.github.com 通，附件 API 配 Accept: application/octet-stream 能直接下二进制。
 set -eu
-TAG=${AIRSIM_OPT_TAG:-audio-opt-v1.0.4}
-FILE=${AIRSIM_OPT_FILE:-airsim-f50-audio-opt-1.0.4-k6.18.60+7.3.1.tar.gz}
+TAG=${AIRSIM_OPT_TAG:-audio-opt-v1.0.5}
+FILE=${AIRSIM_OPT_FILE:-airsim-f50-audio-opt-1.0.5-k6.18.60+7.3.1.tar.gz}
 API=https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/$TAG
 DIR=/tmp/airsim-audioopt
 MSG=$DIR/msg
@@ -20,12 +20,22 @@ mkdir -p "$DIR"
 say() { echo "$*" > "$MSG"; echo "$*" >&2; }
 die() { say "失败：$*"; exit 1; }
 
+# 校验持久数据分区真挂上且可写，再自建音频扩展目录；分区没挂上不裸建，避免落到根 overlay。
+ensure_ext() {
+	_disk=/mnt/mu300-disk
+	awk '$2 == "'"$_disk"'" { f=1 } END { exit f?0:1 }' /proc/mounts 2>/dev/null || return 1
+	[ -d "$_disk" ] || return 1
+	touch "$_disk/.airsim-write-test" 2>/dev/null || return 1
+	rm -f "$_disk/.airsim-write-test" 2>/dev/null || true
+	mkdir -p "$EXT"
+}
+
 krel=$(uname -r)
 case " $OPT_KERNELS " in
 	*" $krel "*) ;;
 	*) die "本机内核 $krel，音频可选件只给 $OPT_KERNELS 用（换到对应内核再装）" ;;
 esac
-[ -d "$EXT" ] || die "音频扩展目录不存在：$EXT"
+ensure_ext || die "音频数据分区 /mnt/mu300-disk 未挂载或不可写，无法创建 $EXT"
 command -v curl >/dev/null 2>&1 || die '本机没有 curl'
 
 say '正在读取 Release 附件'

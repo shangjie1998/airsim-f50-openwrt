@@ -8,7 +8,7 @@
 查什么（只查容易忘、且错了会让人白折腾的几项）：
   主包
     - rpcd/airsim-audio 的 TAG / FILE 版本 == parts/audio/AUDIO-OPT-VERSION
-    - audio.js / maintenance.js 里得有 ready 判断（防退回只认 installed 的旧版）
+    - audio.js 里得有 ready 判断（防退回只认 installed 的旧版）；音频判定已收口到音频页，维护页不再渲染音频卡
     - airsim-audioopt-install 的下载提示是 1MB 档（防退回 420KB 旧文案）
   配件包
     - VERSION == parts/audio/AUDIO-OPT-VERSION
@@ -79,7 +79,7 @@ def check_main(tf, names):
         else:
             checked.append(f'rpcd FILE = {AUDIO_VER}')
 
-    for js in ('view/airsim/audio.js', 'view/airsim/maintenance.js'):
+    for js in ('view/airsim/audio.js',):
         body = read_member(tf, js)
         if body is None:
             problems.append(f'主包里没有 {js}')

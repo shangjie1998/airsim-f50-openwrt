@@ -13,8 +13,8 @@
 只读操作，不改线上任何东西。
 
 用法：
-  python3 build/tools/check-release.py --tag audio-opt-v1.0.4 \\
-      dist/airsim-f50-audio-opt-1.0.4-k6.18.60+7.3.1.tar.gz \\
+  python3 build/tools/check-release.py --tag audio-opt-v1.0.5 \\
+      dist/airsim-f50-audio-opt-1.0.5-k6.18.60+7.3.1.tar.gz \\
       parts/audio/thirdparty/mu300-audio-5.4.tar.gz
 
   # 指定仓库 / token 文件
@@ -69,7 +69,7 @@ def sha256_of(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--tag', required=True, help='Release tag，例如 audio-opt-v1.0.4')
+    ap.add_argument('--tag', required=True, help='Release tag，例如 audio-opt-v1.0.5')
     ap.add_argument('--repo', default='shangjie1998/airsim-f50-openwrt')
     ap.add_argument('--token-file', default='~/Desktop/m8pat.txt')
     ap.add_argument('files', nargs='+', help='本地文件路径（可多个）')

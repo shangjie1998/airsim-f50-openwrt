@@ -50,12 +50,13 @@ function optCard(lc) {
   if (working) { chip.textContent = '安装中'; chip.className = 'as-pill as-pill-neutral'; }
   else if (ready) { chip.textContent = '已装齐'; chip.className = 'as-pill as-pill-green'; }
   else if (installed) { chip.textContent = '缺件'; chip.className = 'as-pill as-pill-red'; }
-  else { chip.textContent = '未安装'; chip.className = 'as-pill as-pill-red'; }
+  else { chip.textContent = '未安装'; chip.className = 'as-pill ' + (info.kernel_ok === false ? 'as-pill-red' : 'as-pill-neutral'); }
 
   rowKernel.textContent = (info.kernel || '—') + (info.vendor_kernel ? '（厂商内核）' : '');
   rowMode.textContent = info.vendor_kernel ? '厂商自带，不用装配件包'
-   : (info.matched ? '配件包里有这套（' + (info.match_dir || '') + '）'
-    : (info.available ? '本包支持 ' + info.available : '本包不支持这个内核'));
+   : (info.kernel_ok === false ? '本包不支持这个内核（覆盖：' + (info.opt_kernels || '—') + '）'
+    : (info.matched ? '配件包已装这套（' + (info.match_dir || '') + '）'
+     : '支持当前内核，尚未安装'));
   rowKo.textContent = info.vendor_kernel ? ('missing=' + (info.audio_missing || '0'))
    : ((info.ko_count || 0) + ' / ' + (info.want_ko || 0) + ' 件');
   rowOpt.textContent = (info.opt_version || '—') + (info.dsp_present ? '（DSP 在）' : '');

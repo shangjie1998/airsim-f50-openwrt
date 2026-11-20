@@ -24,12 +24,22 @@ MODS=$HERE/modules
 die() { echo "装音频模块: $*" >&2; exit 1; }
 say() { echo "装音频模块: $*"; }
 
+# 校验持久数据分区真挂上且可写，再自建音频扩展目录；分区没挂上不裸建，避免落到根 overlay。
+ensure_ext() {
+	_disk=/mnt/mu300-disk
+	awk '$2 == "'"$_disk"'" { f=1 } END { exit f?0:1 }' /proc/mounts 2>/dev/null || return 1
+	[ -d "$_disk" ] || return 1
+	touch "$_disk/.airsim-write-test" 2>/dev/null || return 1
+	rm -f "$_disk/.airsim-write-test" 2>/dev/null || true
+	mkdir -p "$EXT"
+}
+
 # ---- 工具链归档：本仓库 Release 里那份 mu300-audio-5.4.tar.gz ----
 # 五个工具（mu300-audio-dsp/mu300-voice/mu300-hfp/ctlset/pcmhost）的二进制，
 # 上游官方镜像出于授权考虑剔掉了（make-release.sh 里有审计闸），作者另存了一份
 # 带 NOTICE 与 sources.json 的归档。我们把它镜像到自己的 Release，安装时按需取，
 # 不依赖任何第三方仓库是否还在。
-TOOLS_TAG=${AIRSIM_AUDIO_TOOLS_TAG:-audio-opt-v1.0.4}
+TOOLS_TAG=${AIRSIM_AUDIO_TOOLS_TAG:-audio-opt-v1.0.5}
 TOOLS_FILE=${AIRSIM_AUDIO_TOOLS_FILE:-mu300-audio-5.4.tar.gz}
 TOOLS_SHA=${AIRSIM_AUDIO_TOOLS_SHA:-8e2eb2774c485a2df4e28e4e77592a457ffbb626f1dace3b6d1cdc338b786e2b}
 TOOLS_API=${AIRSIM_AUDIO_TOOLS_API:-https://api.github.com/repos/shangjie1998/airsim-f50-openwrt/releases/tags/$TOOLS_TAG}
@@ -91,7 +101,7 @@ if [ "${1:-}" = "--verify" ]; then
 	exit 0
 fi
 
-[ -d "$EXT" ] || die "音频扩展目录不存在：$EXT（需要先有厂商那份音频扩展）"
+ensure_ext || die "音频数据分区 /mnt/mu300-disk 未挂载或不可写，无法创建 $EXT"
 [ -d "$MODS" ] || die '包里没有 modules/ 目录'
 [ -n "$(pkg_krels)" ] || die '包里一个内核目录都没有'
 
@@ -163,7 +173,11 @@ fi
 
 # 开机预留脚本必须在位：缺了它 audio_reserve 那 2304 页物理内存抢不到，
 # 整条音频链（声卡 → prepare → agent）会静默不起来，而且只有重启能重来。
-# 脚本本体来自厂商音频扩展 integration/，我们负责落到 /etc/init.d/ 并挂到 S10。
+# 脚本随配件包自带在 integration/：先同步到扩展目录，再落到 /etc/init.d/ 挂到 S10。
+if [ -d "$HERE/integration" ]; then
+	mkdir -p "$EXT/integration"
+	cp -f "$HERE/integration/"* "$EXT/integration/" 2>/dev/null || true
+fi
 RES=$EXT/integration/airsim-audio-reserve
 if [ -f "$RES" ]; then
 	if cmp -s "$RES" /etc/init.d/airsim-audio-reserve 2>/dev/null; then
