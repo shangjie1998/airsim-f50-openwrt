@@ -23,6 +23,7 @@
 """
 import re
 import sys
+import hashlib
 import tarfile
 from pathlib import Path
 
@@ -135,6 +136,28 @@ def check_audio(tf, names):
             problems.append('install.sh 没有 tools_archive 函数（自动补齐丢了）')
         else:
             checked.append('install.sh 有 tools_archive')
+
+    # 随包 dsp 必须是本地权威版：哈希逐位一致，防 471 老版混回。
+    local_dsp = ROOT / 'parts/audio/opt/bin/mu300-audio-dsp'
+    dsp_bytes = None
+    for m in tf.getmembers():
+        base = m.name.rsplit('/', 1)[-1]
+        if base.startswith('._'):
+            continue
+        if m.name.endswith('/bin/mu300-audio-dsp') and m.isfile():
+            dsp_bytes = tf.extractfile(m).read()
+            break
+    if dsp_bytes is None:
+        problems.append('配件包里没有 bin/mu300-audio-dsp（随包脚本缺失）')
+    elif not local_dsp.is_file():
+        problems.append('本地 parts/audio/opt/bin/mu300-audio-dsp 不存在，无法核对')
+    else:
+        pkg_h = hashlib.sha256(dsp_bytes).hexdigest()
+        loc_h = hashlib.sha256(local_dsp.read_bytes()).hexdigest()
+        if pkg_h != loc_h:
+            problems.append(f'包内 dsp 哈希 {pkg_h[:12]} ≠ 本地权威版 {loc_h[:12]}（可能混进老版）')
+        else:
+            checked.append(f'bin/mu300-audio-dsp 哈希 = 权威版 {loc_h[:12]}')
 
     manifest = read_member(tf, 'MANIFEST')
     if manifest is None:

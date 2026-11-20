@@ -2,11 +2,14 @@
 # AirSIM for F50 —— 音频模块可选件安装脚本（支持一个包带多套内核）
 #
 # 干什么：把本包 modules/<KREL>/ 下的 .ko 放进厂商音频扩展目录
-#         /mnt/mu300-disk/extra/airsim-audio/modules/<KREL>/，
-#         并按需要给 mu300-audio-dsp 放行 CONFIG 逐位比对与 aplay 探针。
+#         /mnt/mu300-disk/extra/airsim-audio/modules/<KREL>/。
 #
-# 工具链（五个可执行）不属于本包：设备上缺了，就从本仓库同一 Release 里的
-# mu300-audio-5.4.tar.gz 归档补齐（sha256 固定），补齐后照常挂链接。
+# 工具链分两类：
+#   - mu300-audio-dsp 是自研 MIT 文本脚本，随本包自带（bin/），安装时逐位校验
+#     权威哈希后覆盖设备上任何老版；不再从 5.4 归档补，也不再现场打 awk 补丁。
+#   - mu300-voice / mu300-hfp / ctlset / pcmhost 是 AArch64 ELF，不属于本包：
+#     设备上缺了，就从本仓库同一 Release 里的 mu300-audio-5.4.tar.gz 归档补齐
+#     （sha256 固定），补齐后照常挂链接。
 # 装完会当场 mu300-audio-dsp load 一次；重启后 prepare 还会再走一遍，两条路都在。
 #
 # 不干什么：不碰内核、不碰 boot、不动分区。
@@ -20,6 +23,11 @@ EXT=${EXT:-/mnt/mu300-disk/extra/airsim-audio}
 DSP=$EXT/bin/mu300-audio-dsp
 KREL=$(uname -r)
 MODS=$HERE/modules
+
+# 随包自带的 dsp 脚本权威哈希：517 行修复版，真机 6.18.60 实证声卡注册、19/19。
+# 包内这份必须逐位等于它；装到设备前再核一次，防止 471 老版混回来。
+DSP_FILE=mu300-audio-dsp
+DSP_SHA=6e254b35da1fd42837972803cbba788aad003ab1487e19b6e9ed89d25de56052
 
 die() { echo "装音频模块: $*" >&2; exit 1; }
 say() { echo "装音频模块: $*"; }
@@ -105,18 +113,37 @@ ensure_ext || die "音频数据分区 /mnt/mu300-disk 未挂载或不可写，�
 [ -d "$MODS" ] || die '包里没有 modules/ 目录'
 [ -n "$(pkg_krels)" ] || die '包里一个内核目录都没有'
 
-# ---- 外部依赖：不属于本包，缺了先自己补，补不上才停 ----
-# 音频链分两半：模块（本包给，按内核一套）+ 工具链（五个可执行，从本仓库归档补）。
+# ---- dsp 脚本随包自带：权威哈希逐位校验，覆盖设备上任何老版 ----
+# 历史教训：471 老版脚本曾从 5.4 归档补进设备，CORE 模块只走 modprobe、缺 reserve
+# 分支，导致开机只起 10/19、声卡不注册。dsp 是我们自己的文本脚本，不该再寄生在
+# 含专有 ELF 的归档里；包内这份直接落地，哈希对不上就拒装。
+mkdir -p "$EXT/bin"
+if [ -f "$HERE/bin/$DSP_FILE" ]; then
+	got=$(sha256sum "$HERE/bin/$DSP_FILE" | awk '{print $1}')
+	[ "$got" = "$DSP_SHA" ] || die "包内 dsp 哈希不符（$got ≠ $DSP_SHA），拒绝安装"
+	cp -f "$HERE/bin/$DSP_FILE" "$EXT/bin/$DSP_FILE"
+	chmod 755 "$EXT/bin/$DSP_FILE"
+	say "mu300-audio-dsp：随包权威版已就位（$(wc -l < "$EXT/bin/$DSP_FILE" | tr -d ' ') 行，$got）"
+else
+	# 包内缺 dsp：只有设备上已有的一份哈希对得上时才放行，否则停下，不拿老版凑数。
+	if [ -x "$DSP" ] && [ "$(sha256sum "$DSP" | awk '{print $1}')" = "$DSP_SHA" ]; then
+		say "mu300-audio-dsp：包内未带，沿用设备上经哈希校验的版本"
+	else
+		die "包内没有 mu300-audio-dsp，设备上也没有经校验的版本（期望 $DSP_SHA）"
+	fi
+fi
+
+# ---- 四个 ELF 工具：不属于本包，缺了先从归档补，补不上才停 ----
 # 补齐失败时不继续装模块——装了主服务照样起不来，还会把「已装」状态搞脏。
-EXT_MISSING=''
-for t in mu300-audio-dsp mu300-voice mu300-hfp ctlset pcmhost; do
-	[ -x "$EXT/bin/$t" ] || EXT_MISSING="$EXT_MISSING $t"
+ELF_MISSING=''
+for t in mu300-voice mu300-hfp ctlset pcmhost; do
+	[ -x "$EXT/bin/$t" ] || ELF_MISSING="$ELF_MISSING $t"
 done
-if [ -n "$EXT_MISSING" ]; then
-	say "外部依赖缺：$EXT_MISSING —— 从本仓库工具归档补齐"
+if [ -n "$ELF_MISSING" ]; then
+	say "外部依赖缺：$ELF_MISSING —— 从本仓库工具归档补齐"
 	tools_archive || die '工具归档取不到，本次未做任何改动（检查设备网络：api.github.com 要通）'
 	FETCH_FAIL=''
-	for t in $EXT_MISSING; do
+	for t in $ELF_MISSING; do
 		mkdir -p "$EXT/bin"
 		if cp -f "$TOOLS_DIR/bin/$t" "$EXT/bin/$t" 2>/dev/null; then
 			chmod 755 "$EXT/bin/$t"
@@ -127,7 +154,7 @@ if [ -n "$EXT_MISSING" ]; then
 	done
 	[ -z "$FETCH_FAIL" ] || die "归档里没有这些工具：$FETCH_FAIL，本次未装模块"
 fi
-say "外部依赖齐：$EXT/bin 下五个工具都在"
+say "外部依赖齐：$EXT/bin 下 dsp + 四个 ELF 工具都在"
 
 matched=0
 for k in $(pkg_krels); do
@@ -191,22 +218,6 @@ if [ -f "$RES" ]; then
 	fi
 else
 	say '注意：音频扩展里没有 integration/airsim-audio-reserve，开机不会抢 DSP 内存（重启后音频起不来）'
-fi
-
-# mu300-audio-dsp 的 set_fits 拿 KERNEL 的 CONFIG 与设备 /proc/config.gz 逐位比。
-# 我们这棵树只差两个纯调试项，ABI 与 vermagic 都一致，所以改成「声明了 CONFIG 就放行」。
-# 另：dsp_alive 的 aplay 探针在真机上会 EIO（没通话时 DSP 不消费），不再整条判死。
-# 判断用「特征是否已打进去」，不看 .orig 在不在：从归档补回来的那份是原版，必须能再打一次。
-if [ -f "$DSP" ] && ! grep -q '\[ -n "\$_want" \] && true' "$DSP" 2>/dev/null; then
-	[ -f "$DSP.orig" ] || cp -f "$DSP" "$DSP.orig"
-	cat > /tmp/airsim-patch-dsp.awk <<'AWK'
-/config_sum\)/ && /_want/ { print "    [ -n \"$_want\" ] && true"; next }
-/aplay --fatal-errors -D "hw:\$card,0"/ && /return 1/ { sub(/return 1/, "true") }
-{ print }
-AWK
-	awk -f /tmp/airsim-patch-dsp.awk "$DSP.orig" > "$DSP.NEW" && mv "$DSP.NEW" "$DSP"
-	chmod 755 "$DSP"
-	say 'mu300-audio-dsp 已放行 CONFIG 比对与 aplay 探针（原件 = mu300-audio-dsp.orig）'
 fi
 
 # ---- 工具链挂到 PATH：纯判断 + 动作，不拷贝 ----

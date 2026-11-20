@@ -64,21 +64,29 @@ if [ -d "$HERE/opt/integration" ]; then
 	chmod 755 "$ROOT/integration/"*
 fi
 
-# 工具链（bin/）不进包：那五个可执行由厂商音频扩展提供（$EXT/bin），
-# install.sh 里按「外部依赖」判断——有就用、没有就停下来说清楚，不在这里复制。
-# 公开 Release 里也没有这套（上游 release 只有面板 mu300-extra-panel 与内核包），
-# 所以不把外部依赖混进发布物，避免以后再出现「包里带一半」的糊涂账。
-BIN_N=0
+# 随包自带的文本脚本（bin/）：目前只有 mu300-audio-dsp。它是自研 MIT 脚本，
+# 必须跟模块一起进包，安装时逐位校验权威哈希（见 opt/install.sh 的 DSP_SHA），
+# 不再从 5.4 工具归档补、也不在现场打补丁。四个 ELF 工具仍走外部归档，不在这里。
+DSP_FILE=mu300-audio-dsp
+DSP_SHA=6e254b35da1fd42837972803cbba788aad003ab1487e19b6e9ed89d25de56052
 if [ -d "$HERE/opt/bin" ] && [ -n "$(ls -A "$HERE/opt/bin" 2>/dev/null)" ]; then
-	echo "注意：opt/bin 里有文件，但工具链按外部依赖处理，不会打进包；如需随包带，先改这条设计再动" >&2
+	mkdir -p "$ROOT/bin"
+	cp -f "$HERE/opt/bin/"* "$ROOT/bin/"
+	chmod 755 "$ROOT/bin/"*
+else
+	die "opt/bin 里没有 mu300-audio-dsp：随包脚本缺失，不能打包"
 fi
+# 随包 dsp 打包前先核哈希，混进老版在这道就拦住。
+_dsp_sha=$(shasum -a 256 "$ROOT/bin/$DSP_FILE" | awk '{print $1}')
+[ "$_dsp_sha" = "$DSP_SHA" ] || die "包内 $DSP_FILE 哈希 $_dsp_sha ≠ 权威 $DSP_SHA，拒绝打包"
 
 {
 	echo "name: airsim-f50-audio-opt"
 	echo "version: $VER"
 	echo "arch: aarch64"
 	echo "kernels: $(printf '%s ' $KRELS)"
-	echo "depends: audio-extra(/mnt/mu300-disk/extra/airsim-audio) tools: mu300-audio-dsp mu300-voice mu300-hfp ctlset pcmhost"
+	echo "depends: audio-extra(/mnt/mu300-disk/extra/airsim-audio)"
+	echo "tools: bundled=mu300-audio-dsp (sha256 $DSP_SHA); external=mu300-voice mu300-hfp ctlset pcmhost (mu300-audio-5.4.tar.gz)"
 	echo "integration: airsim-audio-reserve (S10 开机预留)"
 	for k in $KRELS; do
 		n=$(ls "$PAY/$k"/*.ko 2>/dev/null | wc -l | tr -d ' ')
