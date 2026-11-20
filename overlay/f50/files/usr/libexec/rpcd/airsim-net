@@ -27,6 +27,32 @@ live_if()  { "$PROBE" -k live_if 2>/dev/null; }
 band()     { "$PROBE" -k band_label 2>/dev/null; }
 channels() { "$PROBE" -k channels 2>/dev/null; }
 
+# 无线口名不写死：同一颗射频在 AP 模式叫 wlan0，STA 模式常叫 phy0-sta0（由 netifd
+# 按 phy 派生）。这里把 probe 探到的三个名字汇总去重，防火墙区按这一整组收录，
+# 两种模式下规则都能命中；取不到才回退历史默认 wlan0。
+wifi_devs() {
+	local _a _s _l _d _out=''
+	_a=$("$PROBE" -k ap_if 2>/dev/null)
+	_s=$("$PROBE" -k sta_if 2>/dev/null)
+	_l=$("$PROBE" -k live_if 2>/dev/null)
+	[ -n "$_a" ] || _a=wlan0
+	for _d in "$_l" "$_s" "$_a"; do
+		[ -z "$_d" ] && continue
+		case " $_out " in *" $_d "*) ;; *) _out="$_out $_d" ;; esac
+	done
+	echo "$_out"
+}
+
+# 当前真正在跑的那个无线口：sysfs 探到的 live_if 优先，其次 STA 段配置名，再回退 AP 口。
+sta_live_if() {
+	local _d
+	_d=$(live_if)
+	[ -n "$_d" ] || _d=$("$PROBE" -k sta_if 2>/dev/null)
+	[ -n "$_d" ] || _d=$("$PROBE" -k ap_if 2>/dev/null)
+	[ -n "$_d" ] || _d=wlan0
+	echo "$_d"
+}
+
 # 只保留机器本来就在用的信道上的 AP：band=5g + channels=36 40 44 48 时，
 # 2.4G 与其它信道即使被驱动扫出来也不列 —— 连不上，列了就是骗人。
 allowed_chan() {
@@ -47,7 +73,8 @@ wifi_scan() {
 	# "Netlink error while awaiting scan results: No event received"。用 txpower 判一下，
 	# 睡着了就把无线栈顶起来再扫。
 	if [ "$("$PROBE" -k ap_disabled 2>/dev/null)" = 1 ]; then
-		tp=$(iwinfo wlan0 info 2>/dev/null | awk -F': ' '/Tx-Power/{gsub(/ dBm/,"",$2); print $2; exit}')
+		_w=$(sta_live_if)
+		tp=$(iwinfo "$_w" info 2>/dev/null | awk -F': ' '/Tx-Power/{gsub(/ dBm/,"",$2); print $2; exit}')
 		if [ -z "$tp" ] || [ "$tp" = 0 ]; then
 			wifi up >/dev/null 2>&1
 			sleep 3
@@ -348,7 +375,6 @@ net_probe() {
 # 开关关掉时 192.168.77.1 仍返 403 登录跳转，SSH 不断）。
 RULE_NAME=Allow-LuCI-wwan
 ZONE_NAME=wlanadmin
-ADMIN_DEV=wlan0
 ADMIN_PORTS='80 443'
 FW_INIT=/etc/init.d/firewall
 
@@ -366,10 +392,22 @@ admin_zone_sections() {
 
 admin_zone_ensure() {
 	_s=$(admin_zone_sections | head -1)
-	[ -n "$_s" ] && return 0
+	if [ -n "$_s" ]; then
+		# 接口名会随模式变（wlan0 / phy0-sta0）：把当前探到的无线口补齐进区，
+		# 先清旧 device list 再重列，避免反复 add_list 堆出重复项。
+		for _d in $(uci -q get firewall.$_s.device 2>/dev/null); do
+			uci -q delete_list "firewall.$_s.device=$_d" 2>/dev/null || true
+		done
+		for _d in $(wifi_devs); do
+			uci -q add_list "firewall.$_s.device=$_d" 2>/dev/null || true
+		done
+		return 0
+	fi
 	uci -q add firewall zone >/dev/null || return 1
 	uci -q set "firewall.@zone[-1].name=$ZONE_NAME"
-	uci -q set "firewall.@zone[-1].device=$ADMIN_DEV"
+	for _d in $(wifi_devs); do
+		uci -q add_list "firewall.@zone[-1].device=$_d" 2>/dev/null || true
+	done
 	uci -q set "firewall.@zone[-1].input=REJECT"
 	uci -q set "firewall.@zone[-1].output=ACCEPT"
 	uci -q set "firewall.@zone[-1].forward=REJECT"
@@ -387,7 +425,8 @@ admin_enabled() {
 admin_live() {
 	# 光"表里有这个 comment"不算数：早先它落在 output 链里，看着开了其实没开。
 	# 必须 input 链真的跳到无线口的区链，且区链里真的放行 80/443。
-	nft list chain inet fw4 input 2>/dev/null | grep -q "iifname \"$ADMIN_DEV\" jump input_$ZONE_NAME" || return 1
+	# 口名随模式变（wlan0 / phy0-sta0），这里只认 jump 到本区链，不绑死具体 iifname。
+	nft list chain inet fw4 input 2>/dev/null | grep -q "jump input_$ZONE_NAME" || return 1
 	nft list chain inet fw4 input_$ZONE_NAME 2>/dev/null | grep -q 'dport { 80, 443 }' || return 1
 	return 0
 }
@@ -397,7 +436,7 @@ admin_json() {
 	json_add_boolean ok 1
 	json_add_boolean enabled "$([ "$1" = 1 ] && echo 1 || echo 0)"
 	json_add_boolean live "$([ "$2" = 1 ] && echo 1 || echo 0)"
-	json_add_string device "$ADMIN_DEV"
+	json_add_string device "$(wifi_devs)"
 	json_add_string ports "$ADMIN_PORTS"
 	json_add_string message "$3"
 	json_dump
@@ -417,7 +456,6 @@ admin_status() {
 # 所以这里补两条常驻规则，和 LuCI 的开关解耦：关掉管理页访问不影响手机连接。
 DIRECT_RULE=Allow-AirSIM-direct
 MDNS_RULE=Allow-AirSIM-mdns
-DIRECT_DEV=$ADMIN_DEV
 DIRECT_DATA=/mnt/mu300-disk/extra/airsim/data
 DIRECT_HOST_FILE=/tmp/airsim-direct-host
 
@@ -505,19 +543,27 @@ direct_sync() {
 	return 0
 }
 
-# 手机在哪个网段，广告里的 host 就得是哪个：Wi-Fi 上行时 wlan0 有默认路由，
-# 用 STA 地址；热点 / 蜂窝模式用 LAN 桥地址。写进文件让 mu300d 采纳，
-# 再由它做运行期重绑（不重启进程，避免掐断正在进行的通话）。
-rebind_now() {
-	_sta=$(ip -4 -o addr show dev "$DIRECT_DEV" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
-	_host=''
-	if [ -n "$_sta" ] && ip route 2>/dev/null | grep -q "^default .*dev $DIRECT_DEV"; then
+# 现算当前该对外宣告的直连地址（只读，不写文件、不触发重绑）：
+# Wi-Fi 上行时当前 STA 口有默认路由，用它的地址；热点 / 蜂窝模式退回 LAN 桥地址。
+rebind_host() {
+	local _d _sta _host _ldev
+	_d=$(sta_live_if)
+	_sta=$(ip -4 -o addr show dev "$_d" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+	if [ -n "$_sta" ] && ip route 2>/dev/null | grep -q "^default .*dev $_d"; then
 		_host=$_sta
 	fi
 	if [ -z "$_host" ]; then
 		_ldev=$(json_str interface); _ldev=${_ldev:-br-lan}
 		_host=$(ip -4 -o addr show dev "$_ldev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
 	fi
+	echo "$_host"
+}
+
+# 手机在哪个网段，广告里的 host 就得是哪个：Wi-Fi 上行时 STA 口有默认路由，
+# 用 STA 地址；热点 / 蜂窝模式用 LAN 桥地址。写进文件让 mu300d 采纳，
+# 再由它做运行期重绑（不重启进程，避免掐断正在进行的通话）。
+rebind_now() {
+	_host=$(rebind_host)
 	[ -n "$_host" ] || { jerr '没有可用的直连地址，先确认网卡拿到 IP'; return 0; }
 	printf '%s\n' "$_host" > "$DIRECT_HOST_FILE"
 	direct_sync >/dev/null 2>&1 || true
@@ -533,12 +579,31 @@ rebind_now() {
 	json_dump
 }
 
+# 只读自检：直连端口 / mDNS 规则在不在防火墙表里、当前宣告哪个地址、走哪个无线口。
+# 给联网页一眼能看到，手机连不上时不用翻 nft。
+direct_status() {
+	local _live _host _file
+	_live=0; direct_live && _live=1
+	_file=$(cat "$DIRECT_HOST_FILE" 2>/dev/null)
+	_host=${_file:-$(rebind_host)}
+	json_init
+	json_add_boolean ok 1
+	json_add_boolean live "$_live"
+	json_add_string ports "$(direct_ports)"
+	json_add_string host "${_host:-}"
+	json_add_string devices "$(wifi_devs)"
+	json_add_string sta_if "$("$PROBE" -k sta_if 2>/dev/null)"
+	json_add_string ap_if "$("$PROBE" -k ap_if 2>/dev/null)"
+	json_add_string live_if "$(live_if)"
+	json_dump
+}
+
 # ---- 一屏所需数据：一次调用打包返回 ----
 # 页面首屏原来要发 4 个 ubus 请求（probe / status / wifi_saved / admin_status），
 # 每个请求都要过一次 rpcd、再起一个 shell，这颗 SoC 上光进程开销就 60 ms 一级；
 # 合成一个方法后串起来跑一次，联网页出卡片从 0.52 秒降到 0.3 秒上下。
 net_screen() {
-	local _f _p _s _w _a
+	local _f _p _s _w _a _d
 	# 探测只跑一次：拿 key=value 那份，自己拼页面要的几个字段，
 	# 同一份再喂给 airsim-netmode 查状态，省掉第二次探测（约 0.07 秒）
 	_f=$(mktemp /tmp/.airsim-screen.XXXXXX 2>/dev/null) || _f=/tmp/.airsim-screen.$$
@@ -554,9 +619,10 @@ net_screen() {
 	_s=$(AIR_SIM_PROBE_CACHE="$_f" "$NETMODE" status --json 2>/dev/null); [ -n "$_s" ] || _s='{"ok":false}'
 	_w=$(wifi_saved 2>/dev/null);     [ -n "$_w" ] || _w='{}'
 	_a=$(admin_status 2>/dev/null);   [ -n "$_a" ] || _a='{}'
+	_d=$(direct_status 2>/dev/null);  [ -n "$_d" ] || _d='{}'
 	rm -f "$_f"
 	[ -n "$_p" ] || _p='{"ok":false}'
-	printf '{"ok":true,"probe":%s,"status":%s,"saved":%s,"admin":%s}\n' "$_p" "$_s" "$_w" "$_a"
+	printf '{"ok":true,"probe":%s,"status":%s,"saved":%s,"admin":%s,"direct":%s}\n' "$_p" "$_s" "$_w" "$_a" "$_d"
 }
 
 admin_set() {

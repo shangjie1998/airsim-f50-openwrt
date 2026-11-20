@@ -141,6 +141,8 @@ if [ "$MODE" = key ]; then
 		noscan) echo "$NOSCAN" ;;
 		sta_section) echo "$STA" ;;
 		ap_section) echo "$AP" ;;
+		sta_if) echo "$STA_IF" ;;
+		ap_if) echo "$AP_IF" ;;
 		live_if) echo "$LIVE_IF" ;;
 		single_radio) echo "$SINGLE" ;;
 		client_egress) echo "$EGRESS" ;;

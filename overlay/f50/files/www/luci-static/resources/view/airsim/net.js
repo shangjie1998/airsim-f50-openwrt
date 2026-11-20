@@ -268,6 +268,8 @@ return view.extend({
   var adm = (d && d.admin) || {};
   var admOn = adm.enabled === true;
   var admLive = adm.live === true;
+  var dct = (d && d.direct) || {};
+  var dctLive = dct.live === true;
   var admFeed = E('p', { 'class': 'as-feedback', 'role': 'status', 'aria-live': 'polite' }, '');
   admFeed.style.display = 'none';   // 没有话说的时候不要留一个空框
   var admSwitch = glass.switch(admOn, function(nextOn) {
@@ -297,6 +299,17 @@ return view.extend({
     admFeed.textContent = '请求失败：' + err;
    });
   }, '允许从 Wi-Fi 打开管理页');
+
+  /* ---- 手机连接自检（只读）----
+   * 配对 / 控制 / 语音端口与 mDNS 发现是否真的进了防火墙表，一眼能看到；
+   * 数据来自后端 direct_status，不在这里改任何规则。 */
+  var dctRows = [
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '放行状态'), E('dd', {}, dctLive ? '配对、控制、语音端口与设备发现都已放行' : '规则未生效，手机可能搜不到或连不上')]),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '直连端口'), E('dd', {}, (dct.ports || '8580 8581 8582') + '（TCP）')]),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '设备发现'), E('dd', {}, '5353（UDP）')]),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '当前地址'), E('dd', {}, dct.host || '—')]),
+   E('div', { 'class': 'as-row' }, [E('dt', {}, '无线口'), E('dd', {}, dct.devices || '—')])
+  ];
 
   return E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('net') : ''),
@@ -389,7 +402,20 @@ return view.extend({
      ]),
      admFeed,
      E('div', { 'class': 'as-notice as-notice-warn' }, '这一页权限等同 root：能改联网、能装包、能看短信。打开后，同一个上游 Wi-Fi（比如 PDCN）里的任何设备都能看到登录框并一直试密码；80 端口是明文，共享网络里有人抓包就看得见登录动作。只在自己家的 Wi-Fi 下打开，用完关掉。'),
-     E('p', { 'class': 'as-caption' }, '规则只绑无线口 wlan0，切到「手机流量」后蜂窝公网进不来 —— 就算忘了关，也不会把管理页暴露在运营商网络上。USB 口的管理入口不受这个开关影响。')
+     E('p', { 'class': 'as-caption' }, '规则只绑无线口，切到「手机流量」后蜂窝公网进不来 —— 就算忘了关，也不会把管理页暴露在运营商网络上。USB 口的管理入口不受这个开关影响。')
+    ]),
+
+    E('section', { 'class': 'as-card' }, [
+     E('h3', {}, '手机连接自检'),
+     E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
+      E('div', {}, [
+       E('strong', {}, dctLive ? '手机连本机的通路已放行' : '直连规则没生效'),
+       E('div', { 'class': 'as-caption' }, '配对、控制、语音与设备发现走下面这些端口')
+      ]),
+      dctLive ? pill('已生效', 'green') : pill('未生效', 'red')
+     ]),
+     E('dl', { 'class': 'as-facts' }, dctRows),
+     E('p', { 'class': 'as-caption' }, '这些规则开机自动建好，不用手动配防火墙。电话 / 配对 / 语音走 8580-8582，设备发现走 5353；若显示未生效，来回切一次上网方式，或重启 AirSIM 服务，会把规则补建起来。')
     ]),
 
     E('section', { 'class': 'as-card' }, [

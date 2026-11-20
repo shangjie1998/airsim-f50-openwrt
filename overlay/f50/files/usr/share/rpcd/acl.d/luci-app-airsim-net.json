@@ -10,7 +10,8 @@
 					"wifi_scan",
 					"wifi_saved",
 					"flowfix_check",
-					"admin_status"
+					"admin_status",
+					"direct_status"
 				]
 			}
 		},

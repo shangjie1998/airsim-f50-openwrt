@@ -78,8 +78,8 @@ index 6753359..4dfaefe 100644
 +// 无脑"枚举所有私有 IPv4"会把 8580-8582 绑到运营商内网，等于对外开洞。
 +func directInterfaceNames(s managementSettings) []string {
 +	names := []string{s.Interface}
-+	if s.STAInterface != "" && s.STAInterface != s.Interface {
-+		names = append(names, s.STAInterface)
++	if w := resolveWireless(s); w != "" && w != s.Interface {
++		names = append(names, w)
  	}
 -	hosts := []string{lan}
 -	if s.TunnelInterface == "" {
@@ -134,8 +134,8 @@ index 6753359..4dfaefe 100644
 +		return nil, errors.New("LAN 网卡没有私有 IPv4 地址")
 +	}
 +	hosts := []string{primary}
-+	if s.STAInterface != "" {
-+		if ip, ok := interfaceAddress(s.STAInterface, false); ok && ip != primary {
++	if w := resolveWireless(s); w != "" {
++		if ip, ok := interfaceAddress(w, false); ok && ip != primary {
 +			hosts = append(hosts, ip)
 +		}
 +	}
@@ -421,7 +421,7 @@ index 9fbc4f6..3a5d53d 100644
  		write(w, 500, map[string]string{"error": "gateway_key_storage_failed"})
  		return
  	}
-@@ -553,3 +575,232 @@ func prepareRegistration(reg map[string]any, deviceID string) {
+@@ -553,3 +575,292 @@ func prepareRegistration(reg map[string]any, deviceID string) {
  	reg["android_manufacturer"] = "ZTE"
  	reg["android_model"] = "MU300"
  }
@@ -526,6 +526,66 @@ index 9fbc4f6..3a5d53d 100644
 +
 +// adHostFor 选广告 host：优先采纳 netmode 写的指示文件（它知道当下是热点还是
 +// Wi-Fi 上行），但文件里的地址必须真在当前监听列表里，防止写过时的值。
++// wirelessSysfs 用 sysfs 标记判定无线网卡：phy80211 符号链接存在即无线口。
++// 比按名字前缀猜更稳（上游临时 STA m3s<pid> 也挂同一标记），蜂窝口没有这个标记。
++func wirelessSysfs(name string) bool {
++	_, err := os.Stat("/sys/class/net/" + name + "/phy80211")
++	return err == nil
++}
++
++// defaultRouteInterface 返回扛默认路由的网卡名（/proc/net/route destination 全 0）。
++func defaultRouteInterface() string {
++	b, err := os.ReadFile("/proc/net/route")
++	if err != nil {
++		return ""
++	}
++	for _, line := range strings.Split(string(b), "\n") {
++		f := strings.Fields(line)
++		if len(f) < 3 {
++			continue
++		}
++		if f[1] == "00000000" {
++			return f[0]
++		}
++	}
++	return ""
++}
++
++// resolveWireless 返回当前应作为无线（STA）监听的网卡名：配置口真有私有地址就采纳，
++// 否则按 sysfs 标记枚举现存无线口，优先扛默认路由的那个；找不到返回空。
++// 枚举只认 phy80211 标记，蜂窝口（sipa_eth0 / wwan0）永远不会被选进来。
++func resolveWireless(s managementSettings) string {
++	if s.STAInterface != "" {
++		if _, ok := interfaceAddress(s.STAInterface, false); ok {
++			return s.STAInterface
++		}
++	}
++	defRoute := defaultRouteInterface()
++	ifaces, err := net.Interfaces()
++	if err != nil {
++		return ""
++	}
++	var fallback string
++	for _, n := range ifaces {
++		if n.Flags&net.FlagUp == 0 || n.Name == "lo" || n.Name == s.Interface || n.Name == s.TunnelInterface {
++			continue
++		}
++		if !wirelessSysfs(n.Name) {
++			continue
++		}
++		if _, ok := interfaceAddress(n.Name, false); !ok {
++			continue
++		}
++		if n.Name == defRoute {
++			return n.Name
++		}
++		if fallback == "" {
++			fallback = n.Name
++		}
++	}
++	return fallback
++}
++
 +func (d *daemon) adHostFor(hosts []string) string {
 +	if b, err := os.ReadFile(directHostFile); err == nil {
 +		if h := strings.TrimSpace(string(b)); h != "" {
@@ -539,7 +599,7 @@ index 9fbc4f6..3a5d53d 100644
 +	// 指示文件可能是上一次开机残留的旧地址（已经不在监听列表里）。
 +	// 这种情况按 /proc/net/route 判断当下哪张卡扛着默认路由：Wi-Fi 模式是
 +	// 无线口，热点/蜂窝模式是 LAN 桥。重启后也能自己选对。
-+	if s := d.settings.STAInterface; s != "" && interfaceDefaultRoute(s) {
++	if s := resolveWireless(d.settings); s != "" && interfaceDefaultRoute(s) {
 +		if ip, ok := interfaceAddress(s, false); ok {
 +			return ip
 +		}

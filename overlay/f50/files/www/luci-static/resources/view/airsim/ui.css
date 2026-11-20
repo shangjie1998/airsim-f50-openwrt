@@ -116,10 +116,11 @@ html[data-transparency="solid"] .as-seg{background:var(--as-bg)}
  .as-root{--as-pad:16px;--as-card-pad:18px;--as-gap:14px;--as-fs-title:1.5rem;--as-fs-h3:1.25rem}
 }
 html[data-transparency="solid"] .as-menu-item{background:var(--as-bg)}
-/* 主题那排同名页签在 AirSIM 页让位（只认我们这条） */
+/* 主题那排横向页签在 AirSIM 页让位（只认我们这条自绘菜单）。
+ * 注意：左侧主菜单分组（状态/系统/蜂窝/服务/网络）的子项 ul 同名也叫
+ * .sidebar-submenu / .mobile-nav-submenu，那是原生导航，绝不能在这里藏，
+ * 否则分组展开后整条子菜单消失、主菜单进不去。 */
 body.as-menu-on #tabmenu,
-body.as-menu-on .sidebar-submenu,
-body.as-menu-on .mobile-nav-submenu,
 body.as-menu-on > header .nav{display:none!important}
 /* 主题页脚的 "Powered by LuCI (HEAD detached at 128a7812) branch (26.180...)" 
  * 本来就不该露在这套页面上：它是开发构建的版本串，留着既难看又泄内部信息。
