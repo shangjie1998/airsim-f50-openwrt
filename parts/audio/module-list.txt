@@ -28,7 +28,8 @@ sprd_audcp_boot.ko
 sprd_audcp_dvfs.ko
 
 # --- ALSA 基础层：仅 CONFIG_SOUND=n 的 6.18.54 档外挂编出；SND=y 档（6.18.60/7.3.1）
-# 由内核固件自带，不在配件包里。加载顺序 snd → snd-timer/snd-hrtimer → snd-pcm → snd-hwdep。
+# 由内核固件自带，不在配件包里。加载顺序 soundcore → snd → snd-timer/snd-hrtimer → snd-pcm → snd-hwdep。
+soundcore.ko
 snd.ko
 snd-timer.ko
 snd-hrtimer.ko

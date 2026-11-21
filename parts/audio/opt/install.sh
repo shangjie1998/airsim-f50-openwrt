@@ -24,10 +24,10 @@ DSP=$EXT/bin/mu300-audio-dsp
 KREL=$(uname -r)
 MODS=$HERE/modules
 
-# 随包自带的 dsp 脚本权威哈希：527 行（在 517 行修复版上加 ALSA 基础层分组与加载顺序），真机 6.18.60 实证声卡注册、19/19。
+# 随包自带的 dsp 脚本权威哈希：527 行（在 517 行修复版上加 ALSA 基础层分组与加载顺序，6.18.54 档再补 soundcore 层最先加载），真机 6.18.60 实证声卡注册、19/19。
 # 包内这份必须逐位等于它；装到设备前再核一次，防止 471 老版混回来。
 DSP_FILE=mu300-audio-dsp
-DSP_SHA=db096a0b94b62ee0d781f6e3707d20613e6fe515b91bdef865d24d65aba66a09
+DSP_SHA=d98012d57600ad854cdb3be739ff6c3f20664cfc924efefdd7398d98a028d65a
 
 die() { echo "装音频模块: $*" >&2; exit 1; }
 say() { echo "装音频模块: $*"; }
