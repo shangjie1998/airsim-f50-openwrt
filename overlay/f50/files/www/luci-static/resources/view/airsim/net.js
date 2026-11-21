@@ -59,6 +59,28 @@ function rssiOf(ap) {
  return m ? parseFloat(m[1]) : 0;
 }
 
+/* 下面两组行结构首屏渲染和动作后的局部刷新共用，抽成纯函数，避免两处各写一份
+ * 导致状态口径不一致。 */
+function statusLinesFor(st) {
+ var mode = (st && st.mode) || '';
+ return [
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '当前状态'), E('dd', {}, mode === 'wifi' ? 'Wi-Fi 上网' : mode === 'wifi-pending' ? 'Wi-Fi 待配置（热点已关）' : mode === 'ap' ? '流量 + 热点' : mode === 'cell' ? '流量（热点关）' : '状态没读出来')]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '出口'), E('dd', {}, (st.route_dev || '—') + (st.sta_ip ? ' · ' + st.sta_ip : ''))]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '已连 Wi-Fi'), E('dd', {}, showSsid(st.sta_ssid) || '（未连接）')])
+ ];
+}
+
+function dctRowsFor(dct) {
+ var dctLive = dct && dct.live === true;
+ return [
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '放行状态'), E('dd', {}, dctLive ? '配对、控制、语音端口与设备发现都已放行' : '规则未生效，手机可能搜不到或连不上')]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '直连端口'), E('dd', {}, (dct.ports || '8580 8581 8582') + '（TCP）')]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '设备发现'), E('dd', {}, '5353（UDP）')]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '当前地址'), E('dd', {}, dct.host || '—')]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '无线口'), E('dd', {}, dct.devices || '—')])
+ ];
+}
+
 return view.extend({
  load: function() {
   /* 一次调用拿齐四张卡片的数据：原来分四次，每次都要过一遍 rpcd 再起一个 shell，
@@ -73,17 +95,19 @@ return view.extend({
   var saved = (d && d.saved) || {};
   var mode = st.mode || '';
 
+  /* 下面这些是动作成功后要局部刷新的节点引用；扫描列表 listBox 和手动输入框
+   * manualSsid/manualKey 特意不进这张表 —— 刷新状态时原地保留，不重建。 */
+  var root, factsBox, feedTitle, feedSub, feedPill, savedBox,
+      admTitle, admSub, admPill, admSwitchLabel, dctBox, dctTitle, dctPill;
+
   /* 能力受限的提示：这不是错误，是机器本身的边界，写清楚免得用户以为功能坏了 */
   var limits = [];
   if (probe.single_radio) limits.push('这台机器只有一个 5G 射频，Wi-Fi 与热点不能同时开：连外部 Wi-Fi 时热点会断，手机断网几秒到十几秒。');
   if (probe.band === '5g') limits.push('当前无线只在 5G 工作，扫描只列 ' + (probe.channels || '36 40 44 48') + ' 信道上的热点；2.4G 的热点扫得到也连不上，所以不列。');
   if (probe.noscan === true) limits.push('热点固定 36 信道、不做信道外扫描，这是出厂设置，不要改。');
 
-  var statusLines = [
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '当前状态'), E('dd', {}, mode === 'wifi' ? 'Wi-Fi 上网' : mode === 'wifi-pending' ? 'Wi-Fi 待配置（热点已关）' : mode === 'ap' ? '流量 + 热点' : mode === 'cell' ? '流量（热点关）' : '状态没读出来')]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '出口'), E('dd', {}, (st.route_dev || '—') + (st.sta_ip ? ' · ' + st.sta_ip : ''))]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '已连 Wi-Fi'), E('dd', {}, showSsid(st.sta_ssid) || '（未连接）')])
-  ];
+  factsBox = E('dl', { 'class': 'as-facts' });
+  statusLinesFor(st).forEach(function(n) { factsBox.appendChild(n); });
 
   /* ---- 卡 1：上网方式（一个滑块两态）----
    * 为什么不用 input[type=checkbox]：主题给复选框挂了伪元素渐变和勾，
@@ -112,7 +136,7 @@ return view.extend({
       return;
      }
      feed.textContent = (next ? '已切到 Wi-Fi 上网。' : '已切成流量 + 热点。') + (res.message ? ' ' + res.message : '');
-     window.setTimeout(function() { window.location.reload(); }, 1500);
+     window.setTimeout(function() { refreshState(); }, 1500);
     } else {
      uplinkSwitch.disabled = false;
      glass.switchSet(uplinkSwitch, !next);
@@ -141,7 +165,7 @@ return view.extend({
     if (res && res.ok) {
      feed.className = 'as-feedback as-feedback-success';
      feed.textContent = '已连上 ' + ssid + '。';
-     window.setTimeout(function() { window.location.reload(); }, 1500);
+     window.setTimeout(function() { refreshState(); }, 1500);
     } else {
      feed.className = 'as-feedback as-feedback-error';
      feed.textContent = '连不上：' + ((res && res.message) || '密码错或信号太弱') + '（失败会自动退回原来的设置）';
@@ -232,35 +256,39 @@ return view.extend({
   });
 
   /* ---- 卡 3：已保存的 Wi-Fi ---- */
-  var savedBox;
-  if (saved && saved.ssid) {
-   savedBox = E('div', {}, [
-    E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
+  function buildSavedChildren(sv) {
+   if (sv && sv.ssid) {
+    return [
      E('div', {}, [
-      E('strong', {}, showSsid(saved.ssid)),
-      E('div', { 'class': 'as-caption' }, (saved.encryption === 'psk2' ? 'WPA2' : saved.encryption === 'sae' ? 'WPA3' : '开放') + (saved.has_key ? ' · 密码已保存' : ''))
-     ]),
-     pill('当前' , 'green')
-    ]),
-    E('div', { 'class': 'as-actions' }, [
-     E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
-      /* 空密码交给后端：它会复用已经存下的那份 key（只认同一个 SSID）。 */
-      connect(saved.ssid, saved.encryption || 'psk2', '');
-     } }, '连接'),
-     E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
-      if (!window.confirm('删除保存的「' + showSsid(saved.ssid) + '」？删完要重新输密码。')) return;
-      netForget().then(function(res) {
-       feed.className = 'as-feedback ' + (res && res.ok ? 'as-feedback-success' : 'as-feedback-error');
-       feed.textContent = (res && (res.message || res.error)) || '';
-       if (res && res.ok) window.setTimeout(function() { window.location.reload(); }, 1200);
-      });
-     } }, '删除')
-    ]),
-    E('p', { 'class': 'as-caption' }, '正在用这个 Wi-Fi 上网时不能删，先切回「手机流量」再删 —— 不然删完就没网了。')
-   ]);
-  } else {
-   savedBox = E('p', { 'class': 'as-caption' }, '还没有保存的 Wi-Fi。连上一次就会记住，下次开机自动连。');
+      E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
+       E('div', {}, [
+        E('strong', {}, showSsid(sv.ssid)),
+        E('div', { 'class': 'as-caption' }, (sv.encryption === 'psk2' ? 'WPA2' : sv.encryption === 'sae' ? 'WPA3' : '开放') + (sv.has_key ? ' · 密码已保存' : ''))
+       ]),
+       pill('当前', 'green')
+      ]),
+      E('div', { 'class': 'as-actions' }, [
+       E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
+        /* 空密码交给后端：它会复用已经存下的那份 key（只认同一个 SSID）。 */
+        connect(sv.ssid, sv.encryption || 'psk2', '');
+       } }, '连接'),
+       E('button', { 'class': 'as-btn', 'type': 'button', 'click': function() {
+        if (!window.confirm('删除保存的「' + showSsid(sv.ssid) + '」？删完要重新输密码。')) return;
+        netForget().then(function(res) {
+         feed.className = 'as-feedback ' + (res && res.ok ? 'as-feedback-success' : 'as-feedback-error');
+         feed.textContent = (res && (res.message || res.error)) || '';
+         if (res && res.ok) window.setTimeout(function() { refreshState(); }, 1200);
+        });
+       } }, '删除')
+      ]),
+      E('p', { 'class': 'as-caption' }, '正在用这个 Wi-Fi 上网时不能删，先切回「手机流量」再删 —— 不然删完就没网了。')
+     ])
+    ];
+   }
+   return [ E('p', { 'class': 'as-caption' }, '还没有保存的 Wi-Fi。连上一次就会记住，下次开机自动连。') ];
   }
+  savedBox = E('div', {});
+  buildSavedChildren(saved).forEach(function(n) { savedBox.appendChild(n); });
 
   /* ---- 卡 4：管理页面访问（安全开关）----
    * 这一页权限等同 root，能不能从 Wi-Fi 那边打开它是个安全决定，所以单列一张卡，
@@ -283,7 +311,7 @@ return view.extend({
      admFeed.style.display = '';
      admFeed.className = 'as-feedback as-feedback-success';
      admFeed.textContent = (res.message || '') || (next ? '已允许。' : '已禁止。');
-     window.setTimeout(function() { window.location.reload(); }, 1500);
+     window.setTimeout(function() { refreshState(); }, 1500);
     } else {
      admSwitch.disabled = false;
      glass.switchSet(admSwitch, !nextOn);
@@ -303,15 +331,63 @@ return view.extend({
   /* ---- 手机连接自检（只读）----
    * 配对 / 控制 / 语音端口与 mDNS 发现是否真的进了防火墙表，一眼能看到；
    * 数据来自后端 direct_status，不在这里改任何规则。 */
-  var dctRows = [
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '放行状态'), E('dd', {}, dctLive ? '配对、控制、语音端口与设备发现都已放行' : '规则未生效，手机可能搜不到或连不上')]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '直连端口'), E('dd', {}, (dct.ports || '8580 8581 8582') + '（TCP）')]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '设备发现'), E('dd', {}, '5353（UDP）')]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '当前地址'), E('dd', {}, dct.host || '—')]),
-   E('div', { 'class': 'as-row' }, [E('dt', {}, '无线口'), E('dd', {}, dct.devices || '—')])
-  ];
+  dctBox = E('dl', { 'class': 'as-facts' });
+  dctRowsFor(dct).forEach(function(n) { dctBox.appendChild(n); });
 
-  return E('div', { 'class': 'as-root' }, [
+  /* ---- 局部刷新：动作成功后只回读并重绘可变节点，不整页 reload ----
+   * 扫描列表 listBox、手动输入框 manualSsid/manualKey 不进 paintState，原地保留。
+   * 单射频下连 Wi-Fi 要等认证 + DHCP，回读到的就是当下真实态；拉取失败保留现状。 */
+  function paintState(nd) {
+   var nst = (nd && nd.status) || {};
+   var nsv = (nd && nd.saved) || {};
+   var nadm = (nd && nd.admin) || {};
+   var ndct = (nd && nd.direct) || {};
+   var nmode = nst.mode || '';
+   var nUplink = nmode === 'wifi' || nmode === 'wifi-pending';
+   saved = nsv;
+
+   factsBox.innerHTML = '';
+   statusLinesFor(nst).forEach(function(n) { factsBox.appendChild(n); });
+   feedTitle.textContent = nUplink ? '正在用 Wi-Fi 上网' : (nmode === 'ap' ? '正在用流量上网，热点开着' : '正在用流量上网');
+   feedSub.textContent = nUplink ? '蜂窝数据已断，热点已关' : '热点开着，手机电脑可以连 F50 的 Wi-Fi';
+   feedPill.textContent = nUplink ? 'Wi-Fi' : '流量';
+   feedPill.className = 'as-pill ' + (nUplink ? 'as-pill-green' : 'as-pill-red');
+   glass.switchSet(uplinkSwitch, nUplink);
+
+   savedBox.innerHTML = '';
+   buildSavedChildren(nsv).forEach(function(n) { savedBox.appendChild(n); });
+
+   var nAdmOn = nadm.enabled === true;
+   var nAdmLive = nadm.live === true;
+   admTitle.textContent = nAdmOn ? 'Wi-Fi 那边可以打开管理页' : '只允许 USB 口打开管理页';
+   admSub.textContent = '只放行 80/443 · 绑定 ' + (nadm.device || 'wlan0') + ' 无线口';
+   admPill.textContent = nAdmOn ? (nAdmLive ? '已生效' : '没生效') : '已关';
+   admPill.className = 'as-pill ' + (nAdmOn ? (nAdmLive ? 'as-pill-green' : 'as-pill-red') : 'as-pill-neutral');
+   admSwitchLabel.textContent = nAdmOn ? '允许（从 Wi-Fi 打开）' : '禁止（只走 USB 口）';
+   glass.switchSet(admSwitch, nAdmOn);
+
+   var nDctLive = ndct.live === true;
+   dctTitle.textContent = nDctLive ? '手机连本机的通路已放行' : '直连规则没生效';
+   dctPill.textContent = nDctLive ? '已生效' : '未生效';
+   dctPill.className = 'as-pill ' + (nDctLive ? 'as-pill-green' : 'as-pill-red');
+   dctBox.innerHTML = '';
+   dctRowsFor(ndct).forEach(function(n) { dctBox.appendChild(n); });
+
+   /* 动作期间开关被置 busy，原来靠整页 reload 复位；局部刷新不重建 DOM，这里手动解开。 */
+   uplinkSwitch.disabled = false;
+   admSwitch.disabled = false;
+  }
+
+  var _refreshInflight = null;
+  function refreshState() {
+   if (_refreshInflight) return _refreshInflight;
+   _refreshInflight = L.resolveDefault(netScreen(), {}).then(function(nd) {
+    if (root && root.isConnected && nd) paintState(nd);
+   }).catch(function() { /* 拉取失败保留现状，不刷错屏 */ }).finally(function() { _refreshInflight = null; });
+   return _refreshInflight;
+  }
+
+  root = E('div', { 'class': 'as-root' }, [
    (ui.menu ? ui.menu('net') : ''),
    ui.stylesheet(),
    E('style', {}, glass.css()),
@@ -328,10 +404,10 @@ return view.extend({
      E('h3', {}, '上网方式'),
      E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
       E('div', {}, [
-       E('strong', {}, uplinkOn ? '正在用 Wi-Fi 上网' : (mode === 'ap' ? '正在用流量上网，热点开着' : '正在用流量上网')),
-       E('div', { 'class': 'as-caption' }, uplinkOn ? '蜂窝数据已断，热点已关' : '热点开着，手机电脑可以连 F50 的 Wi-Fi')
+       feedTitle = E('strong', {}, uplinkOn ? '正在用 Wi-Fi 上网' : (mode === 'ap' ? '正在用流量上网，热点开着' : '正在用流量上网')),
+       feedSub = E('div', { 'class': 'as-caption' }, uplinkOn ? '蜂窝数据已断，热点已关' : '热点开着，手机电脑可以连 F50 的 Wi-Fi')
       ]),
-      uplinkOn ? pill('Wi-Fi', 'green') : pill('流量', 'red')
+      feedPill = pill(uplinkOn ? 'Wi-Fi' : '流量', uplinkOn ? 'green' : 'red')
      ]),
      E('div', { 'class': 'as-switch-row', 'click': function(ev) {
       if (ev.target === uplinkSwitch || uplinkSwitch.contains(ev.target)) return;
@@ -343,7 +419,7 @@ return view.extend({
       E('span', { 'class': 'as-caption', style: 'margin-left:4px' }, 'Wi-Fi 上网')
      ]),
      feed,
-     E('dl', { 'class': 'as-facts' }, statusLines),
+     factsBox,
      E('p', { 'class': 'as-caption' }, '开：连外部 Wi-Fi 上网，流量和热点都关。关：用流量上网，并把热点开起来。顺序是固定的 —— 连 Wi-Fi 时先确认拿到地址再断流量，反过来会先丢网；失败会自动退回切换前的状态。')
     ]),
 
@@ -388,17 +464,17 @@ return view.extend({
      E('h3', {}, '管理页面访问'),
      E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
       E('div', {}, [
-       E('strong', {}, admOn ? 'Wi-Fi 那边可以打开管理页' : '只允许 USB 口打开管理页'),
-       E('div', { 'class': 'as-caption' }, '只放行 80/443 · 绑定 ' + (adm.device || 'wlan0') + ' 无线口')
+       admTitle = E('strong', {}, admOn ? 'Wi-Fi 那边可以打开管理页' : '只允许 USB 口打开管理页'),
+       admSub = E('div', { 'class': 'as-caption' }, '只放行 80/443 · 绑定 ' + (adm.device || 'wlan0') + ' 无线口')
       ]),
-      admOn ? pill(admLive ? '已生效' : '没生效', admLive ? 'green' : 'red') : pill('已关', 'neutral')
+      admPill = pill(admOn ? (admLive ? '已生效' : '没生效') : '已关', admOn ? (admLive ? 'green' : 'red') : 'neutral')
      ]),
      E('div', { 'class': 'as-switch-row', 'click': function(ev) {
       if (ev.target === admSwitch || admSwitch.contains(ev.target)) return;
       glass.switchToggle(admSwitch);
      } }, [
       admSwitch,
-      E('span', {}, admOn ? '允许（从 Wi-Fi 打开）' : '禁止（只走 USB 口）')
+      admSwitchLabel = E('span', {}, admOn ? '允许（从 Wi-Fi 打开）' : '禁止（只走 USB 口）')
      ]),
      admFeed,
      E('div', { 'class': 'as-notice as-notice-warn' }, '这一页权限等同 root：能改联网、能装包、能看短信。打开后，同一个上游 Wi-Fi（比如 PDCN）里的任何设备都能看到登录框并一直试密码；80 端口是明文，共享网络里有人抓包就看得见登录动作。只在自己家的 Wi-Fi 下打开，用完关掉。'),
@@ -409,12 +485,12 @@ return view.extend({
      E('h3', {}, '手机连接自检'),
      E('div', { 'class': 'as-inline', style: 'justify-content:space-between' }, [
       E('div', {}, [
-       E('strong', {}, dctLive ? '手机连本机的通路已放行' : '直连规则没生效'),
+       dctTitle = E('strong', {}, dctLive ? '手机连本机的通路已放行' : '直连规则没生效'),
        E('div', { 'class': 'as-caption' }, '配对、控制、语音与设备发现走下面这些端口')
       ]),
-      dctLive ? pill('已生效', 'green') : pill('未生效', 'red')
+      dctPill = pill(dctLive ? '已生效' : '未生效', dctLive ? 'green' : 'red')
      ]),
-     E('dl', { 'class': 'as-facts' }, dctRows),
+     dctBox,
      E('p', { 'class': 'as-caption' }, '这些规则开机自动建好，不用手动配防火墙。电话 / 配对 / 语音走 8580-8582，设备发现走 5353；若显示未生效，来回切一次上网方式，或重启 AirSIM 服务，会把规则补建起来。')
     ]),
 
@@ -426,6 +502,7 @@ return view.extend({
    ]),
    E('footer', { 'class': 'as-footer' }, 'AirSIM for F50 · 联网')
   ]);
+  return root;
  },
 
  handleSaveApply: null,

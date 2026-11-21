@@ -53,6 +53,35 @@ sta_net_name() {
 	echo "$_n"
 }
 
+# ---- 确保 STA 上行两段基础定义存在 ----
+# 刷机后、或原生 LuCI 从没连过 Wi-Fi 时，wireless.<sta>（managed 无线段）与
+# network.<net>（dhcp 上行段）可能压根没建。后端平时只往里填 SSID/密码、切开关，
+# 缺基础段 netifd 建不出 managed 口，表现就是「扫描得到周边、选网输密码后无 IP、
+# 无默认路由」。这里幂等补齐模板：已有字段不覆盖，段不存在才建。
+sta_ensure() {
+	local sta net radio
+	sta=${1:-}
+	[ -n "$sta" ] || { sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0; }
+	net=$(uci -q get "wireless.$sta.network" 2>/dev/null); [ -n "$net" ] || net=wwan
+	radio=$("$PROBE" -k radio 2>/dev/null); [ -n "$radio" ] || radio=radio0
+
+	# 段连类型都没有时先建一个 wifi-iface 段；只 set 具体字段会留下没有类型的裸段，
+	# wireless 靠 `=wifi-iface` 识别接口，认不出就当不存在。
+	[ -z "$(uci -q get "wireless.$sta" 2>/dev/null)" ] && uci -q set "wireless.$sta=wifi-iface"
+	[ -n "$(uci -q get "wireless.$sta.device" 2>/dev/null)" ] || uci -q set "wireless.$sta.device=$radio"
+	[ "$(uci -q get "wireless.$sta.mode" 2>/dev/null)" = sta ]  || uci -q set "wireless.$sta.mode=sta"
+	[ -n "$(uci -q get "wireless.$sta.network" 2>/dev/null)" ] || uci -q set "wireless.$sta.network=$net"
+	[ -n "$(uci -q get "wireless.$sta.ifname" 2>/dev/null)" ] || uci -q set "wireless.$sta.ifname=$sta"
+
+	if [ -z "$(uci -q get "network.$net.proto" 2>/dev/null)" ]; then
+		uci -q set "network.$net=interface"
+		uci -q set "network.$net.proto=dhcp"
+		uci -q set "network.$net.device=$sta"
+	fi
+	uci -q commit wireless 2>/dev/null || true
+	uci -q commit network 2>/dev/null || true
+}
+
 # 按 zone 名定位 firewall uci 段（取不到回空）。
 zone_section_by_name() {
 	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='$1'\$/\1/p" | head -1
@@ -277,6 +306,7 @@ wifi_connect() {
 		*) jerr '加密方式不支持（只支持 WPA2 / WPA3 / 开放）'; return 0 ;;
 	esac
 	sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0
+	sta_ensure "$sta"
 	if [ "$enc" != none ]; then
 		# 本次没带密码时，先看这个 SSID 是不是已经存过、且存了 key：
 		# 是就用存的那份，让"点已保存的网络"不必再输一遍密码。
