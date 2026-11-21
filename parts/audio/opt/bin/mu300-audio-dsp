@@ -112,6 +112,10 @@ DSPBIN=${MU300_AGDSP_DSPBIN:-0xafa00000,0x600000}
 # ASoC core and the compress layer are the kernel's own modules: modprobe finds those (they are not blocked by the
 # on-demand guard), insmod the rest.
 DMA_MODULES="virt-dma sprd-dma"
+# ALSA 基础层：6.18.54 这类 CONFIG_SOUND=n 的内核不带，由配件包外挂编出。依赖顺序
+# snd → timer/hrtimer → pcm → hwdep，必须先于 soc 层 insmod；SND=y 的内核这些在
+# /lib/modules 里，包内没有就回退内核目录。
+BASE_MODULES="snd snd-timer snd-hrtimer snd-pcm snd-hwdep"
 # the extra's own builds where the set has them (mainline: the kernel has no ASoC; snd-aloop everywhere), else the
 # kernel's (5.4's ASoC is built in)
 CORE_MODULES="snd-aloop snd-compress snd-soc-core"
@@ -157,6 +161,12 @@ reserve() {
 load_all() {
     audio_dir >/dev/null || { echo "$(why_none)" >&2; return 1; }
     reserve || return 1
+    # 基础层先于 soc 层：snd/timer/hrtimer/pcm/hwdep，包内优先，缺了回退内核模块目录。
+    for m in $BASE_MODULES; do
+        loaded "$m" && continue
+        if [ -f "$A/$m.ko" ]; then insmod "$A/$m.ko" 2>/dev/null
+        elif [ -f "$K/$m.ko" ]; then insmod "$K/$m.ko" 2>/dev/null; fi
+    done
     for m in $CORE_MODULES; do
         loaded "$m" && continue
         if [ -f "$A/$m.ko" ]; then
