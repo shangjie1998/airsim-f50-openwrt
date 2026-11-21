@@ -53,7 +53,8 @@ airsim-f50-0.1.0.<N>-r<NN>-<适用范围>
 > 前三个的 `-f50` 是当年机型标识，没回头改；从 `0.1.0.4` 起后缀表示**内核线**，
 > 机型在文件名前缀 `airsim-f50-` 里。
 
-当前版本是 `0.1.0.26-r23-any`（`sh build/bump-version.sh 26 r23 any`）。
+当前版本是 `0.1.0.41-r23-any`（`sh build/bump-version.sh 41 r23 any`），
+对应 Agent `0.4.7-mu300.0.1.0.41-r23-any`，音频配件包 `audio-opt 1.0.5`。
 
 ## 版本号不许手工改
 
@@ -68,5 +69,6 @@ airsim-f50-0.1.0.<N>-r<NN>-<适用范围>
 （`archive/5.4-pkg/` 里那套老覆盖包属于历史形态，脚本不碰 —— 它的 `VERSION`/`MANIFEST` 永远停在
 `0.1.0.3-r22-f50`。）
 
-另外记住：**包内 `/usr/lib/airsim/VERSION` 是上游的 `0.1.0-r22`**，被 `audio-preflight`
-按值校验，不参与本仓库计数，别动。
+另外记住：**包内 `/usr/lib/airsim/VERSION` 就是本仓库打包号**（安装时由包内 `VERSION`
+原样铺过去，见 `build/pkg/install.sh`），跟 `VERSION`/`AGENT-VERSION` 同一份真值，
+不参与上游计数，也没有单独的预飞脚本再按值校验；别动它。

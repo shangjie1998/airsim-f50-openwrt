@@ -7,8 +7,8 @@
 | 内核 | 驱动从哪来 | 要不要配件包 | 判据 |
 |---|---|---|---|
 | `5.4.254`（厂商） | **厂商镜像自带**：`saudio.ko`、`snd-soc-sprd-dai.ko`、`snd-soc-sprd-pa-ucp1301.ko`、`snd-soc-sprd-vaudio.ko` 等 24 个 `.ko` | ❌ 不要装（6.18/7.3 那套跟它不通用） | `audio_reserve missing=0` |
-| `6.18.60` | 自编 25 个 `.ko`，落地 `/mnt/mu300-disk/extra/airsim-audio/modules/6.18.60/` | ✅ `audio-opt 1.0.3` | 25 件齐 + `missing=0` |
-| `7.3.1` | 自编 25 个 `.ko`，落地 `modules/7.3.1/` | ✅ `audio-opt 1.0.3` | 同上（真机未验） |
+| `6.18.60` | 自编 25 个 `.ko`，落地 `/mnt/mu300-disk/extra/airsim-audio/modules/6.18.60/` | ✅ `audio-opt 1.0.5` | 25 件齐 + `missing=0` |
+| `7.3.1` | 自编 25 个 `.ko`，落地 `modules/7.3.1/` | ✅ `audio-opt 1.0.5` | 同上（真机切过内核、联网正常，通话回归未在 7.3 上复验） |
 
 **一句话记法**：mainline 内核（6.18 / 7.3）要自己编；厂商内核（5.4）人家本来就全。
 
@@ -42,10 +42,12 @@ cat /proc/asound/cards                             # 期望：Loopback + sprdpho
 - 主包 `install.sh` 只负责"提示有没有对应目录"，**不替配件包装任何东西**。
 - **AGDSP 主固件 `agdsp.bin` 不在配件包内，也不进公开仓 / 公开 Release**：它是 Unisoc/展锐专有镜像，上游只搬运未给再分发许可。需从上游作者仓库 `dikeckaan/mu300-audio-firmware` 的 v1.0 release 手动取 `agdsp.bin`，落到设备 `/lib/firmware/agdsp.bin`（`mu300-audio-dsp install <文件>` 会校验大小、AUDCP 头并记 sha256 到 `/etc/mu300/agdsp.sha256`）。缺它时驱动和声卡能起，但 DSP 不上电、双向通话无声。自用下载 / 局域网 / 私有网盘私有目录留存合规；public 仓、公开 Release、匿名分享链接、二次分发违规。
 
-## 四之一、已知问题（未解决）
+## 四之一、DSP 场景 profile（已自备装机，专有不分发）
 
-- **DSP profiles 四个 blob**（`audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp`）本机、设备、上游作者仓库都没有，只能从同 SoC Android 固件的 `audio_params/sprd/*.xml` 用 `vbc-profile.py` 编译。当前走 **legacy_pcm 直连**兜底，不依赖这组 profile，不阻塞打通电话；完整 DSP 场景路由 / 增益 / 智能功放通路未闭环。EIO 与 profiles 缺失的因果尚未完全分离。详见 kits 仓 `docs/dsp-profiles-gap.md`。
-- 固件自备要求与上述缺口在音频页「已知问题（未解决）」卡片和主页诊断区有对应说明；probe 字段 `fw_present` 报 `/lib/firmware/agdsp.bin` 是否在位。
+- **四个 profile blob**（`audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp`）已从同 SoC Android 底包的 `audio_params/sprd/*.xml` 用 `vbc-profile.py` 取回、本地编译装机，6.18.60 真机通话双向有声回归通过；probe 字段 `profiles_present` 报在位情况。
+- **profile 不是打通电话的必要条件**：缺省走 `legacy_pcm` 直连兜底通路，不依赖这组 profile 也能打通；profile 提供的是完整 DSP 通路的场景路由 / 增益 / 降噪回声消除 / 智能功放参数。voice 通话路径只载前三个（structure / vbc / cvs）；`dsp_smartamp` 属喇叭智能功放场景，本板 codec 后端未接，是上游设计而非缺口。
+- **合规边界**：四个 blob 与 `agdsp.bin` 同属 Unisoc/展锐专有产物，不进 public 仓 / 公开配件包 / 公开 Release / 匿名链接 / 二次分发；本地归档在 kits 仓 `archive/firmware/profiles/`（含 `INSTALL-RECORD.md`、`PROVENANCE`、`SHA256SUMS`），仅供私有备份/自用恢复。
+- 固件自备要求与 profile 状态在音频页对应卡片、主页诊断区有说明；probe 字段 `fw_present` 报 `/lib/firmware/agdsp.bin` 是否在位。
 
 ## 五、文件在哪
 
@@ -64,10 +66,10 @@ cat /proc/asound/cards                             # 期望：Loopback + sprdpho
 | 卡片 | 内容 | 靠什么接口 |
 |---|---|---|
 | 音频配件包 | 状态 / 本机内核 / 覆盖情况 / 件数 / 已装配件包版本，右上角版本号 + 检查更新 | `audio_opt_probe`、`audio_opt_latest`、`audio_opt_install` |
-| 刷机后自检 | 八项一次查完，能补的就地补（原来在「维护」页，已搬到这里） | `selfcheck_run`、`selfcheck_fix` |
+| 刷机后自检 | 六项一次查完（内核版本 / 模块树 / DSP 内存预留 / 开机预留脚本 / 音频身份元数据 / 主服务），能补的就地补（原来在「维护」页，已搬到这里） | `selfcheck_run`、`selfcheck_fix` |
 | 切换内核 | 三档（5.4 / 6.18 / 7.3）选择 + 本机现成内核包 + 上游 release 号，**只拼命令不代跑** | `kernel_bundles`（只读） |
 
-- 页面右上角版本号是**音频配件包版本**（`audio-opt vX`，设备上实际装着的那个），右边跟「检查更新」图标一组；主包版本不在这页重复显示。，跟「检查更新」查到的最新版比对，才会判"有新版本"（显示成 `v1.0.2 → v1.0.3` + 绿 ↑）。
+- 页面右上角版本号是**音频配件包版本**（`audio-opt vX`，设备上实际装着的那个），右边跟「检查更新」图标一组；主包版本不在这页重复显示。跟「检查更新」查到的最新版比对，才会判"有新版本"（显示成 `v<已装> → v<最新>` + 绿 ↑）。
   之前拿包内钉死的 `TAG` 当已装版本，结果是永远显示"已是最新"——已改成读 `audio-opt-version`。
 - 切内核不给执行按钮：要写 boot 分区并重启，重启一律由用户自己来。命令固定为
   `MU300_RELEASE=<release> MU300_KERNEL_BUNDLE=<包> mu300-update kernel <5.4|6.18|7.3>`。

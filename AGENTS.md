@@ -24,23 +24,25 @@
 | 声卡 | `card1 = sprdphone-sc2730` | `card0` |
 | 节点 | 播放 **hw:1,53** / 采集 **hw:1,16** | hw:0,9 / hw:0,18 |
 | 显示名 | 未改 | 改过（VIPME-M8） |
-| 版本口径 | `0.1.0.x-f50`（上游 `0.1.0` + 打包序号，见 README §9） | `0.1.0(N)-r22-m8` |
+| 版本口径 | `0.1.0.N-r23-any`（上游 `0.1.0` + 打包序号 N，见 README §5 与 VERSIONING.md） | `0.1.0(N)-r22-m8` |
 
 两台之间**抄任何文件都会让语音挂掉**。要动 F50 的代码，克隆上游另开一份，不要在 M8 的树上改。
 
-## 1. 这台机器现在是什么状态（**2026-11-14 为准**）
+## 1. 这台机器现在是什么状态（**2026-11-22 为准**）
 
 > 这一节下面的旧描述（"6.18 语音是死的、要语音必须切 5.4"）**已经作废**。
 > 现在 6.18.60 上号码、短信、通话双向音频三项全部真机打通。
 
 - 系统：OpenWrt 25.12.5，`aarch64_generic`，`/opt` 在 `/mnt/mu300-disk` 上的 Linux 分区。
 - **当前运行内核：`6.18.60`（mainline）**，数据联网与语音都在这上面跑通了。
-- 版本：**`0.1.0.30-r23-any`**（Release `v0.1.0.30-r23-any`）。
-- 语音走**自编音频配件包** `audio-opt 1.0.4`（`parts/audio/`，只有 `.ko`，按内核分目录）；
+- 版本：**`0.1.0.41-r23-any`**（Release `v0.1.0.41-r23-any`），Agent `0.4.7-mu300.0.1.0.41-r23-any`。
+- 语音走**自编音频配件包** `audio-opt 1.0.5`（`parts/audio/`，只有 `.ko`，按内核分目录，6.18.60 / 7.3.1 各 25 个）；
   主包负责二进制 + `overlay/f50/files` 整棵树。
+- **DSP 四个场景 profile 已自备装机**（`audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp`），
+  6.18.60 真机通话双向有声回归通过；属 Unisoc 专有，不进公开仓/公开配件包/Release。
 - **设备上不再有"手打的运行时补丁"**。以前靠 `ops/*.sh` 手打的那几处，这轮全固化成了
   `overlay/f50/files/` 下的兼容层，随包安装、刷机后自动生效（见 §4）。
-- 现在只剩人为 UCI 设置还留在设备上：防火墙 `flow_offloading=0`（见 §5）。
+- 防火墙 `flow_offloading`：**6.18.60 实测可保持 `1`**；只有 5.4 线才需要关成 `0`（见 §5）。
 
 ### 1a. 2026-11-14 固化的三个兼容层（**别再手改机器**）
 
@@ -106,7 +108,7 @@ health 接口的 `device_name`/`model`、`/status` 的 `product=AirSIM for F50`�
 | 采集（下行对端声音） | `hw:1,16` | `FE_ST_DUMP of DAC1` |
 | 声卡 | `card1 = sprdphone-sc2730` | |
 | DSP 内存预留 | `/sys/module/audio_reserve/parameters/missing` 应为 `0` | ranges `0xaf700000,0x300000;0xafa00000,0x600000` |
-| 音频扩展状态 | `/usr/lib/airsim/audio-setup --status` → `ready` | |
+| 音频扩展状态 | `ubus call airsim-audio audio_opt_probe` → `ready=true`、`opt_version`、`ko_count/want_ko`、`profiles_present`、`fw_present` | |
 
 **F50 没有喇叭、没有麦克风**——声音全靠 AirSIM 的 PCM 桥经网络走，不要去找本地 mixer 或
 `/dev/snd` 的扬声器，那边什么都没有。Android 侧那条路已判定不可行（ROM 不注册
@@ -117,7 +119,7 @@ health 接口的 `device_name`/`model`、`/status` 的 `product=AirSIM for F50`�
 | # | 现象 | 根因 | 现在怎么办 |
 |---|---|---|---|
 | 1 | 安装报 `MU300 runtime library missing` | 新 rootfs 裁掉了 `/opt/mu300/lib/run-dir.sh` | **已固化**：`overlay/f50/files/opt/mu300/lib/run-dir.sh` 由主包铺上去（§1a）。旧脚本 `ops/` 只留档 |
-| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 对空文件列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | `ops/legacy/音频暂存-空列表保护.sh`（这条仍要单独处理） |
+| 2 | `audio-setup --install` 报 `tar: empty archive`，`status=failed` | `stage-device.sh` 对空文件列表跑 busybox `tar -cpf`，返回 1 触发 `set -e` | **历史坑**：这套 `audio-setup`/`stage-device.sh` 老脚本已退役删除，现行主路径走 LuCI 音频页装 `audio-opt` 配件包；`ops/legacy/音频暂存-空列表保护.sh` 只留档 |
 | 3 | 来电轮询永远失败 `MU300 AT request failed (AT+CLCC)`，手动同条 AT 正常 | 设备自带 `mu300-at` 不认 `-`（stdin），把连字符当命令发出去 | **已固化**：`overlay/f50/files/usr/bin/mu300-at` 探测式兼容层（§1a）。上层那段 `exec.Command(...,"-")` 保持不动，由兼容层适配 |
 | 4 | 数据不拨号：`sipa delegate did not become ready; refusing unsafe PDP activation` | **5.4 的 `sipa-dele.ko` 根本没有 `sipa_dele_wait` 节点**（6.18 才有），而 `delegate_ready()` 把"读不到"当硬失败 | 改 `/opt/mu300/bin/sipa-dele-start` 的 `delegate_ready()`：`/proc/modules` 里有 `sipa_dele` 就记日志放行。**6.18 上不需要这个补丁**（有 `sipa_dele_wait`/`sipa_dele_ready`，走原路径） |
 
@@ -164,11 +166,11 @@ uname -r                                              # 6.18.60（当前，语�
 cat /mnt/mu300-disk/boot/kernel                       # 5.4 / 6.18，当前选择
 cat /proc/asound/cards                                # sprdphone-sc2730（card1）
 
-# —— 语音/DSP：只看这一行，别的都不算证据 ——
+# —— 语音/DSP：只看 dmesg 应答，别的都不算证据 ——
 /usr/bin/mu300-audio-dsp status | grep '^dsp:'
-#   dsp: running - it answered a command on the first try   ← 活的
-#   dsp: no reply - run 'start'                             ← 死的（整机重启一次）
-# 注意：`mu300-audio-dsp start` 的输出和退出码都不能当证据。
+#   dsp: no reply - run 'start'   ← 多半是脚本判活窗口起太早的误报，不能凭这句直接判 DSP 死了
+# 真值判据：dmesg 里有 aud_send_cmd out,cmd ... ret-value:0、且没有 "failed to get command"，即 DSP 真活。
+# 注意：`mu300-audio-dsp start` 的输出和退出码、status 的 no-reply 串，都不能当死/活证据。
 
 /usr/bin/mu300-voice status                           # 要有 scene: running
 /etc/init.d/airsim status                             # running
@@ -180,7 +182,7 @@ printf 'AT+CLCC\n' | /usr/bin/mu300-at -t 6 -          # OK（验证 stdin 兼�
 /sbin/ifconfig >/dev/null; command -v stat || echo '本机没 stat，正常'
 
 ubus call network.interface.wan status | head -20      # up=true, l3_device=sipa_eth0
-uci get firewall.@defaults[0].flow_offloading          # 必须是 0
+uci get firewall.@defaults[0].flow_offloading          # 5.4 必须是 0；6.18.60 实测可保持 1（见 §5）
 nft list chain inet fw4 accept_to_wan | tail -3        # 必须有 oifname "sipa_eth0" ... accept
 ping -c2 223.5.5.5                                     # 设备自身出网
 ```

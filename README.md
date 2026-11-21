@@ -10,9 +10,9 @@
 |---|---|
 | 本适配仓库 | <https://github.com/shangjie1998/airsim-f50-openwrt> |
 | 上游项目 | <https://github.com/kai-wu-cortex/airsim-mu300>（本仓库源码钉在 `v0.1.0-r23`） |
-| 已验收版本 | **`0.1.0.31-r23-any`**（2026-11-14 真机：号码/短信/通话音频三项全通；Wi-Fi 页「已保存」可直接连、不再重输密码；修掉让 Wi-Fi 拿不到 IP 的 `network.wwan` 分裂） |
-| 插件安装包 | [Release `v0.1.0.31-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.31-r23-any) · 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
-| 音频模块包 | `audio-opt 1.0.4`（带 `6.18.60` 与 `7.3.1` 两套）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
+| 已验收版本 | **`0.1.0.41-r23-any`**（2026-11-22 真机 6.18.60：号码/短信/通话音频三项全通，DSP 四个场景 profile 自备装机、通话双向有声回归通过；Wi-Fi 页「已保存」可直接连、不再重输密码；修掉让 Wi-Fi 拿不到 IP 的 `network.wwan` 分裂） |
+| 插件安装包 | [Release `v0.1.0.41-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.41-r23-any) · 约 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
+| 音频模块包 | `audio-opt 1.0.5`（带 `6.18.60` 与 `7.3.1` 两套，各 25 个 `.ko`）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
 | 接手说明 | [docs/接手说明.md](docs/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
 | 联网（Wi-Fi） | [docs/联网.md](docs/联网.md) —— 流量/Wi-Fi/热点三模式互斥 + Wi-Fi 搜索连接删除，**USB 口地址不变** |
 | 编译与复现 | [docs/音频/自编过程.md](docs/音频/自编过程.md) —— 自造 kit、四个编译坑 |
@@ -72,7 +72,7 @@
 
 ### 3-1 装音频模块（按当前内核走，做完必须重启）
 
-常规做法：LuCI → **维护 → 可选配件**，装 `audio-opt 1.0.3`。
+常规做法：LuCI → **维护 → 可选配件**，装 `audio-opt 1.0.5`。
 同一个包（`k6.18.60+7.3.1`）里带两套 payload，装的时候按设备当前内核自动选；
 `5.4` 是厂商镜像自带，不用装。
 
@@ -102,13 +102,13 @@ ssh root@192.168.77.x 'sh /tmp/装音频模块.sh --verify'
 | `mu300-audio-dsp drivers` | 打印 `/mnt/mu300-disk/extra/airsim-audio/modules/<当前内核>`（`6.18.60` 或 `7.3.1`） |
 | `mu300-audio-dsp status` | `drivers: 19/19 loaded`、`memory: 0 pages missing`、`power-up: yes` |
 | `cat /proc/asound/cards` | 出现 `1 [sprdphonesc2730]: sprdphone-sc2730` |
-| `dmesg \| grep aud_send_cmd` | `out,cmd ... ret-value:0` |
+| `dmesg \| grep aud_send_cmd` | `out,cmd ... ret-value:0`（DSP 真活的判据；`status` 偶报 `dsp: no reply` 多是脚本判活窗口起太早的误报，以这条 dmesg 应答为准，不能凭 `no reply` 直接判 DSP 死了） |
 | `wget -qO- http://127.0.0.1:7581/status` | `audio_available: true`，`devices = {Card:1, Capture:"hw:1,16", Playback:"hw:1,53"}` |
 
 ### 3-2 装插件包（覆盖式更新，先备份再换）
 
 ```sh
-scp dist/airsim-f50-0.1.0.26-r23-any.tar.gz root@192.168.77.x:/tmp/p.pkg.tar.gz
+scp dist/airsim-f50-0.1.0.41-r23-any.tar.gz root@192.168.77.x:/tmp/p.pkg.tar.gz
 ssh root@192.168.77.x 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh *\/install.sh'
 ```
 
@@ -159,8 +159,9 @@ sh build/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.t
 | `aplay` 写 `hw:1,53` 恒报 `pcm_write: I/O error` | **假阴性**：没通话时 DSP 不消费 voice PCM；上游 `dsp_alive()` 拿它当探针，本机必须放宽 |
 | `mu300-audio-dsp status` 的 `power-up` 偶显 `unknown` | `amixer` 在 `/usr/lib/airsim/bin`，不在默认 PATH；脚本必须显式带 `PATH=/usr/lib/airsim/bin:/opt/mu300/bin:/opt/mu300/busybox-bin:...` |
 | 设备没有 `/usr/bin/timeout`、`/bin/timeout` | 只有 `/opt/mu300/busybox-bin/timeout`，`prepare.local` 的 PATH 已带上，别乱改 |
-| 上游 `audio-preflight` / `audio-setup` / `stage-device.sh` 仍写死 5.4 | 6.18 走不了官方 `audio-setup --install`，只能按 §3-1 手装 |
-| 音频模块的 CONFIG 哈希与设备不一致 | 设备 `233c7a62…` vs 自编 `d5628675…`，只差两个纯调试项；`set_fits()` 已放宽为"声明了 CONFIG 就放行" |
+| 旧 `audio-preflight` / `audio-setup` / `stage-device.sh` 已退役 | 本仓库主路径是 LuCI 音频页装 `audio-opt` 配件包；上游那套写死 5.4 的老脚本（`audio-setup --install` 等）不再使用，仓库内对应残留已删除，6.18/7.3 走配件包安装器 |
+| 自检不比 CONFIG 哈希 | 判活只认档位对得上（KERNEL 的 `KREL` 等于本机内核）+ 模块 vermagic 认本机内核；编模块时的构建配置和运行内核导出的 `/proc/config.gz` 天然不是同一份，比哈希只会天天报红，CONFIG 字段只当记录留着 |
+| DSP 场景 profile（4 个 blob）自备装机，专有不分发 | `audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp` 四个 profile 已从同 SoC Android 底包取回、本地编译装机，6.18.60 真机通话双向有声回归通过；缺省走 `legacy_pcm` 直连兜底也能打通，profile 是完整 DSP 通路的场景路由/增益/降噪回声消除/智能功放参数，非打通必要条件；属 Unisoc 专有，不进公开仓/公开配件包/Release |
 | iOS 已配对设备仍显示旧名 | 设备名缓存在 App 本地，改名后需删设备重新配对 |
 | 签名 apk 一直没出 | 需要能跑 `apk-tools 3.x` 的 Linux；Mac 上没 Docker |
 | r23 的 Tailscale 私网配对 / 云端缓冲协商 | **未启用、未验收**（2026-11-09 决定先不测）：设备没有 `tailscale0` 接口；缓冲档位由 iPhone 端协商下发，设备侧无观测点。本包只走上游原有路径 |

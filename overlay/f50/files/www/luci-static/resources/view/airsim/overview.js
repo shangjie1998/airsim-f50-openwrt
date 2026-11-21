@@ -395,7 +395,7 @@ return view.extend({
      E('div', { 'class': 'as-number-block' }, [E('span', { 'class': 'as-label' }, 'SIM 本机号码'), text('number', 'div', 'as-number'), text('numberHint', 'p', 'as-caption'), simsLine]),
      E('dl', { 'class': 'as-status-list' }, [row('SIM 卡', 'sim'), row('移动网络', 'network'), row('信号强度', 'signal'), batteryRow, row('当前通话', 'call'), row('音频设备', 'audio'), row('设备地址', 'address')]),
      E('details', { 'class': 'as-details' }, [E('summary', {}, '连接与诊断'), E('dl', {}, [row('云端 Relay', 'relay'), row('上行 / 下行帧', 'frames'), row('最近音频错误', 'audioError')]), text('relayError', 'p', 'as-technical')]),
-     E('p', { 'class': 'as-caption' }, '音频主固件与 profiles 参数均需自备；没有 profiles 也能走直连兜底打通电话，详见「音频」页。'),
+     E('p', { 'class': 'as-caption' }, '音频主固件 agdsp.bin 与 DSP profiles 参数都是 Unisoc 专有、不随包分发，需自备；本机 profiles 已装入并实测通话双向有声。没有 profiles 也能走 legacy_pcm 直连兜底打通电话，详见「音频」页。'),
      text('updated', 'p', 'as-updated')
     ]),
     E('section', { 'class': 'as-card', 'aria-label': '服务控制' }, [E('div', { 'class': 'as-step-heading' }, [E('span', { 'class': 'as-step' }, '01'), E('h3', {}, '启动服务')]), text('serviceCopy', 'p', 'as-copy'),

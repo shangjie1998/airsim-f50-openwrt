@@ -358,7 +358,7 @@ body.as-menu-on footer{display:none!important}
 
 /* ---------- 配件卡片头：左边标题、右下角「版本号 + 检查更新图标」 ----------
  * 用法：<div class="as-card-head"><h4>标题</h4><div class="as-head-meta">
- *          <span class="as-ver">audio-opt v1.0.3</span>
+ *          <span class="as-ver">audio-opt v1.0.5</span>
  *          <button class="as-icon-btn"><span class="as-glyph">↻</span></button>
  *       </div></div>
  * 图标语义：↻ 可查 → 旋转(正在查) → ✓ 已最新 / ↑ 有新版本(绿) / ⚠ 查不到(红)。
