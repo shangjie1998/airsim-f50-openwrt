@@ -40,7 +40,7 @@ cat /proc/asound/cards                             # 期望：Loopback + sprdpho
 - 配件包**只带模块**，不带主程序；主包装不装它都能跑（只是没声）。
 - 配件包按 `<KREL>` 分目录，装之前先看 `payload/` 里有没有你这一档。
 - 主包 `install.sh` 只负责"提示有没有对应目录"，**不替配件包装任何东西**。
-- **AGDSP 主固件 `agdsp.bin` 不在配件包内，也不进公开仓 / 公开 Release**：它是 Unisoc/展锐专有镜像，上游只搬运未给再分发许可。需从上游作者仓库 `dikeckaan/mu300-audio-firmware` 的 v1.0 release 手动取 `agdsp.bin`，落到设备 `/lib/firmware/agdsp.bin`（`mu300-audio-dsp install <文件>` 会校验大小、AUDCP 头并记 sha256 到 `/etc/mu300/agdsp.sha256`）。缺它时驱动和声卡能起，但 DSP 不上电、双向通话无声。自用下载 / 局域网 / 私有网盘私有目录留存合规；public 仓、公开 Release、匿名分享链接、二次分发违规。
+- **AGDSP 主固件 `agdsp.bin` 不在配件包内，也不进公开仓 / 公开 Release**：它是 Unisoc/展锐专有镜像，上游只搬运未给再分发许可。从上游固定 v1.0 Release 手动取（6,291,456 字节，SHA-256 `378ceea78dbf013e10625e71efd6fab487d727e371884ae8daf078da2828b937`）：<https://github.com/dikeckaan/mu300-audio-firmware/releases/download/v1.0/agdsp.bin>。落到设备 `/lib/firmware/agdsp.bin`（`mu300-audio-dsp install <文件>` 会校验大小、AUDCP 头并记 sha256 到 `/etc/mu300/agdsp.sha256`）。缺它时驱动和声卡能起，但 DSP 不上电、双向通话无声。自用下载 / 局域网 / 私有网盘私有目录留存合规；public 仓、公开 Release、匿名分享链接、二次分发违规。出处与提交锚点见 [../../src/plugin/docs/DSP_FIRMWARE_PROVENANCE.md](../../src/plugin/docs/DSP_FIRMWARE_PROVENANCE.md)。
 
 ## 四之一、DSP 场景 profile（已自备装机，专有不分发）
 

@@ -10,8 +10,8 @@
 |---|---|
 | 本适配仓库 | <https://github.com/shangjie1998/airsim-f50-openwrt> |
 | 上游项目 | <https://github.com/kai-wu-cortex/airsim-mu300>（本仓库源码钉在 `v0.1.0-r23`） |
-| 已验收版本 | **`0.1.0.41-r23-any`**（2026-11-22 真机 6.18.60：号码/短信/通话音频三项全通，DSP 四个场景 profile 自备装机、通话双向有声回归通过；Wi-Fi 页「已保存」可直接连、不再重输密码；修掉让 Wi-Fi 拿不到 IP 的 `network.wwan` 分裂） |
-| 插件安装包 | [Release `v0.1.0.41-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.41-r23-any) · 约 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
+| 已验收版本 | **`0.1.0.42-r23-any`**（2026-11-22 真机 6.18.60：号码/短信/通话音频三项全通，DSP 主固件与四个场景 profile 自备装机、通话双向有声回归通过；Wi-Fi 页「已保存」可直接连、不再重输密码；修掉让 Wi-Fi 拿不到 IP 的 `network.wwan` 分裂） |
+| 插件安装包 | [Release `v0.1.0.42-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.42-r23-any) · 约 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
 | 音频模块包 | `audio-opt 1.0.5`（带 `6.18.60` 与 `7.3.1` 两套，各 25 个 `.ko`）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
 | 接手说明 | [docs/接手说明.md](docs/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
 | 联网（Wi-Fi） | [docs/联网.md](docs/联网.md) —— 流量/Wi-Fi/热点三模式互斥 + Wi-Fi 搜索连接删除，**USB 口地址不变** |
@@ -105,10 +105,37 @@ ssh root@192.168.77.x 'sh /tmp/装音频模块.sh --verify'
 | `dmesg \| grep aud_send_cmd` | `out,cmd ... ret-value:0`（DSP 真活的判据；`status` 偶报 `dsp: no reply` 多是脚本判活窗口起太早的误报，以这条 dmesg 应答为准，不能凭 `no reply` 直接判 DSP 死了） |
 | `wget -qO- http://127.0.0.1:7581/status` | `audio_available: true`，`devices = {Card:1, Capture:"hw:1,16", Playback:"hw:1,53"}` |
 
+### 3-1b DSP 主固件 `agdsp.bin` 需自备（缺它双向无声）
+
+音频这条链上有三样东西，别混：
+
+| 东西 | 是什么 | 从哪来 |
+|---|---|---|
+| 25 个 `.ko` 驱动模块 | 内核侧音频驱动 | 在 `audio-opt` 配件包内，随包分发 |
+| **`agdsp.bin` DSP 主固件** | DSP 核跑起来要的专有镜像（6,291,456 字节） | **不在主包、配件包、公开 Release 里，需自备**（本节） |
+| 4 个 profile blob | 完整 DSP 通路的场景路由/增益/降噪回声消除/功放参数 | 自备，见 §4；缺省 `legacy_pcm` 直连兜底仍可打通 |
+
+**为什么不随包发**：`agdsp.bin` 是 Unisoc/展锐专有镜像，上游只做搬运、没给再分发许可；
+本项目的开源许可不覆盖它，所以主包、配件包、公开仓库、公开 Release、匿名链接都不内置这份文件。
+
+**怎么取、放哪**：
+
+1. 从上游固定 Release 手动下载：
+   <https://github.com/dikeckaan/mu300-audio-firmware/releases/download/v1.0/agdsp.bin>
+2. 先核对 SHA-256 必须是
+   `378ceea78dbf013e10625e71efd6fab487d727e371884ae8daf078da2828b937`，不符不得装机。
+3. 落到设备 `/lib/firmware/agdsp.bin`；用 `mu300-audio-dsp install <文件>` 原子落位，
+   它会校验大小、AUDCP 头并把哈希记到 `/etc/mu300/agdsp.sha256`，已有固件不覆盖。
+
+**缺了它会怎样**：驱动和声卡能起来，但 DSP 不上电、**双向通话无声**。
+探针字段 `fw_present` 报 `/lib/firmware/agdsp.bin` 是否在位。出处、提交锚点与许可记录见
+[src/plugin/docs/DSP_FIRMWARE_PROVENANCE.md](src/plugin/docs/DSP_FIRMWARE_PROVENANCE.md)。
+自用下载、局域网喂入、私有网盘私有目录留存可接受；公开仓、公开 Release、匿名分享、二次分发违规。
+
 ### 3-2 装插件包（覆盖式更新，先备份再换）
 
 ```sh
-scp dist/airsim-f50-0.1.0.41-r23-any.tar.gz root@192.168.77.x:/tmp/p.pkg.tar.gz
+scp dist/airsim-f50-0.1.0.42-r23-any.tar.gz root@192.168.77.x:/tmp/p.pkg.tar.gz
 ssh root@192.168.77.x 'cd /tmp && rm -rf pkg && mkdir pkg && tar xzf p.pkg.tar.gz -C pkg && sh *\/install.sh'
 ```
 
@@ -161,6 +188,7 @@ sh build/make-package.sh --build       # 重编 + 打 dist/airsim-f50-<版本>.t
 | 设备没有 `/usr/bin/timeout`、`/bin/timeout` | 只有 `/opt/mu300/busybox-bin/timeout`，`prepare.local` 的 PATH 已带上，别乱改 |
 | 旧 `audio-preflight` / `audio-setup` / `stage-device.sh` 已退役 | 本仓库主路径是 LuCI 音频页装 `audio-opt` 配件包；上游那套写死 5.4 的老脚本（`audio-setup --install` 等）不再使用，仓库内对应残留已删除，6.18/7.3 走配件包安装器 |
 | 自检不比 CONFIG 哈希 | 判活只认档位对得上（KERNEL 的 `KREL` 等于本机内核）+ 模块 vermagic 认本机内核；编模块时的构建配置和运行内核导出的 `/proc/config.gz` 天然不是同一份，比哈希只会天天报红，CONFIG 字段只当记录留着 |
+| DSP 主固件 `agdsp.bin` 自备，专有不分发 | Unisoc/展锐专有镜像，不在主包/配件包/公开 Release 内；从上游固定 v1.0 Release 手动取、核对 SHA-256 后落 `/lib/firmware/agdsp.bin`。缺它时驱动和声卡能起，但 DSP 不上电、**双向通话无声**。详见 §3-1b 与 [固件出处记录](src/plugin/docs/DSP_FIRMWARE_PROVENANCE.md) |
 | DSP 场景 profile（4 个 blob）自备装机，专有不分发 | `audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp` 四个 profile 已从同 SoC Android 底包取回、本地编译装机，6.18.60 真机通话双向有声回归通过；缺省走 `legacy_pcm` 直连兜底也能打通，profile 是完整 DSP 通路的场景路由/增益/降噪回声消除/智能功放参数，非打通必要条件；属 Unisoc 专有，不进公开仓/公开配件包/Release |
 | iOS 已配对设备仍显示旧名 | 设备名缓存在 App 本地，改名后需删设备重新配对 |
 | 签名 apk 一直没出 | 需要能跑 `apk-tools 3.x` 的 Linux；Mac 上没 Docker |
