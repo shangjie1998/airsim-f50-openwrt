@@ -144,6 +144,18 @@ fi
 rm -f /usr/share/luci/menu.d/luci-app-airsim-maintenance.json \
       /usr/share/luci/menu.d/luci-app-airsim-pages.json 2>/dev/null || true
 
+# --- 退役脚本清场 ---
+# 早期写死 5.4 的 audio-setup / audio-preflight / stage-device.sh 已退役，现役主路径是
+# LuCI 音频页装 audio-opt 配件包。历史装机留在 /etc/init.d、rc.d 与 /usr/lib/airsim 的
+# 空脚本/死链接在这里幂等收掉（没装过就是空操作），不碰现役件。
+for f in airsim-audio-setup; do
+	rm -f "/etc/init.d/$f"
+	rm -f /etc/rc.d/S*"$f" /etc/rc.d/K*"$f" 2>/dev/null || true
+done
+for f in audio-setup audio-preflight stage-device.sh; do
+	rm -f "/usr/lib/airsim/$f" 2>/dev/null || true
+done
+
 chmod 755 /usr/libexec/rpcd/airsim-* 2>/dev/null || true
 chmod 755 /usr/lib/airsim/call-forward /etc/init.d/airsim-call-forward 2>/dev/null || true
 
