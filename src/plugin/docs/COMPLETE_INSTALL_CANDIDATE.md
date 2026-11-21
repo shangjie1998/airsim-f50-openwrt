@@ -1,5 +1,9 @@
 # One-install audio — R17 implementation and acceptance
 
+> **已退役（2026-11-21）**：本文件描述的 complete-install 候选机制（APK 内集成音频扩展、
+> 内置固件备用副本、`audio-setup` 状态机、r16 bundle）已整体退役。现行 F50 路线为主包不带
+> 模块、音频走独立配件包 audio-opt，主固件由用户自备。下文仅作历史留档，勿据此复现打包。
+
 This document records the published R17 behavior. The local R18 candidate adds a
 verified firmware copy in its APK as an offline fallback; see
 [DSP firmware provenance](DSP_FIRMWARE_PROVENANCE.md). R17 assets remain unchanged.

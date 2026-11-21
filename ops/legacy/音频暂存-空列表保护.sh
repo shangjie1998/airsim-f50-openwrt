@@ -1,4 +1,6 @@
 #!/bin/sh
+# 【已退役 · 历史留档】依赖 S97 airsim-audio-setup 状态机与 .airsim-complete-install 目录，
+# 该机制随 complete-install 候选一并退役；现行音频走独立配件包 audio-opt，勿再照此脚本执行。
 set -eu
 W=/tmp/aud
 SAVE=/mnt/mu300-disk/extra/.airsim-audio-recovery-backup

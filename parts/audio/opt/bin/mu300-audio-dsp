@@ -282,8 +282,15 @@ dsp_alive() {
     # bounded probe runs, there is no sufficient evidence and this check fails.
     marker=$(dmesg 2>/dev/null | tail -n 1)
     [ -n "$marker" ] || return 1
-    # any PCM open sends the DSP a scene command; the reply is what we are looking for
-    head -c 192000 /dev/zero | timeout 8 aplay --fatal-errors -D "hw:$card,0" -f S16_LE -r 48000 -c 2 -q >/dev/null 2>&1 || true
+    # any PCM open sends the DSP a scene command; the reply is what we are looking for.
+    # 后台起 aplay 再回收，不依赖 coreutils `timeout`（精简固件里可能没装）。
+    head -c 192000 /dev/zero | aplay --fatal-errors -D "hw:$card,0" -f S16_LE -r 48000 -c 2 -q >/dev/null 2>&1 &
+    p=$!
+    sleep 2
+    wait $p 2>/dev/null; aplay_rc=$?
+    kill $p 2>/dev/null
+    # PCM 都打不开，谈不上 DSP 应答，直接判死。
+    [ "$aplay_rc" -eq 0 ] || return 1
     recent=$(dmesg 2>/dev/null | awk -v marker="$marker" '$0 == marker { seen=1; next } seen')
     printf '%s\n' "$recent" | grep -q 'aud_send_cmd out,cmd' &&
         ! printf '%s\n' "$recent" | grep -q 'failed to get command'
@@ -398,7 +405,7 @@ status)
         # every firmware write to.
         set -- $(od -An -tu4 -j32 -N8 "$BOOT/ldinfo" 2>/dev/null)
         [ -n "${1:-}" ] && printf 'ldinfo:   %s loads at %#x, room for %s bytes\n' \
-            "$(head -c 32 "$BOOT/ldinfo" 2>/dev/null | tr -d '\0')" "$1" "$2"
+            "$(head -c 32 "$BOOT/ldinfo" 2>/dev/null | tr -d '\0')" "$1" "${2:-0}"
         case "$(dsp_wakes; echo $?)" in
             0) echo "power-up: yes - the domain came up when a PCM was opened" ;;
             2) echo "power-up: unknown - install alsa-utils to open a PCM and find out" ;;

@@ -10,12 +10,6 @@ service_status() {
 	payload=$(wget -q -T 5 -O - http://127.0.0.1:7581/status 2>/dev/null)
 	if [ -n "$payload" ]; then json_load "$payload"; else json_init; json_add_boolean running 0; fi
 	json_add_boolean service_alive "$alive"
-	if [ -x /usr/lib/airsim/audio-setup ]; then
-		setup=$(/usr/lib/airsim/audio-setup --status 2>/dev/null)
-		case "$setup" in ready|reboot_required|downloading_firmware|staging|preparing|failed) ;; *) setup=not_prepared ;; esac
-		json_add_string audio_setup "$setup"
-		[ "$setup" = ready ] || json_add_boolean audio_available 0
-	fi
 	json_dump
 }
 case "$1" in
@@ -89,14 +83,6 @@ call)
 		wget -q -T 10 --post-data='{}' -O - http://127.0.0.1:7581/number/refresh || printf '%s\n' '{"error":"无法读取号码，请检查服务状态"}'
 		;;
 	start)
-		if [ -x /usr/lib/airsim/audio-setup ]; then
-			setup=$(/usr/lib/airsim/audio-setup --status 2>/dev/null)
-			case "$setup" in
-			 ready) ;;
-			 reboot_required) printf '%s\n' '{"error":"音频组件已安装，请重启进入 OpenWrt 一次，系统会自动完成准备。"}'; exit 0 ;;
-			 *) printf '%s\n' '{"error":"音频安装准备尚未完成，请先检查安装结果。"}'; exit 0 ;;
-			esac
-		fi
 		if ! uci set airsim.main.enabled=1 || ! uci commit airsim || ! /etc/init.d/airsim enable; then
 			printf '%s\n' '{"error":"无法保存服务配置"}'; exit 0
 		fi

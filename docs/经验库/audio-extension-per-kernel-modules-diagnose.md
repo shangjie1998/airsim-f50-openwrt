@@ -22,9 +22,10 @@ metadata:
 不要以为换更大的内核版本号就能通；音频模块是按 release 串与内核配置编译的，缺模块时只能回旧内核，或用音频源码按目标内核重编整组模块并同步改预检的期望值（需对应 SDK 与内核头文件）。
 
 ## 可复用的产物或模板
+> 旧 complete-install 时代的 deps bundle 与 `audio-preflight` 已退役；现行模块在独立配件包目录。
 ```sh
-tar tzf /usr/lib/airsim/deps/*.tar.gz | grep -o 'modules/[^/]*/' | sort -u
+ls /mnt/mu300-disk/extra/airsim-audio/modules/          # 配件包带了哪几档内核的模块
+cat /sys/module/audio_reserve/parameters/missing       # 预留内存缺几页，必须为 0
 ls /lib/modules/$(uname -r) | grep -c '^audio_'
 cat /proc/asound/cards
-/usr/lib/airsim/audio-preflight; echo "rc=$?"
 ```

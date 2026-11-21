@@ -45,15 +45,16 @@ driver is already loaded. Activation consequently requires a clean boot with
 reservation before audio driver loading. Do not load it into the current legacy
 driver session. r15 remains withdrawn.
 
-`scripts/package-openwrt-audio.py` re-audits all module imports before making a
-deterministic candidate and corresponding audio-source archive. Its five inputs
-are the evidence directory, official reference-module directory, isolated patched
-audio source, hash-pinned v1.0.5 userspace archive, and output directory. The
-source archive contains already-patched audio sources plus the integration recipe;
-do not apply guard-reservation.patch to those patched sources a second time.
+Module imports and ABI alignment are re-audited by `scripts/openwrt-audio-abi.py`
+against the kernel symbol table, reference modules and built candidates;
+`scripts/openwrt-audio.test.py` / `openwrt-audio-dsp.test.py` cover the patched
+source and DSP guard. The old deterministic-candidate packager
+(`package-openwrt-audio.py`) and its r16 source archive are retired with the
+complete-install profile; current F50 audio modules ship through the separate
+audio-opt accessory package, not an in-bundle candidate.
 Kernel and system recipe inputs are pinned by URL and hash in sources.json.
 The three legacy static tools' source is unchanged between v1.0.5 and the pinned
-audio commit. Only the newly built 24 kernel modules enter the candidate.
+audio commit. Only the newly built 24 kernel modules enter the accessory package.
 
 For the explicitly authorized recovery, transfer the candidate over the selected
 USB connection, verify its host-computed SHA-256, and unpack it in a private

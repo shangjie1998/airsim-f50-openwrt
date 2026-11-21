@@ -21,20 +21,33 @@ jerr() { json_init; json_add_boolean ok 0; json_add_string error "$1"; json_dump
 need_probe() { [ -x "$PROBE" ] || { jerr '缺少能力探测脚本 airsim-net-probe'; exit 0; }; }
 need_mode()  { [ -x "$NETMODE" ] || { jerr '缺少切换脚本 airsim-netmode'; exit 0; }; }
 
-cfg_sta()  { "$PROBE" -k sta_section 2>/dev/null; }
-cfg_ap()   { "$PROBE" -k ap_section 2>/dev/null; }
-live_if()  { "$PROBE" -k live_if 2>/dev/null; }
-band()     { "$PROBE" -k band_label 2>/dev/null; }
-channels() { "$PROBE" -k channels 2>/dev/null; }
+# 取一个探测键。screen 开头已跑过一次全量探测、把 key=value 缓存到
+# AIR_SIM_PROBE_CACHE 指向的文件时，直接读文件，不再为每个键重新 fork 探测脚本
+# （这颗 SoC 上一次 fork + uci/iw 扫描约 70ms，联网页首屏重复取一批键就多花近半秒）。
+# 缓存缺失/为空（扫描、连接等独立链路直接被调用）时回退原样 fork probe，行为不变。
+pk() {
+	local _k=$1
+	if [ -n "${AIR_SIM_PROBE_CACHE:-}" ] && [ -s "$AIR_SIM_PROBE_CACHE" ]; then
+		sed -n "s/^$_k=//p" "$AIR_SIM_PROBE_CACHE" 2>/dev/null | head -1
+	else
+		"$PROBE" -k "$_k" 2>/dev/null
+	fi
+}
+
+cfg_sta()  { pk sta_section; }
+cfg_ap()   { pk ap_section; }
+live_if()  { pk live_if; }
+band()     { pk band_label; }
+channels() { pk channels; }
 
 # 无线口名不写死：同一颗射频在 AP 模式叫 wlan0，STA 模式常叫 phy0-sta0（由 netifd
 # 按 phy 派生）。这里把 probe 探到的三个名字汇总去重，防火墙区按这一整组收录，
 # 两种模式下规则都能命中；取不到才回退历史默认 wlan0。
 wifi_devs() {
 	local _a _s _l _d _out=''
-	_a=$("$PROBE" -k ap_if 2>/dev/null)
-	_s=$("$PROBE" -k sta_if 2>/dev/null)
-	_l=$("$PROBE" -k live_if 2>/dev/null)
+	_a=$(pk ap_if)
+	_s=$(pk sta_if)
+	_l=$(pk live_if)
 	[ -n "$_a" ] || _a=wlan0
 	for _d in "$_l" "$_s" "$_a"; do
 		[ -z "$_d" ] && continue
@@ -63,7 +76,7 @@ sta_ensure() {
 	sta=${1:-}
 	[ -n "$sta" ] || { sta=$(cfg_sta); [ -n "$sta" ] || sta=wwan0; }
 	net=$(uci -q get "wireless.$sta.network" 2>/dev/null); [ -n "$net" ] || net=wwan
-	radio=$("$PROBE" -k radio 2>/dev/null); [ -n "$radio" ] || radio=radio0
+	radio=$(pk radio); [ -n "$radio" ] || radio=radio0
 
 	# 段连类型都没有时先建一个 wifi-iface 段；只 set 具体字段会留下没有类型的裸段，
 	# wireless 靠 `=wifi-iface` 识别接口，认不出就当不存在。
@@ -104,8 +117,8 @@ net_off_wan() {
 sta_live_if() {
 	local _d
 	_d=$(live_if)
-	[ -n "$_d" ] || _d=$("$PROBE" -k sta_if 2>/dev/null)
-	[ -n "$_d" ] || _d=$("$PROBE" -k ap_if 2>/dev/null)
+	[ -n "$_d" ] || _d=$(pk sta_if)
+	[ -n "$_d" ] || _d=$(pk ap_if)
 	[ -n "$_d" ] || _d=wlan0
 	echo "$_d"
 }
@@ -129,7 +142,7 @@ wifi_scan() {
 	# 待配置态（热点关了、STA 还没 SSID）下射频会睡下去，iwinfo 只会回
 	# "Netlink error while awaiting scan results: No event received"。用 txpower 判一下，
 	# 睡着了就把无线栈顶起来再扫。
-	if [ "$("$PROBE" -k ap_disabled 2>/dev/null)" = 1 ]; then
+	if [ "$(pk ap_disabled)" = 1 ]; then
 		_w=$(sta_live_if)
 		tp=$(iwinfo "$_w" info 2>/dev/null | awk -F': ' '/Tx-Power/{gsub(/ dBm/,"",$2); print $2; exit}')
 		if [ -z "$tp" ] || [ "$tp" = 0 ]; then
@@ -660,8 +673,8 @@ direct_status() {
 	json_add_string ports "$(direct_ports)"
 	json_add_string host "${_host:-}"
 	json_add_string devices "$(wifi_devs)"
-	json_add_string sta_if "$("$PROBE" -k sta_if 2>/dev/null)"
-	json_add_string ap_if "$("$PROBE" -k ap_if 2>/dev/null)"
+	json_add_string sta_if "$(pk sta_if)"
+	json_add_string ap_if "$(pk ap_if)"
 	json_add_string live_if "$(live_if)"
 	json_dump
 }
@@ -672,10 +685,12 @@ direct_status() {
 # 合成一个方法后串起来跑一次，联网页出卡片从 0.52 秒降到 0.3 秒上下。
 net_screen() {
 	local _f _p _s _w _a _d
-	# 探测只跑一次：拿 key=value 那份，自己拼页面要的几个字段，
-	# 同一份再喂给 airsim-netmode 查状态，省掉第二次探测（约 0.07 秒）
+	# 探测只跑一次：拿 key=value 那份存成缓存文件，既喂给 airsim-netmode 查状态，
+	# 也喂给本脚本后面的 wifi_saved / admin_status / direct_status 取键，省掉为
+	# 每个键重新 fork 探测脚本（联网页首屏这部分约半秒，见 pk() 注释）。
 	_f=$(mktemp /tmp/.airsim-screen.XXXXXX 2>/dev/null) || _f=/tmp/.airsim-screen.$$
 	"$PROBE" -p >"$_f" 2>/dev/null || : >"$_f"
+	export AIR_SIM_PROBE_CACHE="$_f"
 	_p=$(awk -F= '
 		{ v[$1] = $2 }
 		END {
@@ -684,7 +699,7 @@ net_screen() {
 				(v["single_radio"] == "1" ? "true" : "false"),
 				(v["noscan"] == "1" ? "true" : "false")
 		}' "$_f")
-	_s=$(AIR_SIM_PROBE_CACHE="$_f" "$NETMODE" status --json 2>/dev/null); [ -n "$_s" ] || _s='{"ok":false}'
+	_s=$("$NETMODE" status --json 2>/dev/null); [ -n "$_s" ] || _s='{"ok":false}'
 	_w=$(wifi_saved 2>/dev/null);     [ -n "$_w" ] || _w='{}'
 	_a=$(admin_status 2>/dev/null);   [ -n "$_a" ] || _a='{}'
 	_d=$(direct_status 2>/dev/null);  [ -n "$_d" ] || _d='{}'

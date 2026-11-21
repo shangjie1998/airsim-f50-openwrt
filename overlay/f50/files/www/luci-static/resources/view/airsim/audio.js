@@ -18,6 +18,10 @@ var kbList = rpc.declare({ object: 'airsim-audio', method: 'kernel_bundles', exp
 
 var KERNEL_CHOICES = ['5.4', '6.18', '7.3'];
 
+/* AGDSP 主固件：专有未授权镜像，配件包/主包/公开仓都不内置，只能从上游作者 release 自备。 */
+var FW_URL = 'https://github.com/dikeckaan/mu300-audio-firmware/releases/download/v1.0/agdsp.bin';
+var FW_PATH = '/lib/firmware/agdsp.bin';
+
 function card(title, body, wide) {
  return E('section', { 'class': 'as-card' + (wide ? ' as-wide' : '') }, [E('h3', {}, title)].concat(body));
 }
@@ -32,6 +36,7 @@ function optCard(lc) {
  var rowKernel = E('dd', {}, '—');
  var rowMode = E('dd', {}, '—');
  var rowKo = E('dd', {}, '—');
+ /* 固件在位状态由独立「AGDSP 主固件」卡片展示，这里不再重复提示。 */
  var rowOpt = E('dd', {}, '—');
 
  function setNotice(el, kind, title, detail) {
@@ -79,6 +84,7 @@ function optCard(lc) {
   installBtn.textContent = ready ? '重装' : (installed ? '补齐缺件' : '安装 / 重装');
   installBtn.title = inopt ? '' : '当前内核不在这个配件包的覆盖范围（' + (info.opt_kernels || '') + '），装了也起不来';
   note.textContent = '配件包按内核编二进制：' + (info.opt_kernels || '—') + '。内核对不上的要换配件包，不是硬装。缺工具链时按钮会自动从配件包仓库补。';
+
  }
 
  var installBtn = E('button', { 'type': 'button', 'class': 'as-button', 'disabled': true, 'click': function() {
@@ -312,6 +318,94 @@ function kernelCard() {
  ], true);
 }
 
+/* ---------------- AGDSP 主固件（自备说明） ---------------- */
+function fwCard() {
+ var statusEl = E('p', { 'class': 'as-caption' }, '正在读取本机固件状态……');
+ var urlBox = E('p', { 'class': 'as-technical' }, FW_URL);
+ var pathBox = E('p', { 'class': 'as-technical' }, FW_PATH);
+ var feed = E('p', { 'class': 'as-caption', 'role': 'status', 'aria-live': 'polite' }, '');
+
+ function copyText(text, okMsg) {
+  if (!text) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+   navigator.clipboard.writeText(text).then(function() { feed.textContent = okMsg; })
+    .catch(function() { feed.textContent = '复制被浏览器拦了，手动选中那行复制。'; });
+  } else {
+   feed.textContent = '这个浏览器不让自动复制，手动选中那行复制。';
+  }
+ }
+
+ var copyUrlBtn = E('button', { 'type': 'button', 'class': 'as-button', 'click': function() { copyText(FW_URL, '下载链接已复制，去浏览器或 SSH 里粘。'); } }, '复制下载链接');
+ var copyPathBtn = E('button', { 'type': 'button', 'class': 'as-button', 'click': function() { copyText(FW_PATH, '落地路径已复制。'); } }, '复制落地路径');
+
+ setTimeout(function() {
+  audProbe().then(function(r) {
+   var info = r && r[0] ? r[0] : (r || {});
+   if (info.fw_present === true) {
+    statusEl.className = 'as-caption as-mini-green';
+    statusEl.textContent = '本机已有这个固件：' + FW_PATH;
+   } else {
+    statusEl.className = 'as-caption as-mini-red';
+    statusEl.textContent = '本机没有这个固件；先从下面链接取一份落到设备上，通话才有声。';
+   }
+  }).catch(function() { statusEl.textContent = '本机固件状态读不到（主包较旧）。'; });
+ }, 0);
+
+ return card('AGDSP 主固件（语音 DSP）', [
+  E('p', { 'class': 'as-copy' }, '这是语音 DSP 跑起来必需的专有固件，文件名叫 agdsp.bin。'),
+  statusEl,
+  E('div', { 'class': 'as-field-label' }, '从哪里获取（上游作者仓库 v1.0 release）'),
+  urlBox,
+  E('div', { 'class': 'as-field-label' }, '放到设备哪个目录'),
+  pathBox,
+  E('div', { 'class': 'as-buttons' }, [copyUrlBtn, copyPathBtn]),
+  feed,
+  E('p', { 'class': 'as-caption' }, '为什么咱不带：它是 Unisoc/展锐专有镜像，上游作者只做了搬运、没有给出再分发许可，所以配件包、主包和公开仓库都不内置这份文件，只能你自己从上面链接取。'),
+  E('p', { 'class': 'as-caption' }, '缺了它会怎样：驱动和声卡能起，但 DSP 不上电，双向通话无声。落位后由 mu300-audio-dsp 校验大小、AUDCP 头和 SHA-256，已有固件不覆盖。')
+ ], true);
+}
+
+/* ---------------- DSP 通话参数 profiles（自备说明） ---------------- */
+var PROFILE_NAMES = ['audio_structure', 'dsp_vbc', 'cvs', 'dsp_smartamp'];
+
+function profilesCard() {
+ var statusEl = E('p', { 'class': 'as-caption' }, '正在读取本机参数状态……');
+ var listBox = E('p', { 'class': 'as-technical' }, PROFILE_NAMES.join(' · '));
+
+ setTimeout(function() {
+  audProbe().then(function(r) {
+   var info = r && r[0] ? r[0] : (r || {});
+   if (info.profiles_present === true) {
+    statusEl.className = 'as-caption as-mini-green';
+    statusEl.textContent = '本机已有四个 profile 参数（/lib/firmware/）。';
+   } else {
+    statusEl.className = 'as-caption as-mini-red';
+    statusEl.textContent = '本机缺：' + (info.profiles_missing || '部分 profile 参数') + '；不影响先打通电话。';
+   }
+  }).catch(function() { statusEl.textContent = '本机参数状态读不到（主包较旧）。'; });
+ }, 0);
+
+ return card('DSP 通话参数（profiles）', [
+  E('p', { 'class': 'as-copy' }, '四个 blob 是 DSP 通话场景参数：音频结构、VBC 语音处理、CVS 后处理、智能功放。'),
+  statusEl,
+  E('div', { 'class': 'as-field-label' }, '文件名（落在 /lib/firmware/）'),
+  listBox,
+  E('p', { 'class': 'as-caption' }, '没有这四个也能正常打电话：缺省时通话走 legacy_pcm 直连兜底通路，不挡打通；装上后 DSP 才按通话场景套用路由、增益、降噪回声消除和智能功放参数。6.18.60 已实测装入后正常通话、双向有声。'),
+  E('p', { 'class': 'as-caption' }, '为什么咱不带：这些是 Unisoc/展锐专有参数，未提供再分发许可，配件包、主包和公开仓库都不内置，需自备（从同 SoC Android 的 audio_params XML 编译）。')
+ ], true);
+}
+
+/* ---------------- 说明与自备项（不阻塞直连通话） ---------------- */
+function knownIssuesCard() {
+ return card('说明与自备项', [
+  E('p', { 'class': 'as-copy' }, '下面几条不挡 legacy_pcm 直连通话，先记下。'),
+  E('ul', { 'class': 'as-instructions' }, [
+   E('li', {}, 'AGDSP 主固件 agdsp.bin 属专有镜像，配件包不随包分发，需按上方「AGDSP 主固件」提示自备；固件不到位时 DSP 不上电、通话无声。'),
+   E('li', {}, 'DSP profiles 四个参数 blob 已自备装入并实测通话通过；缺省仍可走直连兜底打通电话，详见上方「DSP 通话参数」卡片。')
+  ])
+ ], true);
+}
+
 return view.extend({
  load: function() { return {}; },
  render: function() {
@@ -332,7 +426,7 @@ return view.extend({
     ]),
     E('div', { 'class': 'as-head-meta' }, [lc.ver, lc.btn])
    ]),
-   E('div', { 'class': 'as-layout' }, [optCard(lc), selfCheckCard(), kernelCard()])
+   E('div', { 'class': 'as-layout' }, [optCard(lc), selfCheckCard(), fwCard(), profilesCard(), kernelCard(), knownIssuesCard()])
   ]);
  },
  handleSaveApply: null,

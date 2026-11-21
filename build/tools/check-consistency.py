@@ -68,7 +68,7 @@ if not modlist:
 elif not want:
     problems.append('rpcd/airsim-audio 里没找到 WANT_KO=NN')
 else:
-    real = sum(1 for ln in modlist.splitlines() if ln.strip().endswith('.ko'))
+    real = sum(1 for ln in modlist.splitlines() if ln.strip() and not ln.strip().startswith('#') and ln.strip().endswith('.ko'))
     if int(want.group(1)) != real:
         problems.append(f'音频件数打架：rpcd WANT_KO={want.group(1)}，但 module-list.txt 有 {real} 个 .ko')
 

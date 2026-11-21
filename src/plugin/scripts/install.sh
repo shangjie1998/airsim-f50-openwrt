@@ -76,11 +76,4 @@ else
  chmod 644 /etc/apk/keys/airsim-dev.pem
 fi
 apk --no-network add --upgrade "$work/$PACKAGE"
-[ -x /usr/lib/airsim/audio-setup ] || fail 'Complete audio setup helper missing; calls are not ready'
-audio_state=$(/usr/lib/airsim/audio-setup --status)
-case "$audio_state" in
- ready) echo 'Audio preparation passed. Refresh LuCI → Services → AirSIM. Start and pair.' ;;
- reboot_required) echo 'Audio is staged. Restart into OpenWrt once; preparation resumes automatically. Calls are not ready yet.' ;;
- *) fail 'Audio setup did not complete; inspect the installation error before using calls' ;;
-esac
 echo 'No phone call or SMS was initiated.'

@@ -21,7 +21,7 @@ return view.extend({
    return nodes[key];
   }
   function set(key, value) { if (nodes[key].textContent !== String(value)) nodes[key].textContent = String(value); }
-  function ready(s) { return !!(s.running && s.agent && s.agent.reachable && (!s.audio_setup || s.audio_setup === 'ready')); }
+  function ready(s) { return !!(s.running && s.agent && s.agent.reachable); }
   function callLabel(state) { return ({ incoming: '来电响铃', waiting: '等待接听', dialing: '正在拨号', alerting: '对方振铃', active: '已接通', held: '通话保持' })[state] || '状态待确认'; }
   function callMessage(kind, title, description) {
    nodes.callFeedback.className = 'as-feedback as-feedback-' + kind;
@@ -64,13 +64,10 @@ return view.extend({
   function refresh(s) {
    current = s;
    var online = ready(s), sim = s.sim || {}, audio = s.audio || {}, relay = s.relay || {};
-   var setupBlocked = !!s.audio_setup && s.audio_setup !== 'ready';
-   var setupCopy = s.audio_setup === 'reboot_required' ? '音频组件已安装，请重启进入 OpenWrt 一次，系统会自动完成准备。' :
-    s.audio_setup === 'failed' || s.audio_setup === 'not_prepared' ? '音频安装准备未完成，请检查安装结果；当前还不能通话。' : '音频组件正在准备，请稍候。';
    var paired = s.pairing && s.pairing.expires_at > Date.now() ? s.pairing : null;
    if (s.version) previousVersion = s.version;
    set('version', previousVersion ? 'v' + previousVersion : 'MU300 · OpenWrt');
-   set('live', setupBlocked ? s.audio_setup === 'reboot_required' ? '需重启完成安装' : '音频准备未完成' : pending === 'start' ? '正在启动' : pending === 'stop' ? '正在关闭' : online ? '服务运行中' : s.service_alive ? '服务连接中' : '服务已关闭');
+   set('live', pending === 'start' ? '正在启动' : pending === 'stop' ? '正在关闭' : online ? '服务运行中' : s.service_alive ? '服务连接中' : '服务已关闭');
    nodes.live.className = 'as-pill ' + (online ? 'as-pill-green' : 'as-pill-neutral');
    set('number', sim.phone_number || (online ? '等待号码' : '—'));
    set('numberHint', !online ? '启动服务后，自动读取 SIM 本机号码。' : sim.phone_number ? 'SIM 自动读取 · ' + (sim.phone_number_updated_at ? new Date(sim.phone_number_updated_at).toLocaleTimeString() + ' 更新' : '实时同步') : sim.phone_number_status === 'not_provided' ? 'SIM 未存储本机号码。可点击右侧重新读取。' : '正在读取，约每 30 秒自动刷新。');
@@ -78,15 +75,15 @@ return view.extend({
    set('network', sim.reg_status_text || '等待检测');
    set('signal', sim.signal_dbm != null ? sim.signal_dbm + ' dBm' : '基带暂未提供');
    set('call', s.call_active ? '通话进行中' : online ? '待机' : '—');
-   set('audio', setupBlocked ? s.audio_setup === 'reboot_required' ? '需重启完成准备' : '尚未准备完成' : s.audio_available ? '已识别' : '等待检测');
+   set('audio', s.audio_available ? '已识别' : '等待检测');
    set('address', s.lan_ip || '—');
    set('relay', relay.last_error ? '连接暂时异常' : relay.configured ? '已配置' : '尚未配置');
    set('frames', audio.uplink_frames != null ? audio.uplink_frames + ' / ' + audio.downlink_frames : '—');
    set('audioError', audio.last_error === 'EOF' || !audio.last_error ? '无' : audio.last_error);
    set('relayError', relay.last_error || '暂无错误记录');
    set('updated', '状态更新于 ' + new Date().toLocaleTimeString());
-   set('serviceCopy', setupBlocked ? setupCopy : online ? '电话网关已就绪，可继续配对客户端。' : '启动电话网关，连接你的 AirSIM 客户端。');
-   buttons.start.disabled = !!pending || online || setupBlocked;
+   set('serviceCopy', online ? '电话网关已就绪，可继续配对客户端。' : '启动电话网关，连接你的 AirSIM 客户端。');
+   buttons.start.disabled = !!pending || online;
    buttons.stop.disabled = !!pending || (!s.service_alive && !s.running) || !!s.call_active;
    buttons.number_refresh.disabled = !!pending || !online;
    buttons.pair_start.disabled = !!pending || !online;

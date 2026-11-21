@@ -24,10 +24,12 @@ DSP=$EXT/bin/mu300-audio-dsp
 KREL=$(uname -r)
 MODS=$HERE/modules
 
-# 随包自带的 dsp 脚本权威哈希：527 行（在 517 行修复版上加 ALSA 基础层分组与加载顺序，6.18.54 档再补 soundcore 层最先加载），真机 6.18.60 实证声卡注册、19/19。
+# 随包自带的 dsp 脚本权威哈希：534 行（527 行版上加 status 兼容修复：ldinfo 位置参数兜底；
+# 不再依赖精简固件可能缺失的 coreutils `timeout`，改后台 aplay+回收探测存活，并接住 aplay
+# 退出码——PCM 打不开直接判死）。真机 6.18.60 实证 19/19。
 # 包内这份必须逐位等于它；装到设备前再核一次，防止 471 老版混回来。
 DSP_FILE=mu300-audio-dsp
-DSP_SHA=d98012d57600ad854cdb3be739ff6c3f20664cfc924efefdd7398d98a028d65a
+DSP_SHA=dc787b25370a004758f1db2253132f081c6911ae42ffd26f67ff81178913ab07
 
 die() { echo "装音频模块: $*" >&2; exit 1; }
 say() { echo "装音频模块: $*"; }
@@ -253,7 +255,7 @@ if [ "$matched" = 1 ] && command -v mu300-audio-dsp >/dev/null 2>&1; then
 		if mu300-audio-dsp load >/dev/null 2>&1; then
 			say '驱动已加载（等声卡注册完主服务就能起）'
 		else
-			say '注意：这次没加载成，看 /tmp/airsim-audio-setup.log 与 /tmp/airsim-audio-reserve.log'
+			say '注意：这次没加载成，看 /tmp/airsim-audio-reserve.log 与本次安装输出'
 		fi
 	else
 		say "注意：mu300-audio-dsp drivers 仍报没驱动（$(mu300-audio-dsp drivers 2>&1 | head -1)）"

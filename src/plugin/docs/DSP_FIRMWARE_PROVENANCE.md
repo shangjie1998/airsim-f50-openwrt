@@ -1,11 +1,14 @@
-# DSP 固件固定副本与离线回退
+# DSP 固件来源与许可记录
 
-R18 增加固件备用副本，避免首次安装依赖上游仓库持续在线。已有 `/lib/firmware/agdsp.bin` 保留并复用；仅缺失时执行获取流程。
+AGDSP 主固件 `agdsp.bin` 是 Unisoc/展锐专有镜像，**不随主包、配件包或公开 Release 分发**；
+上游只做搬运，未提供再分发许可。缺失时由用户自行从上游固定 Release 地址获取，落到设备
+`/lib/firmware/agdsp.bin`；已有固件保留复用，不重复下载。
 
-1. 尝试上游固定 HTTPS Release 地址，整体最多等待 25 秒。
-2. 下载失败、文件不完整或 SHA-256 不符时，改用签名 APK 中 `/usr/lib/airsim/deps/agdsp.bin`。
-3. 备用副本也必须通过同一个固定 SHA-256，复制后再次检查；任何检查失败都不会安装该固件或继续暂存音频扩展。
-4. 通过检查后原子安装，并记录来源为 `upstream` 或 `bundled_backup`。后续启动/升级已有文件时不再次下载。
+1. 从上游固定 HTTPS Release 地址下载（地址见下表）。
+2. 文件必须通过同一个固定 SHA-256 校验；校验不符不得安装。
+3. 校验通过后由 `mu300-audio-dsp install <文件>` 原子落位，并把哈希记入 `/etc/mu300/agdsp.sha256`。
+4. 主包与配件包的打包链路不再内置该固件副本；自用下载、局域网喂入、私有网盘私有目录留存可接受，
+   public 仓、公开 Release、匿名分享链接、二次分发违规。
 
 ## 来源与固定身份
 
@@ -19,20 +22,12 @@ R18 增加固件备用副本，避免首次安装依赖上游仓库持续在线�
 
 副本从公开上游提交提取，不从用户设备导出。保留上游原始 Git 对象、提交和作者记录；不改称本项目自研固件。该二进制与内核/音频模块仍是不同组件，备用下载机制不扩大硬件支持范围。
 
-## 本地构建与备份
+## 本地留存
 
-`scripts/fetch-firmware.sh` 优先使用已校验的本地缓存；缓存缺失时从固定提交的本地镜像提取。镜像也不存在时才尝试克隆上游或下载固定 Release。不会自动更新到上游 HEAD，不会 prune 已保存镜像。通过 `AIRSIM_FIRMWARE_REPO` 指定已有镜像、`AIRSIM_FIRMWARE_CACHE` 指定持久缓存目录。
-
-```sh
-AIRSIM_FIRMWARE_REPO=/absolute/path/mu300-audio-firmware.git \
-AIRSIM_FIRMWARE_CACHE=/absolute/path/firmware-cache \
-sh scripts/fetch-firmware.sh
-```
-
-默认缓存为工作树 `out/firmware-backup/`。固件、镜像和离线 Git bundle 保存在本地，排除于代码提交之外；已取得的包内副本不依赖该开发机路径或网络。
+固件本地归档在 kits 仓 `archive/firmware/`（含 `agdsp.bin`、`PROVENANCE`、`SHA256SUMS`），
+仅供私有备份/自用恢复，排除于公开代码提交之外；不再有随主包分发的副本，也不提供离线打包脚本。
+需要时先核对上表 SHA-256，再落到设备 `/lib/firmware/agdsp.bin`。
 
 ## 许可记录
 
-包元数据中的 `LicenseRef-Undocumented-DSP-Firmware` 指向本节，表示未提供许可声明的独立固件，不表示额外授权。
-
-2026-11-02 核查，上游仓库和 v1.0 发布没有 LICENSE 或明确再分发许可文件。原作者及固件权利人的权利保留；本项目的 PolyForm/GPL/MIT 许可不覆盖此二进制，也不将公开可下载视为获得开源许可。R18 按维护者要求保留本地克隆，并将固定副本纳入签名 APK 的离线回退候选；未单独创建公开固件仓库。R18 未公开发布；维护者随后明确要求以 R19 开发预览发布，离线回退仍未实机验收。此打包决定不代表已经取得或确认独立固件的再分发许可。本文件不授予任何额外权利。
+2026-11-02 核查，上游仓库和 v1.0 发布没有 LICENSE 或明确再分发许可文件。原作者及固件权利人的权利保留；本项目的 PolyForm/GPL/MIT 许可不覆盖此二进制，也不将公开可下载视为获得开源许可。早期 R18–R23 曾把固定副本纳入签名 APK 离线回退候选，该 complete-install 机制已退役；现行打包不再内置固件副本。此记录不代表已经取得或确认独立固件的再分发许可，本文件不授予任何额外权利。

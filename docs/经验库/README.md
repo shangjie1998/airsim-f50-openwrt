@@ -61,6 +61,7 @@
 | 文件 | 一句话 |
 |---|---|
 | `cloud-dial-missing-sim-field-follows-at-context.md` |  |
+| `relay-cloudflare-worker-1027-daily-quota-exhausted.md` | 命令通道 429、body `error code: 1027`：Cloudflare Worker 免费档日额度耗尽被边缘停用，全站路径跨设备复现，别再查本地密钥鉴权 |
 
 ## confirm
 

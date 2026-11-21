@@ -128,7 +128,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 miss=""
 while IFS= read -r m; do
-	[ -n "$m" ] || continue
+	case $m in ''|'#'*) continue ;; esac
 	found=$(find "$SRCROOT" -name "$m" -type f 2>/dev/null | head -n 1)
 	if [ -z "$found" ]; then
 		miss="$miss $m"

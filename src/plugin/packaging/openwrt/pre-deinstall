@@ -11,9 +11,6 @@ if [ -x /etc/init.d/airsim-update ]; then
 	/etc/init.d/airsim-update stop >/dev/null 2>&1
 	/etc/init.d/airsim-update disable >/dev/null 2>&1
 fi
-if [ -x /etc/init.d/airsim-audio-setup ]; then
- /etc/init.d/airsim-audio-setup disable >/dev/null 2>&1
-fi
 if [ -L /mnt/mu300-disk/extra/airsim/upstream-voice-startup ]; then
 	mv /mnt/mu300-disk/extra/airsim/upstream-voice-startup /etc/rc.d/S96mu300-voice
 	/etc/init.d/mu300-voice start

@@ -58,13 +58,3 @@ test('unavailable call status disables all call controls',()=>{
  const t=setup({...idle(),calls:{available:false,error:'offline',calls:[]}});t.type('12345');
  for(const button of Object.values(t.buttons))assert.equal(button.disabled,true);
 });
-test('incomplete audio installation is visible and cannot start calls or pairing',()=>{
- for(const audio_setup of ['reboot_required','failed','not_prepared','preparing']) {
-  const t=setup({...idle(),audio_available:true,audio_setup});t.type('12345');
-  assert.equal(t.buttons.dial.disabled,true);
-  assert.equal(t.elements.find(x=>x.tag==='button'&&x.textContent==='启动服务').disabled,true);
-  assert.equal(t.elements.find(x=>x.tag==='button'&&x.textContent==='获取配对码').disabled,true);
-  assert.match(t.root.textContent,audio_setup==='reboot_required'?/重启进入 OpenWrt/:/准备/);
-  assert.equal(t.requests.length,0);
- }
-});

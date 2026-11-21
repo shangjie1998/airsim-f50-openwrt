@@ -38,14 +38,3 @@ for name in mu300-audio-5.4.tar.gz SHA256SUMS; do
 	esac
 	[ "$(shasum -a 256 "$file" | cut -d' ' -f1)" = "$expected" ] || { echo "Audio dependency digest mismatch: $name" >&2; exit 1; }
 done
-
-# Audited current-kernel recovery, bundled by the complete-install candidate.
-if [ "${AIRSIM_COMPLETE_INSTALL:-1}" = 1 ] && [ -z "${AIRSIM_AUDIO_BUNDLE:-}" ]; then
- file="$HERE/out/audio-deps/airsim-audio-0.1.0-r16.tar.gz"
- if [ ! -f "$file" ]; then
-  curl -fL --proto '=https' --connect-timeout 15 --max-time 180 --retry 3 \
-   https://github.com/kai-wu-cortex/airsim-mu300/releases/download/v0.1.0-r16/airsim-audio-0.1.0-r16.tar.gz -o "$file.part"
-  mv "$file.part" "$file"
- fi
- [ "$(shasum -a 256 "$file" | cut -d' ' -f1)" = 5af9b2dd888905b453b61273668736c24e1dd67b821d5fdb5a59c807a0134af3 ] || { echo 'Recovery bundle digest mismatch' >&2; exit 1; }
-fi

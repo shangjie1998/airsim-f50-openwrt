@@ -68,7 +68,7 @@ fi
 # 必须跟模块一起进包，安装时逐位校验权威哈希（见 opt/install.sh 的 DSP_SHA），
 # 不再从 5.4 工具归档补、也不在现场打补丁。四个 ELF 工具仍走外部归档，不在这里。
 DSP_FILE=mu300-audio-dsp
-DSP_SHA=d98012d57600ad854cdb3be739ff6c3f20664cfc924efefdd7398d98a028d65a
+DSP_SHA=dc787b25370a004758f1db2253132f081c6911ae42ffd26f67ff81178913ab07
 if [ -d "$HERE/opt/bin" ] && [ -n "$(ls -A "$HERE/opt/bin" 2>/dev/null)" ]; then
 	mkdir -p "$ROOT/bin"
 	cp -f "$HERE/opt/bin/"* "$ROOT/bin/"

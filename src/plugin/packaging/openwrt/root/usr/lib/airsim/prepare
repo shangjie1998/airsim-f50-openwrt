@@ -1,13 +1,5 @@
 #!/bin/sh
 set -eu
-if [ -x /usr/lib/airsim/audio-setup ]; then
- state=$(/usr/lib/airsim/audio-setup --status)
- case "$state" in
-  ready) ;;
-  reboot_required) echo 'Restart into OpenWrt once; audio setup resumes automatically before AirSIM.' >&2; exit 1 ;;
-  *) echo 'Audio setup has not completed. Check the installation error before starting AirSIM.' >&2; exit 1 ;;
- esac
-fi
 # Optional root-owned hardware preparation retained across plugin upgrades.
 # The package does not create this override or enable driver-version bypasses.
 if [ -f /etc/airsim/prepare.local ]; then
@@ -107,7 +99,17 @@ elif [ -f "$FLAG" ]; then
 	:  # 跳过 DSP（见上面的日志）
 elif _dir=$(audio_extra_for_kernel); then
 	if [ ! -f /run/airsim-dsp-prepared ]; then
-		mu300-audio-dsp start
+		# DSP 判活未通过不能挡住本体：语音跳过，页面/短信/配对/来电照常。
+		# 判活窗口误报见 #37；失败只记 auto 标记，驱动/时序恢复后下次启动自动清掉重试。
+		if ! mu300-audio-dsp start; then
+			mkdir -p "$FLAG_DIR"
+			{
+				echo "auto: DSP start 判活未通过（语音跳过，本体照常）"
+				echo "kernel: $KREL"
+				echo "note: 页面/短信/配对/来电正常；语音待 DSP 判活时序恢复后自动回来。"
+			} > "$FLAG"
+			logger -t airsim "DSP start 判活未通过，跳过语音，本体继续启动"
+		fi
 		touch /run/airsim-dsp-prepared
 	fi
 	rm -f "$FLAG_DIR/no-audio.reason"

@@ -40,6 +40,12 @@ cat /proc/asound/cards                             # 期望：Loopback + sprdpho
 - 配件包**只带模块**，不带主程序；主包装不装它都能跑（只是没声）。
 - 配件包按 `<KREL>` 分目录，装之前先看 `payload/` 里有没有你这一档。
 - 主包 `install.sh` 只负责"提示有没有对应目录"，**不替配件包装任何东西**。
+- **AGDSP 主固件 `agdsp.bin` 不在配件包内，也不进公开仓 / 公开 Release**：它是 Unisoc/展锐专有镜像，上游只搬运未给再分发许可。需从上游作者仓库 `dikeckaan/mu300-audio-firmware` 的 v1.0 release 手动取 `agdsp.bin`，落到设备 `/lib/firmware/agdsp.bin`（`mu300-audio-dsp install <文件>` 会校验大小、AUDCP 头并记 sha256 到 `/etc/mu300/agdsp.sha256`）。缺它时驱动和声卡能起，但 DSP 不上电、双向通话无声。自用下载 / 局域网 / 私有网盘私有目录留存合规；public 仓、公开 Release、匿名分享链接、二次分发违规。
+
+## 四之一、已知问题（未解决）
+
+- **DSP profiles 四个 blob**（`audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp`）本机、设备、上游作者仓库都没有，只能从同 SoC Android 固件的 `audio_params/sprd/*.xml` 用 `vbc-profile.py` 编译。当前走 **legacy_pcm 直连**兜底，不依赖这组 profile，不阻塞打通电话；完整 DSP 场景路由 / 增益 / 智能功放通路未闭环。EIO 与 profiles 缺失的因果尚未完全分离。详见 kits 仓 `docs/dsp-profiles-gap.md`。
+- 固件自备要求与上述缺口在音频页「已知问题（未解决）」卡片和主页诊断区有对应说明；probe 字段 `fw_present` 报 `/lib/firmware/agdsp.bin` 是否在位。
 
 ## 五、文件在哪
 
