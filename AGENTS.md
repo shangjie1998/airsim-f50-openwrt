@@ -35,7 +35,7 @@
 
 - 系统：OpenWrt 25.12.5，`aarch64_generic`，`/opt` 在 `/mnt/mu300-disk` 上的 Linux 分区。
 - **当前运行内核：`6.18.60`（mainline）**，数据联网与语音都在这上面跑通了。
-- 版本：**`0.1.0.41-r23-any`**（Release `v0.1.0.41-r23-any`），Agent `0.4.7-mu300.0.1.0.41-r23-any`。
+- 版本：**`0.1.0.44-r23-any`**（Release `v0.1.0.44-r23-any`），Agent `0.4.7-mu300.0.1.0.44-r23-any`。
 - 语音走**自编音频配件包** `audio-opt 1.0.5`（`parts/audio/`，只有 `.ko`，按内核分目录，6.18.60 / 7.3.1 各 25 个）；
   主包负责二进制 + `overlay/f50/files` 整棵树。
 - **DSP 四个场景 profile 已自备装机**（`audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp`），
