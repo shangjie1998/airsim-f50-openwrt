@@ -98,7 +98,7 @@ return view.extend({
   var notifyMissed = E('input', { 'type': 'checkbox', 'id': 'as-call-notify_missed' });
 
   var channelBlock = E('div', { hidden: true }, [
-   field('url', 'HTTPS 地址', urlInput),
+   field('url', 'HTTPS 地址', urlInput, '目标须为公网地址；内网、环回、链路本地及保留段会被后端拒绝投递，不会重试。'),
    E('div', { 'class': 'as-port-fields' }, [field('method', '请求方法', methodSelect), field('timeout', '超时（秒，1–120）', timeoutInput)]),
    field('content_type', '正文格式', typeSelect),
    field('expect', '成功响应条件（可选）', expectInput, '留空时任意 HTTP 2xx 算成功；填 code=200 这类条件时，还要响应 JSON 顶层字段匹配。'),

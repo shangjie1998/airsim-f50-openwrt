@@ -23,6 +23,9 @@ BODY_FILE=/tmp/call-forward.body
 QUEUE_FILE="$BASE/call-forward-queue"
 QUEUE_MAX=20
 QUEUE_TTL=600
+# 连续多少次采样读不到通话，才判定结束/未接。跟上游 tracker 一致取 2：
+# 单次 CLCC/Agent 抖动读空不该立刻报一通已结束的电话。
+MISS_THRESHOLD=2
 AGENT_URL=http://127.0.0.1:8575/api/calls/status
 AT_BIN=/usr/libexec/unisoc-modem/at
 # 单卡：F50 只有一个卡槽。双卡逻辑保留在代码里（slot_label/INFO_SELF_x/poll_at
@@ -245,6 +248,85 @@ tpl() {
 		| sed "s|{uptime}|${INFO_UPTIME:-}|g"
 }
 
+# --- 目标地址公网校验（借鉴上游 notificationHTTPClient 的 SSRF 口径）---
+# 拒绝环回/私网/链路本地/保留/文档/组播段。shell 层做不到 Go 那样解析后
+# 逐 IP 重拨，这里在投递前把字面 IP 与 DNS 解析结果逐个过一遍段表。
+v4_is_blocked() {
+	_o1=${1%%.*}; _rest=${1#*.}; _o2=${_rest%%.*}
+	case "$_o1" in
+	0|10|127) return 0 ;;
+	169) [ "$_o2" = 254 ] && return 0 ;;
+	172) case "$_o2" in 1[6-9]|2[0-9]|3[01]) return 0 ;; esac ;;
+	# 100.64.0.0/10 = 100.64.0.0 – 100.127.255.255，128 及以上不放进来。
+	100) case "$_o2" in 6[4-9]|10[0-9]|11[0-9]|12[0-7]) return 0 ;; esac ;;
+	192)
+		case "$_o2" in
+		168) return 0 ;;
+		0)  case "${_rest#*.}" in 0.*|2.*) return 0 ;; esac ;;
+		esac ;;
+	198)
+		case "$_o2" in
+		1[89]) return 0 ;;
+		51) _o3=${_rest#*.}; _o3=${_o3%%.*}; [ "$_o3" = 100 ] && return 0 ;;
+		esac ;;
+	203) [ "$_o2" = 0 ] && case "${_rest#*.}" in 113.*) return 0 ;; esac ;;
+	22[4-9]|23[0-9]|24[0-9]|25[0-5]) return 0 ;;
+	esac
+	return 1
+}
+
+# IPv6 只做粗校：环回/未指定/链路本地/私有 ULA/文档/NAT64 前缀拒掉，
+# 其余 v6 放行（shell 不便做完整 v6 网段前缀匹配）。
+v6_is_blocked() {
+	case "$1" in
+	::1|::|fe80:*|fc*|fd*|2001:db8:*|64:ff9b:*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# 把域名解析成 IP 列表；解析失败留空，由调用方拒掉。
+resolve_host() {
+	_ns=$(nslookup "$1" 2>/dev/null | sed -n 's/^Address: \([0-9a-fA-F:.]*\).*/\1/p' | grep -v '^127\.' | grep -v '^::1')
+	[ -n "$_ns" ] || _ns=$(ping -c 1 -W 1 "$1" 2>/dev/null | sed -n 's/.*(\([0-9a-fA-F:.]*\)).*/\1/p' | head -1)
+	printf '%s' "$_ns"
+}
+
+# validate_destination <url>  -> 0 公网可用 / 1 拒绝
+validate_destination() {
+	_u=$1
+	[ -n "$_u" ] || return 1
+	[ "${#_u}" -le 2048 ] || return 1
+	case "$_u" in
+	*@*) return 1 ;;   # 内嵌用户名/密码
+	*#*) return 1 ;;   # 片段
+	http://*|https://*) ;;
+	*) return 1 ;;
+	esac
+	_rest=${_u#*://}
+	_hostport=${_rest%%/*}
+	_host=${_hostport%%:*}
+	[ -n "$_host" ] || return 1
+
+	case "$_host" in
+	*.*)
+		v4_is_blocked "$_host" && return 1
+		return 0 ;;
+	*:*)
+		v6_is_blocked "$_host" && return 1
+		return 0 ;;
+	esac
+
+	_ips=$(resolve_host "$_host")
+	[ -n "$_ips" ] || return 1
+	for _ip in $_ips; do
+		case "$_ip" in
+		*.*) v4_is_blocked "$_ip" && return 1 ;;
+		*)   v6_is_blocked "$_ip" && return 1 ;;
+		esac
+	done
+	return 0
+}
+
 # expect_match <field=value> <response body>
 expect_match() {
 	_expect=$1
@@ -267,6 +349,13 @@ send_event() {  # send_event <kind> <number> <state> <direction> <slot>
 		SEND_SELF=
 		return 1
 	}
+	# 非公网/形态非法的目标不投递、也不排队：重试一台内网或环回地址没有意义。
+	if ! validate_destination "$_url"; then
+		record "$_event" invalid_destination ""
+		log "reject non-public or malformed destination for $_event"
+		SEND_SELF=
+		return 1
+	fi
 
 	_body=$(tpl "${_body_tpl:-}" "$_event" "$_number" "$_state" "$_direction" "$(date '+%Y-%m-%d %H:%M:%S')" "$_slot")
 
@@ -445,35 +534,48 @@ poll_agent() {
 }
 
 # apply_state <slot|idx|state|number|direction>  (empty means no call)
+# 状态文件第六段是连续消失计数：当次采样读空先计数，攒够 MISS_THRESHOLD 次
+# 才判结束/未接，避免单次 AT/Agent 抖动误报一通已挂断的电话。
 apply_state() {
 	_cur=$1
 	_prev=$(cat "$STATE_FILE" 2>/dev/null)
-	# A leftover 4-field state file predates slot tracking; drop it instead of
-	# firing one bogus ended event on upgrade.
-	if [ -n "$_prev" ] && [ "$(printf '%s' "$_prev" | awk -F'|' '{print NF}')" != 5 ]; then
-		_prev=
+	# 只认 5 段（旧版无计数）或 6 段（带计数）；更早的残文件直接丢掉，
+	# 免得升级时凭空补发一条 ended。
+	if [ -n "$_prev" ]; then
+		_nf=$(printf '%s' "$_prev" | awk -F'|' '{print NF}')
+		[ "$_nf" = 5 ] || [ "$_nf" = 6 ] || _prev=
 	fi
-	[ "$_cur" = "$_prev" ] && return 0
 
-	_prev_slot=; _prev_state=; _prev_number=; _prev_dir=
+	_prev_slot=; _prev_state=; _prev_number=; _prev_dir=; _prev_miss=0
 	if [ -n "$_prev" ]; then
 		_prev_slot=$(printf '%s' "$_prev" | cut -d'|' -f1)
 		_prev_state=$(printf '%s' "$_prev" | cut -d'|' -f3)
 		_prev_number=$(printf '%s' "$_prev" | cut -d'|' -f4)
 		_prev_dir=$(printf '%s' "$_prev" | cut -d'|' -f5)
+		_prev_miss=$(printf '%s' "$_prev" | cut -d'|' -f6)
+		[ -n "$_prev_miss" ] || _prev_miss=0
 	fi
 
-	printf '%s' "$_cur" > "$STATE_FILE" 2>/dev/null
-
 	if [ -z "$_cur" ]; then
+		# 当前读不到通话：没有上一态就无事可做；否则累加消失计数。
 		[ -n "$_prev_state" ] || return 0
+		_prev_miss=$((_prev_miss + 1))
+		if [ "$_prev_miss" -lt "$MISS_THRESHOLD" ]; then
+			# 还没攒够：保留上一态和新计数，等下一轮采样再确认。
+			printf '%s|%s|%s|%s|%s|%s' "$_prev_slot" "" "$_prev_state" "$_prev_number" "$_prev_dir" "$_prev_miss" > "$STATE_FILE" 2>/dev/null
+			return 0
+		fi
+		: > "$STATE_FILE"
 		case "$_prev_state" in
-		# Never answered: ringing on either naming of the inbound state.
+		# 从未接通：振铃态消失按未接算。
 		ringing) if notify_enabled missed; then send_event missed "$_prev_number" ended "$_prev_dir" "$_prev_slot"; fi ;;
 		*)       if notify_enabled ended; then send_event ended "$_prev_number" ended "$_prev_dir" "$_prev_slot"; fi ;;
 		esac
 		return 0
 	fi
+
+	# 当前有通话：消失计数清零，落盘。
+	printf '%s|0' "$_cur" > "$STATE_FILE" 2>/dev/null
 
 	_cur_slot=$(printf '%s' "$_cur" | cut -d'|' -f1)
 	_cur_state=$(printf '%s' "$_cur" | cut -d'|' -f3)

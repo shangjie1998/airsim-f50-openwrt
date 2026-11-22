@@ -12,7 +12,7 @@ var getSims = rpc.declare({ object: 'airsim-sms', method: 'sms_sims', expect: {}
 // Paired-client pruning. The list is read-only metadata; removing entries is
 // destructive from the phone's point of view, so the UI confirms twice.
 var getPairClients = rpc.declare({ object: 'airsim-pair', method: 'pair_clients', expect: {}, reject: true, nobatch: true });
-var removePairClients = rpc.declare({ object: 'airsim-pair', method: 'pair_remove', params: ['indexes'], expect: {}, reject: true, nobatch: true });
+var removePairClients = rpc.declare({ object: 'airsim-pair', method: 'pair_remove', params: ['ids'], expect: {}, reject: true, nobatch: true });
 var actions = {};
 ['start', 'stop', 'pair_start', 'pair_cancel', 'number_refresh'].forEach(function(name) {
  actions[name] = rpc.declare({ object: 'airsim', method: name, expect: {} });
@@ -29,7 +29,7 @@ function pairStamp(ts) {
 }
 
 function pairStateTag(client) {
- if (client.online) return E('span', { 'class': 'as-pair-time as-pair-online' }, '在线');
+ if (client.online || client.recent) return E('span', { 'class': 'as-pair-time as-pair-online' }, '在线');
  if (!client.last_used) return E('span', { 'class': 'as-pair-time' }, '尚未使用');
  return E('span', { 'class': 'as-pair-time' }, '上次 ' + pairStamp(client.last_used));
 }
@@ -81,17 +81,20 @@ function pairStepList(box, result) {
  box.appendChild(E('p', { 'class': 'as-copy as-modal-copy' }, '共 ' + clients.length + ' 个客户端已配对。勾选要删除的条目；删除后那台设备必须重新配对才能连接。'));
  var chosen = [], removeButton;
  var list = E('div', { 'class': 'as-pair-list' });
- clients.forEach(function(client) {
+ clients.forEach(function(client, pos) {
+  var cid = client.id || client.index;
+  var serial = client.index || (pos + 1);
+  var tail = client.fingerprint || (client.id || '').slice(-9);
   var check = E('input', { 'type': 'checkbox', 'class': 'as-pair-check' });
   check.addEventListener('change', function() {
-   var at = chosen.indexOf(client.index);
-   if (check.checked && at < 0) chosen.push(client.index);
+   var at = chosen.indexOf(cid);
+   if (check.checked && at < 0) chosen.push(cid);
    else if (!check.checked && at >= 0) chosen.splice(at, 1);
    removeButton.disabled = chosen.length === 0;
   });
   list.appendChild(E('label', { 'class': 'as-pair-item' }, [
    check,
-   E('span', { 'class': 'as-pair-main' }, '客户端 ' + client.index + ' · 密钥尾号 ' + client.fingerprint),
+   E('span', { 'class': 'as-pair-main' }, '客户端 ' + serial + ' · 密钥尾号 ' + tail),
    pairStateTag(client)
   ]));
  });
@@ -103,14 +106,16 @@ function pairStepList(box, result) {
 
 function pairStepConfirm(box, clients, chosen) {
  box.textContent = '';
- var targets = clients.filter(function(client) { return chosen.indexOf(client.index) >= 0; });
+ var targets = clients.filter(function(client) { return chosen.indexOf(client.id || client.index) >= 0; });
  box.appendChild(E('h3', {}, '确认删除这 ' + targets.length + ' 个客户端？'));
  box.appendChild(E('p', { 'class': 'as-copy as-modal-copy as-modal-warn' },
   '此操作不可恢复：删除后对应设备必须重新输入六位配对码才能再次连接。'));
  var list = E('div', { 'class': 'as-pair-list' });
  targets.forEach(function(client) {
+  var serial = client.index || (clients.indexOf(client) + 1);
+  var tail = client.fingerprint || (client.id || '').slice(-9);
   list.appendChild(E('div', { 'class': 'as-pair-item as-pair-item-static' }, [
-   E('span', { 'class': 'as-pair-main' }, '客户端 ' + client.index + ' · 密钥尾号 ' + client.fingerprint),
+   E('span', { 'class': 'as-pair-main' }, '客户端 ' + serial + ' · 密钥尾号 ' + tail),
    pairStateTag(client)
   ]));
  });
@@ -240,10 +245,10 @@ return view.extend({
    buttons.pair_start.textContent = pending === 'pair_start' ? '正在获取…' : paired ? '重新获取配对码' : '获取配对码';
    buttons.number_refresh.textContent = pending === 'number_refresh' ? '正在读取…' : '重新读取号码';
    set('stopHint', s.calls && s.calls.available === false ? '通话状态待确认，暂不能关闭服务。' : s.call_active ? '通话结束后才能关闭服务。' : '关闭服务将停止电话网关与 Bonjour 发现。');
-   set('discovery', paired ? 'Bonjour 发现已开启' : 'Bonjour 配对发现未开启');
+   set('discovery', paired ? '配对窗口已开启 · 手动 IP：' + (s.tunnel_ip || s.lan_ip || '未知') + ' · 配对端口：' + s.pairing_port : 'Bonjour 配对发现未开启');
    nodes.discovery.className = 'as-discovery' + (paired ? ' is-active' : '');
    set('code', paired ? paired.code : '— — — — — —');
-   set('countdown', paired ? Math.max(0, Math.ceil((paired.expires_at - Date.now()) / 1000)) + ' 秒后失效，发现服务将自动关闭' : online ? '获取配对码时，同步开启 120 秒 Bonjour 发现。' : '请先启动服务，再获取配对码。');
+   set('countdown', paired ? Math.max(0, Math.ceil((paired.expires_at - Date.now()) / 1000)) + ' 秒后失效，可通过局域网自动发现或私网 IP 配对' : online ? '获取配对码时，同步开启 120 秒 Bonjour 发现。' : '请先启动服务，再获取配对码。');
    nodes.code.className = 'as-code' + (paired ? ' is-active' : '');
    syncCalls(s);
    root && root.setAttribute('aria-busy', pending ? 'true' : 'false');

@@ -55,7 +55,7 @@ AirSIM-pair-clients.patch          干净           未合并        都在
 | `AirSIM-f50-sta-reachability.patch` | `plugin/cmd/airsim-mu300d/direct.go`、`main.go` | 直连端口/mDNS 跟着当前上行网卡走（`directAddresses`/`adHostFor`/`interfaceForHost`/`rebind`/`serveEndpoint`）。**明确否掉了"双接口同时广播"方案** |
 | `AirSIM-f50-tar-update.patch` | 更新包校验 | `apk --keys-dir` + `SHA256SUMS` |
 | `AirSIM-f50-vnic-audio-host.patch` | `module-agent/calls.go` | `/api/calls/audio/host/config` 的 `host` 从死值 `192.168.225.1` 改成跟着网卡走（`audioAdvertiseHost`）。**别误读成修音频的手段**：iOS 实际走 8582 连 PCM，音频不通的真因在设备侧 DSP（见 `docs/经验库/mu300-call-audio-dsp.md`） |
-| `AirSIM-mu300-keytable-lru.patch` | 键盘映射 | LRU |
+| `AirSIM-mu300-client-manage.patch` | `cmd/airsim-mu300d/main.go`、`pair_clients.go`、`internal/gateway/clients.go`、`early_media.go`、`gateway.go` | 已配对客户端管理：去固定 16 名额上限，指纹=裸 SHA-256 hex（`watchOwner`），`lastUsed` 只在内存不落盘；`/pair/clients` 列表、`/pair/remove` 按指纹移除并持久化，`pairAdminLocal` loopback 守卫，`pairStorageFailure` 存储失败错误码。旧 16 名额 LRU 模型（`keytable-lru`）整块被取代，已归档 |
 | `AirSIM-mu300-number-early-retry.patch` | `module-agent/mu300.go` | 开机早期重试 `AT+CNUM`，别让本机号码一直"等待号码" |
 | `AirSIM-mu300-signal-operator.patch` | `module-agent/mu300.go` | 信号/运营商读取 |
 | `AirSIM-mu300-sms-send.patch` | `module-agent/mu300_sms.go` | 短信发送 |

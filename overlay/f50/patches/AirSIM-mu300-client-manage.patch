@@ -1,0 +1,780 @@
+diff --git a/plugin/cmd/airsim-mu300d/main.go b/plugin/cmd/airsim-mu300d/main.go
+--- a/plugin/cmd/airsim-mu300d/main.go
++++ b/plugin/cmd/airsim-mu300d/main.go
+@@ -183,6 +183,7 @@
+ 	admin.HandleFunc("/rebind", d.rebindHandler)
+ 	admin.HandleFunc("/pair/cancel", d.cancelPair)
+ 	admin.HandleFunc("/pair/clients", d.pairClients)
++	admin.HandleFunc("/pair/remove", d.removePairClient)
+ 	admin.HandleFunc("/number/refresh", d.refreshNumber)
+ 	admin.HandleFunc("/call/action", d.callAction)
+ 	public := http.NewServeMux()
+@@ -419,20 +420,6 @@
+ 	write(w, 200, map[string]bool{"ok": true})
+ }
+ 
+-// pairClients 列出已配对客户端，带最后一次鉴权时间与在线状态。
+-// rpcd 的 airsim-pair 优先读这条，读不到才回退读文件（那时没有在线状态）。
+-func (d *daemon) pairClients(w http.ResponseWriter, r *http.Request) {
+-	if !method(w, r, "GET") {
+-		return
+-	}
+-	if d.gateway == nil {
+-		write(w, 200, map[string]any{"clients": []any{}, "total": 0, "limit": 16})
+-		return
+-	}
+-	clients := d.gateway.Clients()
+-	write(w, 200, map[string]any{"clients": clients, "total": len(clients), "limit": 16})
+-}
+-
+ func (d *daemon) closePair(id string) {
+ 	d.adMu.Lock()
+ 	defer d.adMu.Unlock()
+@@ -491,14 +478,21 @@
+ 		return
+ 	}
+ 	defer clear(plaintext)
++	// Open 已消费本次配对码：注册或持久化随后失败也要立即关掉窗口，
++	// 不让用过的码被当成可重用；不重开、不重放注册。
++	defer d.closePair(s.ID)
+ 	var reg map[string]any
+ 	if json.Unmarshal(plaintext, &reg) != nil {
+ 		write(w, 400, map[string]string{"error": "invalid_registration"})
+ 		return
+ 	}
+ 	localSecret, _ := reg["vowlan_secret"].(string)
+-	if d.gateway == nil || d.gateway.CheckAdd(localSecret) != nil {
+-		write(w, 500, map[string]string{"error": "gateway_key_storage_failed"})
++	if d.gateway == nil {
++		pairStorageFailure(w)
++		return
++	}
++	if d.gateway.CheckAdd(localSecret) != nil {
++		write(w, 400, map[string]string{"error": "invalid_registration", "message": "配对密钥格式无效，请更正后重新获取配对码。"})
+ 		return
+ 	}
+ 	result := map[string]any{"configured": true, "local_mode": true}
+@@ -537,8 +531,8 @@
+ 			return
+ 		}
+ 	}
+-	if d.gateway.AddClient(localSecret, claim.ClientPublic) != nil {
+-		write(w, 500, map[string]string{"error": "gateway_key_storage_failed"})
++	if d.gateway.Add(localSecret) != nil {
++		pairStorageFailure(w)
+ 		return
+ 	}
+ 	// Agent HTTP 200 acknowledges validation and persistence. Its configured
+@@ -559,8 +553,17 @@
+ 	d.mu.Lock()
+ 	d.paired = true
+ 	d.mu.Unlock()
+-	d.closePair(s.ID)
+ 	write(w, 200, result)
++}
++
++// pairStorageFailure 表示密钥已校验通过、但写持久化存储失败。配对码已由 defer 关闭，
++// 提示端必须重新获取新码，不能重试旧码。
++func pairStorageFailure(w http.ResponseWriter) {
++	write(w, 500, map[string]any{
++		"error":               "gateway_key_storage_failed",
++		"message":             "设备保存配对失败，请检查存储可写与剩余空间，然后重新获取配对码；不要重试旧码。",
++		"retry_with_new_code": true,
++	})
+ }
+ 
+ // These fields belong to the phone-side gateway, not the Go Agent's strict
+diff --git a/plugin/cmd/airsim-mu300d/pair_clients.go b/plugin/cmd/airsim-mu300d/pair_clients.go
+new file mode 100644
+--- /dev/null
++++ b/plugin/cmd/airsim-mu300d/pair_clients.go
+@@ -0,0 +1,58 @@
++package main
++
++import (
++	"encoding/json"
++	"io"
++	"net"
++	"net/http"
++	"strings"
++)
++
++// pairAdminLocal guards the loopback-only admin listener. The fingerprint is
++// not a secret, but the remove action still must not be reachable from the LAN.
++func pairAdminLocal(w http.ResponseWriter, r *http.Request) bool {
++	host, _, err := net.SplitHostPort(r.RemoteAddr)
++	if err != nil || !net.ParseIP(host).IsLoopback() {
++		http.Error(w, "loopback only", 403)
++		return false
++	}
++	w.Header().Set("Cache-Control", "no-store")
++	return true
++}
++
++func (d *daemon) pairClients(w http.ResponseWriter, r *http.Request) {
++	if !pairAdminLocal(w, r) || !method(w, r, "GET") {
++		return
++	}
++	write(w, 200, map[string]any{"ok": true, "clients": d.gateway.Clients(), "activity_scope": "since_service_start"})
++}
++
++func (d *daemon) removePairClient(w http.ResponseWriter, r *http.Request) {
++	if !pairAdminLocal(w, r) || !method(w, r, "POST") {
++		return
++	}
++	var input struct {
++		ID string `json:"id"`
++	}
++	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256))
++	decoder.DisallowUnknownFields()
++	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || len(input.ID) != 64 || strings.Trim(input.ID, "0123456789abcdef") != "" {
++		write(w, 200, map[string]string{"error": "配对标识无效，请刷新列表"})
++		return
++	}
++	if !d.callMu.TryLock() {
++		write(w, 200, map[string]string{"error": "通话操作进行中，请稍后再试"})
++		return
++	}
++	defer d.callMu.Unlock()
++	calls := d.callsSnapshot(r.Context())
++	if !calls.Available || len(calls.Calls) > 0 || d.bridge.Status()["active"] == true {
++		write(w, 200, map[string]string{"error": "请先结束通话；通话状态未知时不能移除配对"})
++		return
++	}
++	if err := d.gateway.RemoveClientIdle(input.ID); err != nil {
++		write(w, 200, map[string]string{"error": "未能移除配对，请确认音频会话已结束且设备存储可写"})
++		return
++	}
++	write(w, 200, map[string]any{"ok": true, "id": input.ID})
++}
+
+diff --git a/plugin/cmd/airsim-mu300d/pair_clients_test.go b/plugin/cmd/airsim-mu300d/pair_clients_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugin/cmd/airsim-mu300d/pair_clients_test.go
+@@ -0,0 +1,80 @@
++package main
++
++import (
++	"airsim.local/mu300/internal/gateway"
++	"encoding/base64"
++	"net/http"
++	"net/http/httptest"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func pairFixture(t *testing.T, status string) (*daemon, string) {
++	t.Helper()
++	g, err := gateway.New(filepath.Join(t.TempDir(), "keys.json"), "fixture")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = g.Add(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("a", 32)))); err != nil {
++		t.Fatal(err)
++	}
++	d := &daemon{gateway: g, client: &http.Client{Transport: callTransport(func(r *http.Request) (*http.Response, error) {
++		if r.Method != "GET" || r.URL.Path != "/api/calls/status" {
++			t.Fatal("unexpected operation", r.Method, r.URL.Path)
++		}
++		return callResponse(200, status), nil
++	})}}
++	return d, g.Clients()[0].ID
++}
++
++func pairRequest(method, body string) *http.Request {
++	r := httptest.NewRequest(method, "/pair/remove", strings.NewReader(body))
++	r.RemoteAddr = "127.0.0.1:1234"
++	return r
++}
++
++// 通话状态未知、解析失败、基带报错或通话进行中，一律失败关闭；只有明确空闲才放行移除。
++func TestPairRemovalFailsClosedAndDoesNotRestart(t *testing.T) {
++	for _, status := range []string{`{}`, `broken`, `{"active":null,"last_poll_error":"timeout"}`, `{"active":{"id":"mu300-call"}}`} {
++		d, id := pairFixture(t, status)
++		w := httptest.NewRecorder()
++		d.removePairClient(w, pairRequest("POST", `{"id":"`+id+`"}`))
++		if !strings.Contains(w.Body.String(), `"error"`) || len(d.gateway.Clients()) != 1 {
++			t.Fatal("unknown or active state allowed removal", w.Body.String())
++		}
++	}
++	d, id := pairFixture(t, `{"active":null,"calls":[]}`)
++	w := httptest.NewRecorder()
++	d.removePairClient(w, pairRequest("POST", `{"id":"`+id+`"}`))
++	if !strings.Contains(w.Body.String(), `"ok":true`) || len(d.gateway.Clients()) != 0 {
++		t.Fatal(w.Body.String())
++	}
++}
++
++// 管理边界：非法指纹、多余字段、追加 JSON 被拒；非 loopback 403；列表只回指纹不回密钥。
++func TestPairAdminBoundary(t *testing.T) {
++	d, id := pairFixture(t, `{"active":null}`)
++	for _, body := range []string{`{"id":"0"}`, `{"id":"` + id + `","key":"bad"}`, `{"id":"` + id + `"} {}`} {
++		w := httptest.NewRecorder()
++		d.removePairClient(w, pairRequest("POST", body))
++		if !strings.Contains(w.Body.String(), `"error"`) {
++			t.Fatal(w.Body.String())
++		}
++	}
++	r := pairRequest("POST", `{"id":"`+id+`"}`)
++	r.RemoteAddr = "192.0.2.3:1234"
++	w := httptest.NewRecorder()
++	d.removePairClient(w, r)
++	if w.Code != http.StatusForbidden {
++		t.Fatal("public removal")
++	}
++	w = httptest.NewRecorder()
++	d.pairClients(w, pairRequest("GET", ""))
++	if !strings.Contains(w.Body.String(), id) || strings.Contains(w.Body.String(), `"key"`) {
++		t.Fatal(w.Body.String())
++	}
++	if len(d.gateway.Clients()) != 1 {
++		t.Fatal("invalid request mutated keys")
++	}
++}
+
+diff --git a/plugin/cmd/airsim-mu300d/pairing_test.go b/plugin/cmd/airsim-mu300d/pairing_test.go
+--- a/plugin/cmd/airsim-mu300d/pairing_test.go
++++ b/plugin/cmd/airsim-mu300d/pairing_test.go
+@@ -215,16 +215,13 @@
+ 	}
+ }
+ 
+-// 密钥格式非法时必须在碰 Agent 之前就拒掉，别把一次注册消耗在一个废 key 上。
+-// （"表满"这一路已经改成淘汰最久未用，不再算失败，因此不再需要这条保护。）
+-func TestPairingInvalidGatewayKeyDoesNotReplaceAgentRegistration(t *testing.T) {
++func TestPairingInvalidGatewayKeyDoesNotReachRegistration(t *testing.T) {
+ 	d := pairingFixture(t, func(*http.Request) (*http.Response, error) {
+ 		t.Fatal("invalid gateway key reached Agent")
+ 		return nil, nil
+ 	})
+ 	reg := pairingRegistrationFixture(99)
+ 	reg["vowlan_secret"] = "invalid-key"
+-
+ 	s, err := pairing.New(time.Now())
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -232,7 +229,7 @@
+ 	d.session = s
+ 	w := httptest.NewRecorder()
+ 	d.claim(w, httptest.NewRequest("POST", "/pair/v1/claim", bytes.NewReader(encryptedPairingClaim(t, s, s.Code, reg))))
+-	if w.Code != http.StatusInternalServerError || d.paired {
+-		t.Fatal("gateway failure accepted")
+-	}
+-}
++	if w.Code != http.StatusBadRequest || d.paired {
++		t.Fatal("gateway key rejection accepted")
++	}
++}
+
+diff --git a/plugin/internal/gateway/clients.go b/plugin/internal/gateway/clients.go
+new file mode 100644
+--- /dev/null
++++ b/plugin/internal/gateway/clients.go
+@@ -0,0 +1,111 @@
++package gateway
++
++import (
++	"crypto/sha256"
++	"errors"
++	"fmt"
++	"time"
++)
++
++// ClientInfo contains a SHA-256 fingerprint, never key bytes or a key suffix.
++// Activity is authenticated direct traffic observed during this process lifetime.
++// Cloud relay traffic does not identify a direct pairing and is not inferred.
++type ClientInfo struct {
++	ID       string `json:"id"`
++	LastUsed int64  `json:"last_used,omitempty"`
++	Recent   bool   `json:"recent"`
++}
++
++// watchOwner derives the public owner fingerprint from a verified pairing key.
++// It is a one-way digest; the raw key is never copied into a response or log.
++func watchOwner(key []byte) string { return fmt.Sprintf("%x", sha256.Sum256(key)) }
++
++func (g *Gateway) touchClientLocked(owner string, now int64) {
++	if g.lastUsed == nil {
++		g.lastUsed = make(map[string]int64)
++	}
++	g.lastUsed[owner] = now
++}
++
++// Clients returns the durable paired fingerprints with in-memory activity.
++func (g *Gateway) Clients() []ClientInfo {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	result := make([]ClientInfo, 0, len(g.keys))
++	now := time.Now().Unix()
++	for _, encoded := range g.keys {
++		key, _ := decode(encoded)
++		owner := watchOwner(key)
++		clear(key)
++		used := g.lastUsed[owner]
++		result = append(result, ClientInfo{owner, used, used > 0 && now >= used && now-used <= 120})
++	}
++	return result
++}
++
++func (g *Gateway) hasClientLocked(owner string) bool {
++	for _, encoded := range g.keys {
++		key, _ := decode(encoded)
++		match := watchOwner(key) == owner
++		clear(key)
++		if match {
++			return true
++		}
++	}
++	return false
++}
++
++// reserveClientPCMLocked admits one owner to the shared PCM slot. A key removed
++// after handshake authentication must not open a new audio session.
++func (g *Gateway) reserveClientPCMLocked(owner string) bool {
++	if g.pcm || g.closing || !g.hasClientLocked(owner) {
++		return false
++	}
++	g.pcm = true
++	return true
++}
++
++// RemoveClientIdle uses the durable remove path under the admission lock.
++// Unknown IDs are harmless (idempotent). No service restart or modem command.
++func (g *Gateway) RemoveClientIdle(owner string) error {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	if g.pcm || g.earlyStreamDone != nil {
++		return errors.New("音频会话进行中，请结束后再移除配对")
++	}
++	for _, encoded := range g.keys {
++		key, _ := decode(encoded)
++		match := watchOwner(key) == owner
++		clear(key)
++		if match {
++			return g.removeLocked(encoded)
++		}
++	}
++	return nil
++}
++
++func (g *Gateway) removeLocked(encoded string) error {
++	parent, e := decode(encoded)
++	if e != nil {
++		return e
++	}
++	owner := watchOwner(parent)
++	clear(parent)
++	keys := make([]string, 0, len(g.keys))
++	for _, k := range g.keys {
++		if k != encoded {
++			keys = append(keys, k)
++		}
++	}
++	if err := g.persistKeys(keys); err != nil {
++		return err
++	}
++	g.keys = keys
++	delete(g.lastUsed, owner)
++	for k, lease := range g.earlyLeases {
++		if lease.owner == "wlan:"+owner {
++			delete(g.earlyLeases, k)
++		}
++	}
++	return nil
++}
+
+diff --git a/plugin/internal/gateway/clients_test.go b/plugin/internal/gateway/clients_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugin/internal/gateway/clients_test.go
+@@ -0,0 +1,134 @@
++package gateway
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++)
++
++// 活动指纹隐私：列表只回 sha256 指纹，绝不回原始密钥或尾号；活动状态只记本次进程生命周期。
++func TestClientActivityAndFingerprintPrivacy(t *testing.T) {
++	g, _ := New(filepath.Join(t.TempDir(), "keys.json"), "fixture")
++	key := []byte(strings.Repeat("a", 32))
++	encoded := base64.RawURLEncoding.EncodeToString(key)
++	if err := g.Add(encoded); err != nil {
++		t.Fatal(err)
++	}
++	before := g.Clients()
++	if len(before) != 1 || before[0].LastUsed != 0 || before[0].Recent {
++		t.Fatal(before)
++	}
++	ts := fmt.Sprint(time.Now().Unix())
++	if g.authenticate("GET", "/v1/health", nil, ts, "bad-nonce", "bad") != nil || g.Clients()[0].LastUsed != 0 {
++		t.Fatal("invalid request updated activity")
++	}
++	nonce := "activity-fixture"
++	sig := Sign(key, canonical("GET", "/v1/health", nil, ts, nonce))
++	if g.authenticate("GET", "/v1/health", nil, ts, nonce, sig) == nil {
++		t.Fatal("valid auth rejected")
++	}
++	clients := g.Clients()
++	if !clients[0].Recent || clients[0].LastUsed == 0 || clients[0].ID != watchOwner(key) {
++		t.Fatal(clients)
++	}
++	raw, _ := json.Marshal(clients)
++	if strings.Contains(string(raw), encoded) || strings.Contains(string(raw), encoded[len(encoded)-8:]) {
++		t.Fatal("key leaked into management response")
++	}
++	g.mu.Lock()
++	g.lastUsed[clients[0].ID] = time.Now().Unix() - 121
++	g.mu.Unlock()
++	if g.Clients()[0].Recent {
++		t.Fatal("old activity shown as recent")
++	}
++	reloaded, err := New(g.path, "fixture")
++	if err != nil || reloaded.Clients()[0].LastUsed != 0 {
++		t.Fatal("activity scope is not process lifetime")
++	}
++}
++
++// 移除只作用于选中指纹；PCM 占用或 early media 进行中拒绝；落盘持久化；被吊销密钥不能再准入。
++func TestRemoveClientIdlePersistsAndRevokesOnlySelected(t *testing.T) {
++	g, _ := New(filepath.Join(t.TempDir(), "keys.json"), "fixture")
++	first := []byte(strings.Repeat("a", 32))
++	second := []byte(strings.Repeat("b", 32))
++	for _, k := range [][]byte{first, second} {
++		if err := g.Add(base64.RawURLEncoding.EncodeToString(k)); err != nil {
++			t.Fatal(err)
++		}
++	}
++	owner := watchOwner(first)
++	g.pcm = true
++	if err := g.RemoveClientIdle(owner); err == nil || len(g.Clients()) != 2 {
++		t.Fatal("active PCM removal allowed")
++	}
++	g.pcm = false
++	g.earlyStreamDone = make(chan struct{})
++	if err := g.RemoveClientIdle(owner); err == nil {
++		t.Fatal("early media removal allowed")
++	}
++	g.earlyStreamDone = nil
++	if err := g.RemoveClientIdle(owner); err != nil {
++		t.Fatal(err)
++	}
++	if len(g.Clients()) != 1 || g.Clients()[0].ID != watchOwner(second) {
++		t.Fatal("wrong client removed")
++	}
++	if err := g.RemoveClientIdle(owner); err != nil {
++		t.Fatal("repeat removal is not harmless")
++	}
++	restored, err := New(g.path, "fixture")
++	if err != nil || len(restored.Clients()) != 1 {
++		t.Fatal("removal not durable")
++	}
++	ts := fmt.Sprint(time.Now().Unix())
++	nonce := "removed-key-fixture"
++	sig := Sign(first, canonical("GET", "/v1/health", nil, ts, nonce))
++	if g.authenticate("GET", "/v1/health", nil, ts, nonce, sig) != nil {
++		t.Fatal("removed parent still authenticates")
++	}
++}
++
++// 已吊销的握手不能再开音频，绑定的 early lease 一并清掉。
++func TestRemovedClientCannotReserveAudioAfterAuthentication(t *testing.T) {
++	g, _ := New(filepath.Join(t.TempDir(), "keys.json"), "fixture")
++	key := []byte(strings.Repeat("a", 32))
++	g.Add(base64.RawURLEncoding.EncodeToString(key))
++	owner := watchOwner(key)
++	ts := fmt.Sprint(time.Now().Unix())
++	nonce := "delayed-handshake"
++	sig := Sign(key, canonical("PCM", "/v1/pcm", nil, ts, nonce))
++	if g.authenticate("PCM", "/v1/pcm", nil, ts, nonce, sig) == nil {
++		t.Fatal("fixture auth")
++	}
++	g.earlyLeases = map[string]*earlyLease{"fixture": {owner: "wlan:" + owner}}
++	if err := g.RemoveClientIdle(owner); err != nil {
++		t.Fatal(err)
++	}
++	g.mu.Lock()
++	admitted := g.reserveClientPCMLocked(owner)
++	g.mu.Unlock()
++	if admitted || len(g.earlyLeases) != 0 {
++		t.Fatal("revoked handshake can start audio or retain grant")
++	}
++}
++
++// 持久化失败时不得把内存里的密钥也撤掉（失败关闭）。
++func TestRemoveClientIdleStorageFailureKeepsKey(t *testing.T) {
++	root := t.TempDir()
++	g, _ := New(filepath.Join(root, "keys.json"), "fixture")
++	key := []byte(strings.Repeat("a", 32))
++	g.Add(base64.RawURLEncoding.EncodeToString(key))
++	if err := os.Mkdir(g.path+".tmp", 0700); err != nil {
++		t.Fatal(err)
++	}
++	if g.RemoveClientIdle(watchOwner(key)) == nil || len(g.Clients()) != 1 {
++		t.Fatal("failed persistence revoked key in memory")
++	}
++	os.RemoveAll(g.path + ".tmp")
++}
+
+diff --git a/plugin/internal/gateway/early_media.go b/plugin/internal/gateway/early_media.go
+--- a/plugin/internal/gateway/early_media.go
++++ b/plugin/internal/gateway/early_media.go
+@@ -95,6 +95,11 @@
+ 	}
+ 	now := time.Now().Unix()
+ 	g.mu.Lock()
++	if !g.hasClientLocked(watchOwner(key)) {
++		g.mu.Unlock()
++		http.Error(w, "pairing revoked", 403)
++		return
++	}
+ 	if g.earlyLeases == nil {
+ 		g.earlyLeases = make(map[string]*earlyLease)
+ 	}
+@@ -139,7 +144,7 @@
+ 	g.mu.Lock()
+ 	defer g.mu.Unlock()
+ 	l := g.earlyLeases[earlyMapKey(owner, call)]
+-	if l == nil || l.sessionID != session || l.expires <= now || l.expires > now+earlyLeaseSeconds {
++	if !g.hasClientLocked(strings.TrimPrefix(owner, "wlan:")) || l == nil || l.sessionID != session || l.expires <= now || l.expires > now+earlyLeaseSeconds {
+ 		return false
+ 	}
+ 	return !handshake || (issued > now && issued <= now+earlyLeaseSeconds && l.issued[issued])
+@@ -173,11 +178,10 @@
+ 		return
+ 	}
+ 	g.mu.Lock()
+-	if g.pcm {
++	if !g.reserveClientPCMLocked(strings.TrimPrefix(owner, "wlan:")) {
+ 		g.mu.Unlock()
+ 		return
+ 	}
+-	g.pcm = true
+ 	done := make(chan struct{})
+ 	g.earlyStreamDone = done
+ 	g.mu.Unlock()
+
+diff --git a/plugin/internal/gateway/gateway.go b/plugin/internal/gateway/gateway.go
+--- a/plugin/internal/gateway/gateway.go
++++ b/plugin/internal/gateway/gateway.go
+@@ -26,6 +26,7 @@
+ 	mu              sync.Mutex
+ 	path, id        string
+ 	keys            []string
++	lastUsed        map[string]int64
+ 	seen            map[string]int64
+ 	pcm             bool
+ 	earlyBackend    EarlyMediaBackend
+@@ -40,7 +41,7 @@
+ }
+ 
+ func New(path, id string) (*Gateway, error) {
+-	g := &Gateway{path: path, id: id, seen: make(map[string]int64), client: &http.Client{Timeout: 75 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
++	g := &Gateway{path: path, id: id, seen: make(map[string]int64), lastUsed: make(map[string]int64), client: &http.Client{Timeout: 75 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+ 	b, err := os.ReadFile(path)
+ 	if errors.Is(err, os.ErrNotExist) {
+ 		return g, nil
+@@ -48,7 +49,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if json.Unmarshal(b, &g.keys) != nil || len(g.keys) > 16 {
++	if json.Unmarshal(b, &g.keys) != nil {
+ 		return nil, errors.New("invalid gateway state")
+ 	}
+ 	for _, key := range g.keys {
+@@ -67,15 +68,21 @@
+ }
+ 
+ // CheckAdd checks a candidate without authorizing it. Pairing uses this before
+-// Agent registration; a rejected registration must not consume a client slot.
+-// Add checks again when committing, since capacity may have changed meanwhile.
++// Agent registration; a rejected registration must not authorize a local key.
++// Pairings have no fixed count limit. Add still validates before durable storage.
+ func (g *Gateway) CheckAdd(encoded string) error {
+ 	g.mu.Lock()
+ 	defer g.mu.Unlock()
+ 	return g.checkAddLocked(encoded)
+ }
+ func (g *Gateway) checkAddLocked(encoded string) error {
+-	if _, err := decode(encoded); err != nil {
++	_, err := decode(encoded)
++	return err
++}
++func (g *Gateway) Add(encoded string) error {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	if err := g.checkAddLocked(encoded); err != nil {
+ 		return err
+ 	}
+ 	for _, key := range g.keys {
+@@ -83,23 +90,14 @@
+ 			return nil
+ 		}
+ 	}
+-	if len(g.keys) >= 16 {
+-		return errors.New("gateway client limit reached")
+-	}
++	keys := append(append([]string(nil), g.keys...), encoded)
++	if err := g.persistKeys(keys); err != nil {
++		return err
++	}
++	g.keys = keys
+ 	return nil
+ }
+-func (g *Gateway) Add(encoded string) error {
+-	g.mu.Lock()
+-	defer g.mu.Unlock()
+-	if err := g.checkAddLocked(encoded); err != nil {
+-		return err
+-	}
+-	for _, key := range g.keys {
+-		if key == encoded {
+-			return nil
+-		}
+-	}
+-	keys := append(append([]string(nil), g.keys...), encoded)
++func (g *Gateway) persistKeys(keys []string) error {
+ 	b, _ := json.Marshal(keys)
+ 	f, err := os.OpenFile(g.path+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+ 	if err != nil {
+@@ -118,11 +116,7 @@
+ 	if err != nil {
+ 		return err
+ 	}
+-	if err = os.Rename(g.path+".tmp", g.path); err != nil {
+-		return err
+-	}
+-	g.keys = keys
+-	return nil
++	return os.Rename(g.path+".tmp", g.path)
+ }
+ func Sign(key []byte, canonical string) string {
+ 	m := hmac.New(sha256.New, key)
+@@ -156,6 +150,7 @@
+ 		key, _ := decode(encoded)
+ 		if hmac.Equal([]byte(Sign(key, canonical(method, path, body, ts, nonce))), []byte(sig)) {
+ 			g.seen[nonce] = now + 61
++			g.touchClientLocked(watchOwner(key), now)
+ 			return key
+ 		}
+ 	}
+@@ -364,6 +359,7 @@
+ 		g.event("pcm_auth_rejected")
+ 		return
+ 	}
++	owner := watchOwner(key)
+ 	clear(key)
+ 	g.event("pcm_authenticated")
+ 	// Wait for receive-only teardown before opening duplex on the shared DSP.
+@@ -380,12 +376,11 @@
+ 		}
+ 	}
+ 	g.mu.Lock()
+-	if g.pcm {
++	if !g.reserveClientPCMLocked(owner) {
+ 		g.mu.Unlock()
+ 		g.event("pcm_busy")
+ 		return
+ 	}
+-	g.pcm = true
+ 	g.mu.Unlock()
+ 	defer func() { g.mu.Lock(); g.pcm = false; g.mu.Unlock() }()
+ 	upstream, err := net.DialTimeout("tcp", "127.0.0.1:7580", 3*time.Second)
+
+diff --git a/plugin/internal/gateway/gateway_test.go b/plugin/internal/gateway/gateway_test.go
+--- a/plugin/internal/gateway/gateway_test.go
++++ b/plugin/internal/gateway/gateway_test.go
+@@ -114,20 +114,66 @@
+ 		t.Fatal("secret file permissions")
+ 	}
+ }
+-func TestSecretValidationAndBoundedClients(t *testing.T) {
++func TestSecretValidationAndUnboundedClients(t *testing.T) {
+ 	g, _ := New(filepath.Join(t.TempDir(), "clients.json"), "test")
+ 	for _, key := range []string{"", "bad!", base64.RawURLEncoding.EncodeToString([]byte("short"))} {
+ 		if g.Add(key) == nil {
+ 			t.Fatal("invalid key accepted")
+ 		}
+ 	}
+-	for i := 0; i < 16; i++ {
++	// 上游 R26 去掉了网关 16 条配对名额上限：合法密钥不再因数量被拒，
++	// 多余客户端由管理侧按指纹 ID 移除。这里连加 18 个，全部应当准入。
++	for i := 0; i < 18; i++ {
+ 		key := sha256.Sum256([]byte(fmt.Sprint(i)))
+ 		if err := g.Add(base64.RawURLEncoding.EncodeToString(key[:])); err != nil {
+ 			t.Fatal(err)
+ 		}
+ 	}
+-	if g.Add(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("z", 32)))) == nil {
+-		t.Fatal("unbounded clients")
++	extra := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("z", 32)))
++	if g.Add(extra) != nil {
++		t.Fatal("valid key rejected after sixteen")
++	}
++	if len(g.Clients()) != 19 {
++		t.Fatalf("listed %d clients, want 19", len(g.Clients()))
+ 	}
+ }
++
++func TestRemoveClientByIdentityPersistsAndIsIdempotent(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "clients.json")
++	g, _ := New(path, "test")
++	k1 := []byte(strings.Repeat("a", 32))
++	k2 := []byte(strings.Repeat("b", 32))
++	if err := g.Add(base64.RawURLEncoding.EncodeToString(k1)); err != nil {
++		t.Fatal(err)
++	}
++	if err := g.Add(base64.RawURLEncoding.EncodeToString(k2)); err != nil {
++		t.Fatal(err)
++	}
++	if len(g.Clients()) != 2 {
++		t.Fatalf("before remove: listed %d, want 2", len(g.Clients()))
++	}
++	owner1 := watchOwner(k1)
++	if err := g.RemoveClientIdle(owner1); err != nil {
++		t.Fatal(err)
++	}
++	remaining := g.Clients()
++	if len(remaining) != 1 || remaining[0].ID != watchOwner(k2) {
++		t.Fatalf("after remove: %+v", remaining)
++	}
++	// 未知指纹幂等返回 nil，不报错、不改动现有客户端。
++	if err := g.RemoveClientIdle("0000000000000000000000000000000000000000000000000000000000000000"); err != nil {
++		t.Fatalf("unknown id should be idempotent: %v", err)
++	}
++	if len(g.Clients()) != 1 {
++		t.Fatal("unknown id altered the list")
++	}
++	// 持久化落盘：重载网关后被移除的密钥不应回来。
++	g2, err := New(path, "test")
++	if err != nil {
++		t.Fatal(err)
++	}
++	reloaded := g2.Clients()
++	if len(reloaded) != 1 || reloaded[0].ID != watchOwner(k2) {
++		t.Fatalf("reloaded: %+v", reloaded)
++	}
++}
+
+diff --git a/plugin/packaging/openwrt/post-install b/plugin/packaging/openwrt/post-install
+--- a/plugin/packaging/openwrt/post-install
++++ b/plugin/packaging/openwrt/post-install
+@@ -1,5 +1,8 @@
+ #!/bin/sh
+ # rpcd must rescan the new executable and ACL before LuCI can call it.
++# Drop the LuCI menu/view index cache so an upgraded overlay page or entry is
++# not served from a stale /tmp index on first reload.
++rm -f /tmp/luci-indexcache /tmp/luci-indexcache.*
+ /etc/init.d/airsim-update enable >/dev/null 2>&1
+ (/etc/init.d/airsim-update restart >/dev/null 2>&1) &
+ (/etc/init.d/rpcd restart >/dev/null 2>&1) &

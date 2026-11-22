@@ -15,6 +15,7 @@ var DEFAULT_RELAY = 'https://airsim-push.remotepilot.site';
 function validate(s) {
  if (s.mode !== 'local' && s.mode !== 'cloud') return '请选择连接模式。';
  if (!/^[a-zA-Z0-9_.-]{1,15}$/.test(s.interface)) return 'LAN 接口名称无效。';
+ if (s.tunnel_interface && (!/^[a-zA-Z0-9_.-]{1,15}$/.test(s.tunnel_interface) || s.tunnel_interface === s.interface || s.tunnel_interface === 'lo')) return 'Tailscale 接口名称无效或与 LAN 重复。';
  var used = [7580, 7581, 8575, 8576];
  for (var port of [s.pair_port, s.control_port, s.pcm_port]) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || used.indexOf(port) >= 0) return '端口须为 1024–65535，互不重复且避开内部端口 7580/7581/8575/8576。';
@@ -75,7 +76,7 @@ return view.extend({
   }
 
   function input(key, label, type, help) {
-   fields[key] = E('input', { 'id': 'as-conn-' + key, 'type': type || 'text', 'class': 'as-input', 'value': String(settings[key]), 'autocomplete': 'off', 'maxlength': key === 'relay_url' ? 512 : 32 });
+   fields[key] = E('input', { 'id': 'as-conn-' + key, 'type': type || 'text', 'class': 'as-input', 'value': String(settings[key] == null ? "" : settings[key]), 'autocomplete': 'off', 'maxlength': key === 'relay_url' ? 512 : 32 });
    var kids = [E('label', { 'for': 'as-conn-' + key, 'class': 'as-field-label' }, label), fields[key]];
    if (help) kids.push(E('p', { 'class': 'as-caption' }, help));
    return E('div', { 'class': 'as-setting' }, kids);
@@ -94,6 +95,7 @@ return view.extend({
     mode: fields.mode.value,
     relay_url: fields.relay_url.value.trim().replace(/\/+$/, ''),
     interface: fields.interface.value.trim(),
+    tunnel_interface: fields.tunnel_interface.value.trim(),
     pair_port: Number(fields.pair_port.value),
     control_port: Number(fields.control_port.value),
     pcm_port: Number(fields.pcm_port.value)
@@ -135,6 +137,7 @@ return view.extend({
   var portCard = E('section', { 'class': 'as-card' }, [
    E('h3', {}, '端口与接口'),
    input('interface', '可信 LAN 接口', 'text', '通常为 br-lan。只绑定该接口的私有 IPv4，不改路由、防火墙或设备网络。'),
+   input('tunnel_interface', 'Tailscale 接口（可选）', 'text', '留空关闭；通常为 tailscale0。先连接 Tailscale，两端允许配对、控制和 PCM 端口。保存后启动服务生效。'),
    E('div', { 'class': 'as-port-fields' }, [
     input('pair_port', '配对端口', 'number'),
     input('control_port', '控制端口', 'number'),

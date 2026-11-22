@@ -18,6 +18,25 @@ WIFISSID=PDCN   # 仅作提示用，不参与判断
 
 jerr() { json_init; json_add_boolean ok 0; json_add_string error "$1"; json_dump; }
 
+# 写动作排他锁：模式切换 / 连 Wi-Fi / 改管理开关会动 wireless 与 uci 配置，
+# 两个并发写会踩出半份配置。mkdir 原子抢锁，记 PID 可接管僵死锁，退出释放。
+LOCK_DIR=/tmp/airsim-net.lock
+lock_acquire() {
+	if mkdir "$LOCK_DIR" 2>/dev/null; then
+		echo $$ > "$LOCK_DIR/pid" 2>/dev/null
+		return 0
+	fi
+	_old=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+	if [ -n "$_old" ] && ! kill -0 "$_old" 2>/dev/null; then
+		rm -rf "$LOCK_DIR"
+		mkdir "$LOCK_DIR" 2>/dev/null || return 1
+		echo $$ > "$LOCK_DIR/pid" 2>/dev/null
+		return 0
+	fi
+	return 1
+}
+lock_release() { rm -rf "$LOCK_DIR" 2>/dev/null; }
+
 need_probe() { [ -x "$PROBE" ] || { jerr '缺少能力探测脚本 airsim-net-probe'; exit 0; }; }
 need_mode()  { [ -x "$NETMODE" ] || { jerr '缺少切换脚本 airsim-netmode'; exit 0; }; }
 
@@ -802,6 +821,13 @@ if [ ! -t 0 ]; then
 	[ -n "$_stdin" ] && _args=$_stdin
 fi
 	need_probe
+	# 只有改配置的动作抢锁；扫描/状态查询不占锁，避免读被写堵死。
+	case " mode_set wifi_connect wifi_forget admin_set rebind direct_sync flowfix_fix " in
+	*" $2 "*)
+		lock_acquire || { jerr '网络配置正在调整，请稍后再试'; exit 0; }
+		trap lock_release EXIT
+		;;
+	esac
 	case "$2" in
 	flowfix_check) flowfix check ;;
 	flowfix_fix)   flowfix fix ;;

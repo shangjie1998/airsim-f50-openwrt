@@ -38,6 +38,20 @@ function optCard(lc) {
  var rowKo = E('dd', {}, '—');
  /* 固件在位状态由独立「AGDSP 主固件」卡片展示，这里不再重复提示。 */
  var rowOpt = E('dd', {}, '—');
+ var rowMatch = E('dd', {}, '—');
+ var rowCfg = E('dd', {}, '—');
+
+ /* 后端 match_status 五档 → 人话。ok 之外的档位说清缺的是哪一环。 */
+ function matchStatusText(s) {
+  switch (s) {
+   case 'ok': return '目录与模块对得上';
+   case 'no_dir': return '当前内核没有对应驱动目录';
+   case 'no_reserve': return '目录在，但缺 audio_reserve.ko';
+   case 'bad_elf': return 'reserve.ko 不是合法可加载模块（损坏或非本架构）';
+   case 'vermagic_mismatch': return '模块 vermagic 不认当前内核（别处编的）';
+   default: return '—';
+  }
+ }
 
  function setNotice(el, kind, title, detail) {
   el.className = 'as-caption' + (kind === 'error' ? ' as-mini-red' : (kind === 'ok' ? ' as-mini-green' : ''));
@@ -65,6 +79,8 @@ function optCard(lc) {
   rowKo.textContent = info.vendor_kernel ? ('missing=' + (info.audio_missing || '0'))
    : ((info.ko_count || 0) + ' / ' + (info.want_ko || 0) + ' 件');
   rowOpt.textContent = (info.opt_version || '—') + (info.dsp_present ? '（DSP 在）' : '');
+  rowMatch.textContent = info.vendor_kernel ? '厂商内核自带，不校验配件目录' : matchStatusText(info.match_status);
+  rowCfg.textContent = info.config_sha256 ? info.config_sha256.slice(0, 12) + '…（仅记录对照，不参与判定）' : '—';
 
   if (working) setNotice(msg, 'info', '正在装', (info.message || info.state || ''));
   else if (installed && info.vendor_kernel) setNotice(msg, 'ok', '这台是厂商内核', '自带语音模块，页面这边不用再装配件包');
@@ -120,7 +136,9 @@ function optCard(lc) {
   E('div', { 'class': 'as-row' }, [E('dt', {}, '本机内核'), rowKernel]),
   E('div', { 'class': 'as-row' }, [E('dt', {}, '覆盖情况'), rowMode]),
   E('div', { 'class': 'as-row' }, [E('dt', {}, '模块件数'), rowKo]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '模块校验'), rowMatch]),
   E('div', { 'class': 'as-row' }, [E('dt', {}, '配件包版本'), rowOpt]),
+  E('div', { 'class': 'as-row' }, [E('dt', {}, '内核配置指纹'), rowCfg]),
   msg,
   E('div', { 'class': 'as-buttons' }, [installBtn]),
   note

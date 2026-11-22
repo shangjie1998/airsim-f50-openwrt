@@ -14,6 +14,6 @@ AirSIM-mu300-signal-operator.patch	active			mu300VendorSignalDBM	mu300RefreshMod
 AirSIM-f50-release-source.patch	active	airsim-f50-openwrt	kai-wu-cortex/airsim-mu300;luci-app-airsim-
 AirSIM-f50-tar-update.patch	active	airsim-f50-	luci-app-airsim-;apk --keys-dir;SHA256SUMS
 AirSIM-f50-sta-reachability.patch	active
-AirSIM-mu300-keytable-lru.patch	active
+AirSIM-mu300-client-manage.patch	active			RemoveClientIdle;pairStorageFailure;pairAdminLocal
 AirSIM-mu300-number-early-retry.patch	active			mu300RefreshModem;AT+CNUM
 AirSIM-f50-vnic-audio-host.patch	active			audioAdvertiseHost

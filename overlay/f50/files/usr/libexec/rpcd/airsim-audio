@@ -82,7 +82,30 @@ audio_opt_latest() {
 	json_dump
 }
 
-vermagic_of() { grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 | cut -d= -f2; }
+# 只读盘点借鉴上游 moduleMagic：抠 vermagic 之前先粗验 ELF 头，挡住纯文本/
+# 损坏/截断文件靠数据段里碰巧出现的字符串冒充模块。这里只校验头字段，不做
+# 符号 CRC 审计；严格 .modinfo 段定位留待后续 Go 化。
+#   EI_CLASS=2（64 位） EI_DATA=1（小端） e_type=1（ET_REL） e_machine=183（AARCH64）
+# 注意：F50 固件不带 od/xxd，字节读取一律走 busybox hexdump，别再引 od。
+_byte_hex() { dd if="$1" bs=1 skip="$2" count=1 2>/dev/null | hexdump -e '1/1 "%02x"' 2>/dev/null; }
+_u16le_hex() { dd if="$1" bs=1 skip="$2" count=2 2>/dev/null | hexdump -e '2/1 "%02x"' 2>/dev/null; }
+elf_ok() {
+	[ -f "$1" ] || return 1
+	_magic=$(dd if="$1" bs=1 count=4 2>/dev/null | hexdump -e '4/1 "%02x"' 2>/dev/null)
+	[ "$_magic" = "7f454c46" ] || return 1
+	[ "$(_byte_hex "$1" 4)" = "02" ] || return 1
+	[ "$(_byte_hex "$1" 5)" = "01" ] || return 1
+	[ "$(_u16le_hex "$1" 16)" = "0100" ] || return 1   # e_type=1 ET_REL（小端字节序）
+	[ "$(_u16le_hex "$1" 18)" = "b700" ] || return 1  # e_machine=183 AARCH64（小端字节序）
+	return 0
+}
+
+vermagic_of() { elf_ok "$1" || return 1; grep -ao 'vermagic=[^[:space:]]*' "$1" 2>/dev/null | head -n 1 | cut -d= -f2; }
+
+# 当前内核配置指纹（只读记录，不参与装没装好的判定）。编模块的构建配置和
+# 运行内核导出的 /proc/config.gz 天然不是同一份，拿哈希硬比会误报（2026-11-11
+# 真机踩过：已正常出声仍报对不上），所以这里只带出供排障对照。
+cfg_hash() { gzip -dc /proc/config.gz 2>/dev/null | grep -E '^(CONFIG_|# CONFIG_)' | LC_ALL=C sort | sha256sum | cut -d' ' -f1; }
 
 # 当前内核是否有对得上的驱动目录：目录名 == <krel> 或 <krel>+*，且 audio_reserve.ko 的
 # vermagic 前缀等于 <krel>。两者都满足才算，避免只改目录名骗过判断。
@@ -97,6 +120,24 @@ match_dir() {
 		esac
 	done
 	return 1
+}
+
+# 目录匹配状态：no_dir / no_reserve / bad_elf / vermagic_mismatch / ok。
+# 把原来“对得上/对不上”一态拆开，页面能说清缺的是哪一环。
+inspect_dir() {
+	_k=$1
+	_d=
+	for _x in "$EXT/modules/$_k" "$EXT/modules/$_k"+*; do
+		[ -d "$_x" ] && { _d=$_x; break; }
+	done
+	[ -n "$_d" ] || { echo no_dir; return 1; }
+	[ -f "$_d/audio_reserve.ko" ] || { echo no_reserve; return 1; }
+	elf_ok "$_d/audio_reserve.ko" || { echo bad_elf; return 1; }
+	_v=$(vermagic_of "$_d/audio_reserve.ko")
+	case $_v in
+	"$_k"|"$_k "*) echo ok; return 0 ;;
+	*) echo vermagic_mismatch; return 1 ;;
+	esac
 }
 
 ko_count() {
@@ -133,6 +174,8 @@ status_field() {
 aud_probe() {
 	kver=$(uname -r)
 	md=$(match_dir "$kver" 2>/dev/null || true)
+	match_status=$(inspect_dir "$kver" 2>/dev/null || true)
+	cfg_fp=$(cfg_hash)
 	n=$(ko_count "$kver")
 	# 已装版本以扩展目录里的实时文件为准：安装器每次装完都会写它。
 	# /tmp/airsim-audio-status 是开机脚本留下的快照，装完新包不刷新，拿它当首选会一直报旧版本。
@@ -195,7 +238,9 @@ aud_probe() {
 	json_add_string opt_kernels "$OPT_KERNELS"
 	json_add_string available "$(avail_krels)"
 	json_add_boolean matched "$([ -n "$md" ] && echo 1 || echo 0)"
+	json_add_string match_status "$match_status"
 	json_add_string match_dir "$md"
+	json_add_string config_sha256 "$cfg_fp"
 	json_add_boolean ext_present "$([ -d "$EXT" ] && echo 1 || echo 0)"
 	json_add_int ko_count "$n"
 	json_add_int want_ko "$([ "$vendor" = 1 ] && echo 0 || echo "$WANT_KO")"

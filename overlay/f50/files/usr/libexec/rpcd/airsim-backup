@@ -28,6 +28,27 @@ service_running() {
 		| jsonfilter -e '@.'"$SERVICE"'.instances.*.running' 2>/dev/null | grep -q true
 }
 
+# 排他锁：备份读写 data/、恢复还会停服务覆盖配置，两个并发会踩出半一致快照。
+# 用 mkdir 的原子性抢锁（不依赖 flock 是否进了 busybox），锁里记 PID，持锁进程
+# 已退出留下的僵死锁可以接管。退出时 trap 释放。
+LOCK_DIR=/tmp/airsim-backup.lock
+lock_acquire() {
+	if mkdir "$LOCK_DIR" 2>/dev/null; then
+		echo $$ > "$LOCK_DIR/pid" 2>/dev/null
+		return 0
+	fi
+	_old=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+	if [ -n "$_old" ] && ! kill -0 "$_old" 2>/dev/null; then
+		rm -rf "$LOCK_DIR"
+		mkdir "$LOCK_DIR" 2>/dev/null || return 1
+		echo $$ > "$LOCK_DIR/pid" 2>/dev/null
+		return 0
+	fi
+	return 1
+}
+lock_release() { rm -rf "$LOCK_DIR" 2>/dev/null; }
+lock_busy() { json_init; json_add_boolean ok 0; json_add_string error "备份/恢复正在进行，请稍后再试"; json_dump; }
+
 fingerprint_info() {
 	finger=$(airsim_fingerprint)
 	model=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
@@ -46,6 +67,8 @@ fingerprint_info() {
 }
 
 backup_make() {
+	lock_acquire || { lock_busy; return; }
+	trap lock_release EXIT
 	work=/tmp/airsim-backup.$$
 	rm -rf "$work"
 	mkdir -p "$work/backup/config" "$work/backup/data" 2>/dev/null || {
@@ -87,6 +110,8 @@ backup_make() {
 }
 
 backup_restore() {
+	lock_acquire || { lock_busy; return; }
+	trap lock_release EXIT
 	IFS= read -r request
 	if ! json_load "$request"; then
 		printf '%s\n' '{"ok":false,"error":"无效恢复请求"}'; return
