@@ -53,9 +53,9 @@ airsim-f50-0.1.0.<N>-r<NN>-<适用范围>
 > 前三个的 `-f50` 是当年机型标识，没回头改；从 `0.1.0.4` 起后缀表示**内核线**，
 > 机型在文件名前缀 `airsim-f50-` 里。
 
-当前版本是 `0.1.0.44-r23-any`（`sh build/bump-version.sh`，已装机核验、提交推送 main、发 Release `v0.1.0.44-r23-any` 并过闸三），
-对应 Agent `0.4.7-mu300.0.1.0.44-r23-any`，音频配件包 `audio-opt 1.0.5`。
-本版接线补回 Tailscale 私网配对的前端入口（连接页隧道接口、概览页隧道 IP 展示）；后端隧道逻辑上游本就保留。设备侧 tailscale 本体尚未安装登录，真机两端配对未验收。基线仍钉上游 `v0.1.0-r23`，r25/r26 其余后端新线未跟。
+当前版本是 `0.1.0.45-r23-any`（`sh build/bump-version.sh`，已本地叠加构建回归、打主包过双闸、装机 F50 真机拨测验收通过；待提交推送 main、发 Release `v0.1.0.45-r23-any` 并过闸三），
+对应 Agent `0.4.7-mu300.0.1.0.45-r23-any`，音频配件包 `audio-opt 1.0.5`。
+本版定点并入上游 r26 三项加固：C1 控制面版本头前置 401；C2 信号读数带来源标签（`csq_rssi`/`vendor_rsrp`）与更新时间并贯通到 daemon/`/api/status`；C3 配对会话响应补 `remaining_ms`。基线仍钉上游 `v0.1.0-r23`，r26 其余新增线（Watch v2、PCM 增益、device_admin/backup/jobs/蓝牙等）未跟。设备侧 tailscale 本体尚未安装登录，真机两端配对未验收。
 
 ## 版本号不许手工改
 

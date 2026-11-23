@@ -10,8 +10,8 @@
 |---|---|
 | 本适配仓库 | <https://github.com/shangjie1998/airsim-f50-openwrt> |
 | 上游项目 | <https://github.com/kai-wu-cortex/airsim-mu300>（本仓库源码钉在 `v0.1.0-r23`） |
-| 已验收版本 | **`0.1.0.44-r23-any`**（2026-11-23 真机 6.18.60：通话双向有声复测正常、配对成功；已配对客户端管理弹窗实机走查——去 16 名额上限、按指纹删除并回执；音频自检 25/25、`match_status=ok`。基线仍钉上游 `v0.1.0-r23`） |
-| 插件安装包 | [Release `v0.1.0.44-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.44-r23-any) · 约 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
+| 已验收版本 | **`0.1.0.45-r23-any`**（2026-11-23 真机 6.18.60：通话双向有声拨测约 32 秒、双向音频帧正常；配对成功；客户端管理弹窗实机走查——去 16 名额上限、按指纹删除并回执；音频自检 25/25、`match_status=ok`。本版并入上游 r26 三项定点加固：版本头前置 401、信号来源/更新时间贯通、配对会话 `remaining_ms`。基线仍钉上游 `v0.1.0-r23`） |
+| 插件安装包 | [Release `v0.1.0.45-r23-any`](https://github.com/shangjie1998/airsim-f50-openwrt/releases/tag/v0.1.0.45-r23-any) · 约 6.1 MB（仓库内 [`dist/`](dist/) 只放当前这一版） |
 | 音频模块包 | `audio-opt 1.0.5`（带 `6.18.60` 与 `7.3.1` 两套，各 25 个 `.ko`）；**5.4 不用装**，厂商镜像自带，见 [docs/内核矩阵.md](docs/内核矩阵.md) |
 | 接手说明 | [docs/接手说明.md](docs/接手说明.md) —— 现状、装机三步、判活五条、未修复问题 |
 | 联网（Wi-Fi） | [docs/联网.md](docs/联网.md) —— 流量/Wi-Fi/热点三模式互斥 + Wi-Fi 搜索连接删除，**USB 口地址不变** |

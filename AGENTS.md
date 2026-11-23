@@ -35,7 +35,7 @@
 
 - 系统：OpenWrt 25.12.5，`aarch64_generic`，`/opt` 在 `/mnt/mu300-disk` 上的 Linux 分区。
 - **当前运行内核：`6.18.60`（mainline）**，数据联网与语音都在这上面跑通了。
-- 版本：**`0.1.0.44-r23-any`**（Release `v0.1.0.44-r23-any`），Agent `0.4.7-mu300.0.1.0.44-r23-any`。
+- 版本：**`0.1.0.45-r23-any`**（已装机真机验收，待发 Release `v0.1.0.45-r23-any`），Agent `0.4.7-mu300.0.1.0.45-r23-any`。
 - 语音走**自编音频配件包** `audio-opt 1.0.5`（`parts/audio/`，只有 `.ko`，按内核分目录，6.18.60 / 7.3.1 各 25 个）；
   主包负责二进制 + `overlay/f50/files` 整棵树。
 - **DSP 四个场景 profile 已自备装机**（`audio_structure` / `dsp_vbc` / `cvs` / `dsp_smartamp`），
@@ -75,7 +75,7 @@
 | 层 | 位置 | 管什么 |
 |---|---|---|
 | **文件层** | `overlay/f50/files/` 整棵树 | 直接铺到设备根目录的**厂商脚本兼容层**（§1a 那三个）、`/usr/lib/airsim/` 那些运行时脚本。刷机后随包装上 |
-| **补丁层** | `overlay/f50/patches/*.patch` | 上游 Go 代码的改动，构建时由 `apply.py` 打进合并树。规则见 §8c，目前 9 个 active |
+| **补丁层** | `overlay/f50/patches/*.patch` | 上游 Go 代码的改动，构建时由 `apply.py` 打进合并树。规则见 §8c，目前 10 个 active |
 
 旧的 `ops/*.sh` 只当**历史留档**，不要再拿它手打设备——那些内容已经进了上面两层。
 
@@ -268,6 +268,11 @@ git log --all --oneline -S"<可疑串>"    # 历史里也翻不到才算清完
 6. 打不上就去改 hunk 上下文，不许 `--fuzz` / `-l` / `--forward` 绕过。
 7. 写测试断言要贴代码意图，不要为了让测试变绿放宽语义（例如"安装已执行但版本
    未确认"按设计不回滚，就不该断言零安装）。
+8. **诊断补丁不进补丁链**：现场抓现行的临时日志/计数另起独立 diag-tree，取证后回滚原版
+   备份；不登记 `manifest.tsv` active、不进正式补丁、不推远端、不传 Release，只留 `saves/`。
+   要转正另起正式 followup 补丁走完整闭环（见经验库 `diagnostic-binary-instrument-tree-and-rollback`）。
+9. **入口前置校验上线前真机回归**：在主链路入口加硬校验（如版本头前置 401）前，先确认所有
+   出站请求都带对应请求头；上线后以真机拨测鉴权计数 + 双向音频帧为准，自测带头不算数。
 
 另外一条同类教训：写内核/版本判断时按**多档前缀**写全（`5.4.*` / `6.18.*` / `7.3.*`），
 别拿某一档当唯一判据。之前某个配件包的 `kernel_ok` 只比 `6.18.60`，在 7.3.1 上
@@ -285,7 +290,7 @@ docs/经验库/mu300-call-audio-dsp.md  ★ 通话静音的四层排查 + 三处
 docs/经验库/mu300-at-stdin-mode-mismatch.md  ★ stdin 契约不匹配那条坑
 docs/历史/5.4-*.md            5.4 时代三条完整链路（历史，参考用）
 overlay/f50/files/            ★★ 直接铺到设备根目录的整棵树（三个厂商脚本兼容层在这儿）
-overlay/f50/patches/          ★★ 上游 Go 的补丁层（9 个 active，见 manifest.tsv）
+overlay/f50/patches/          ★★ 上游 Go 的补丁层（10 个 active，见 manifest.tsv）
 overlay/f50/build.sh          构建入口：rsync src → 体检 → apply.py 打补丁 → 编译
 overlay/f50/apply.py          补丁应用器（字母序、打不上硬失败）
 build/                       造包（make-package.sh / bump-version.sh / pkg/ 包内安装脚本 / tools/）
