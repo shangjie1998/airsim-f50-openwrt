@@ -17,3 +17,4 @@ AirSIM-f50-sta-reachability.patch	active
 AirSIM-mu300-client-manage.patch	active			RemoveClientIdle;pairStorageFailure;pairAdminLocal
 AirSIM-mu300-number-early-retry.patch	active			mu300RefreshModem;AT+CNUM
 AirSIM-f50-vnic-audio-host.patch	active			audioAdvertiseHost
+AirSIM-mu300-z-r26-followup.patch	active			remaining_ms;signal_source;vendor_rsrp

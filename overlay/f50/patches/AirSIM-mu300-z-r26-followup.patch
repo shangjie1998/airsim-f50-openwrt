@@ -1,0 +1,79 @@
+diff --git a/plugin/cmd/airsim-mu300d/main.go b/plugin/cmd/airsim-mu300d/main.go
+--- a/plugin/cmd/airsim-mu300d/main.go
++++ b/plugin/cmd/airsim-mu300d/main.go
+@@ -302,8 +302,9 @@
+ 	}
+ 	d.mu.Lock()
+ 	var session any
+-	if d.session != nil && d.session.Expires > time.Now().UnixMilli() {
+-		session = map[string]any{"code": d.session.Code, "expires_at": d.session.Expires}
++	now := time.Now().UnixMilli()
++	if d.session != nil && d.session.Expires > now {
++		session = map[string]any{"code": d.session.Code, "expires_at": d.session.Expires, "remaining_ms": d.session.Expires - now}
+ 	}
+ 	paired := d.paired
+ 	d.mu.Unlock()
+@@ -362,7 +363,7 @@
+ 	}
+ 	// Only return selected status and this SIM's own number; never credentials.
+ 	result := map[string]any{}
+-	for _, key := range []string{"sim_inserted", "signal_dbm", "reg_status_text", "phone_number", "phone_number_status", "phone_number_updated_at", "configured", "cloud_enabled", "command_connected", "management_blocked", "call_push_ready", "last_error", "relay_url"} {
++	for _, key := range []string{"sim_inserted", "operator", "signal_dbm", "signal_source", "signal_updated_at", "reg_status_text", "phone_number", "phone_number_status", "phone_number_updated_at", "configured", "cloud_enabled", "command_connected", "management_blocked", "call_push_ready", "last_error", "relay_url"} {
+ 		if value, ok := data[key]; ok {
+ 			result[key] = value
+ 		}
+
+diff --git a/plugin/internal/gateway/gateway.go b/plugin/internal/gateway/gateway.go
+--- a/plugin/internal/gateway/gateway.go
++++ b/plugin/internal/gateway/gateway.go
+@@ -187,6 +187,11 @@
+ 		return
+ 	}
+ 	h := r.Header
++	if h.Get("X-AirSIM-VoWLAN-Version") != "1" {
++		g.event("control_auth_rejected")
++		http.Error(w, "authentication required", 401)
++		return
++	}
+ 	nonce := h.Get("X-AirSIM-VoWLAN-Nonce")
+ 	key := g.authenticate(r.Method, r.URL.RequestURI(), body, h.Get("X-AirSIM-VoWLAN-Timestamp"), nonce, h.Get("X-AirSIM-VoWLAN-Signature"))
+ 	if h.Get("X-AirSIM-VoWLAN-Version") != "1" || key == nil {
+
+diff --git a/AirSIM/module/module-agent/modem.go b/AirSIM/module/module-agent/modem.go
+--- a/AirSIM/module/module-agent/modem.go
++++ b/AirSIM/module/module-agent/modem.go
+@@ -16,6 +16,8 @@
+ 	Operator             string `json:"operator,omitempty"`
+ 	SIMInserted          bool   `json:"sim_inserted"`
+ 	SignalDBM            *int   `json:"signal_dbm"`
++	SignalSource         string `json:"signal_source,omitempty"`
++	SignalUpdatedAt      string `json:"signal_updated_at,omitempty"`
+ 	NetworkMode          string `json:"network_mode,omitempty"`
+ 	RadioBand            string `json:"radio_band,omitempty"`
+ 	RegistrationText     string `json:"reg_status_text,omitempty"`
+
+diff --git a/AirSIM/module/module-agent/mu300.go b/AirSIM/module/module-agent/mu300.go
+--- a/AirSIM/module/module-agent/mu300.go
++++ b/AirSIM/module/module-agent/mu300.go
+@@ -322,6 +322,12 @@
+ 	fallbackDBM := (*int)(nil)
+ 	if csqDBM == nil {
+ 		fallbackDBM = mu300VendorSignalDBM()
++	}
++	var source string
++	if csqDBM != nil {
++		source = "csq_rssi"
++	} else if fallbackDBM != nil {
++		source = "vendor_rsrp"
+ 	}
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
+@@ -343,6 +349,8 @@
+ 		// 两边都拿不到就维持 nil，页面照旧显示「基带暂未提供」。
+ 		a.modem.SignalDBM = fallbackDBM
+ 	}
++	a.modem.SignalSource = source
++	a.modem.SignalUpdatedAt = time.Now().UTC().Format(time.RFC3339)
+ }
+ 
+ func (a *agent) mu300RefreshNumber() (string, error) {
